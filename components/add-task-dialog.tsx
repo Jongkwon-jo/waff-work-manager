@@ -86,7 +86,7 @@ export function AddTaskDialog({ projectId, onAddTask }: AddTaskDialogProps) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="xs" className="h-7 gap-1 px-2 text-[11px]">
+        <Button variant="outline" size="sm" className="h-7 gap-1 px-2 text-[11px]">
           <Plus className="h-3 w-3" />
           {"업무 추가"}
         </Button>
