@@ -30,10 +30,12 @@ import type { Task, TaskStatus, TaskCategory } from "@/lib/data"
 
 interface AddTaskDialogProps {
   projectId: string
+  parentId?: string // 부모 업무 ID 추가
   onAddTask: (task: Task) => void
+  trigger?: React.ReactNode // 커스텀 트리거 버튼 지원
 }
 
-export function AddTaskDialog({ projectId, onAddTask }: AddTaskDialogProps) {
+export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTaskDialogProps) {
   const [open, setOpen] = useState(false)
   const [taskName, setTaskName] = useState("")
   const [category, setCategory] = useState<TaskCategory>("일반")
@@ -57,6 +59,7 @@ export function AddTaskDialog({ projectId, onAddTask }: AddTaskDialogProps) {
     const newTask: Task = {
       id: `t${Date.now()}`,
       projectId,
+      parentId, // 부모 ID 설정
       task: taskName,
       category,
       department,
@@ -65,6 +68,7 @@ export function AddTaskDialog({ projectId, onAddTask }: AddTaskDialogProps) {
       endDate: formatDate(endDate),
       status,
       manDays: parseFloat(manDays) || 0,
+      isSubTask: !!parentId, // 부모가 있으면 하위 업무로 표시
     }
 
     onAddTask(newTask)
@@ -86,17 +90,21 @@ export function AddTaskDialog({ projectId, onAddTask }: AddTaskDialogProps) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 gap-1 px-2 text-[11px]">
-          <Plus className="h-3 w-3" />
-          {"업무 추가"}
-        </Button>
+        {trigger || (
+          <Button variant="outline" size="sm" className="h-7 gap-1 px-2 text-[11px]">
+            <Plus className="h-3 w-3" />
+            {"업무 추가"}
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[500px]">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>{"새 세부 업무 추가"}</DialogTitle>
+            <DialogTitle>{parentId ? "하위 업무 추가" : "새 세부 업무 추가"}</DialogTitle>
             <DialogDescription>
-              {"프로젝트의 새로운 세부 업무 정보를 입력하세요."}
+              {parentId 
+                ? "선택한 업무의 하위 업무 정보를 입력하세요." 
+                : "프로젝트의 새로운 세부 업무 정보를 입력하세요."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">

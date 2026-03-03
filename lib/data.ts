@@ -4,6 +4,7 @@ export type TaskCategory = "일반" | "중요" | "정기"
 export interface Task {
   id: string
   projectId: string
+  parentId?: string // 부모 업무 ID (루트 업무는 없음)
   task: string
   category: TaskCategory
   department: string
@@ -13,6 +14,7 @@ export interface Task {
   status: TaskStatus
   manDays: number
   isSubTask?: boolean
+  subTasks?: Task[] // 하위 업무 리스트 (UI 렌더링용)
 }
 
 export type ProjectType = "SI" | "R&D" | "S/F" | "Etc"

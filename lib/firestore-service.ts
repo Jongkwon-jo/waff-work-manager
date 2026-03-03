@@ -31,10 +31,26 @@ export async function fetchProjectsWithTasks(): Promise<Project[]> {
         where("projectId", "==", projectId)
       );
       const tasksSnapshot = await getDocs(tasksQuery);
-      const tasksList: Task[] = tasksSnapshot.docs.map(doc => ({
+      const allTasks: Task[] = tasksSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       } as Task));
+
+      const taskMap: { [key: string]: Task } = {};
+      const tasksList: Task[] = [];
+
+      allTasks.forEach(task => {
+        taskMap[task.id] = { ...task, subTasks: [] };
+      });
+
+      allTasks.forEach(task => {
+        const taskWithSub = taskMap[task.id];
+        if (task.parentId && taskMap[task.parentId]) {
+          taskMap[task.parentId].subTasks?.push(taskWithSub);
+        } else {
+          tasksList.push(taskWithSub);
+        }
+      });
 
       projectsList.push({
         id: projectId,
@@ -55,6 +71,28 @@ export async function fetchProjectsWithTasks(): Promise<Project[]> {
 export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Promise<string> {
   const docRef = await addDoc(collection(db, PROJECTS_COLLECTION), project);
   return docRef.id;
+}
+
+export async function updateProjectInDB(projectId: string, updates: Partial<Project>): Promise<void> {
+  const projectRef = doc(db, PROJECTS_COLLECTION, projectId);
+  await updateDoc(projectRef, updates);
+}
+
+export async function deleteProjectFromDB(projectId: string): Promise<void> {
+  // 1. 프로젝트에 속한 모든 업무 삭제 (Batch 사용 권장)
+  const tasksQuery = query(collection(db, TASKS_COLLECTION), where("projectId", "==", projectId));
+  const tasksSnapshot = await getDocs(tasksQuery);
+  
+  const batch = writeBatch(db);
+  tasksSnapshot.docs.forEach((taskDoc) => {
+    batch.delete(taskDoc.ref);
+  });
+  
+  // 2. 프로젝트 삭제
+  const projectRef = doc(db, PROJECTS_COLLECTION, projectId);
+  batch.delete(projectRef);
+  
+  await batch.commit();
 }
 
 export async function addTaskToDB(task: Omit<Task, "id">): Promise<string> {

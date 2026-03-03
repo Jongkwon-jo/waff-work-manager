@@ -6,12 +6,14 @@ import { getDepartmentList } from "@/lib/data"
 import { 
   fetchProjectsWithTasks, 
   addProjectToDB, 
+  updateProjectInDB,
+  deleteProjectFromDB,
   addTaskToDB, 
   updateTaskInDB, 
   deleteTaskFromDB
 } from "@/lib/firestore-service"
 import { StatusSummary } from "@/components/status-summary"
-import { FilterBar } from "@/components/filter-bar"
+import { FilterBar, ProjectSortType } from "@/components/filter-bar"
 import { ProjectList } from "@/components/project-list"
 import { GanttView } from "@/components/gantt-view"
 import { ProjectCardView } from "@/components/project-card-view"
@@ -27,6 +29,7 @@ export default function DashboardPage() {
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all")
   const [departmentFilter, setDepartmentFilter] = useState("all")
   const [personFilter, setPersonFilter] = useState("all")
+  const [sortBy, setSortBy] = useState<ProjectSortType>("latest") // 정렬 상태 추가
   const [viewMode, setViewMode] = useState<"list" | "gantt" | "card">("list")
 
   useEffect(() => {
@@ -46,63 +49,103 @@ export default function DashboardPage() {
     }
   }
 
-  const allTasks = useMemo(() => projectList.flatMap((p) => p.tasks), [projectList])
+  // 모든 업무를 평면화하여 계산 (상태 요약용)
+  const flattenTasks = (tasks: Task[]): Task[] => {
+    return tasks.reduce((acc, task) => {
+      return [...acc, task, ...flattenTasks(task.subTasks || [])]
+    }, [] as Task[])
+  }
+
+  const allTasksFlat = useMemo(() => {
+    return projectList.flatMap((p) => flattenTasks(p.tasks))
+  }, [projectList])
+
   const persons = useMemo(() => {
     const personSet = new Set<string>()
-    allTasks.forEach((t) => {
+    allTasksFlat.forEach((t) => {
       t.person.split(",").forEach((p) => {
         const trimmed = p.trim()
         if (trimmed) personSet.add(trimmed)
       })
     })
     return Array.from(personSet).sort()
-  }, [allTasks])
+  }, [allTasksFlat])
+
   const departments = getDepartmentList()
+
+  // 프로젝트 정렬 로직 적용
+  const sortedProjects = useMemo(() => {
+    const list = [...projectList]
+    
+    return list.sort((a, b) => {
+      if (sortBy === "name") return a.name.localeCompare(b.name)
+      if (sortBy === "type") return a.type.localeCompare(b.type)
+      if (sortBy === "progress") {
+        const getProgress = (p: Project) => {
+          const tasks = flattenTasks(p.tasks)
+          if (tasks.length === 0) return 0
+          return tasks.filter(t => t.status === "완료").length / tasks.length
+        }
+        return getProgress(b) - getProgress(a)
+      }
+      // latest (기본값) - ID 역순 (또는 나중에 생성일 필드가 있다면 그것으로)
+      return b.id.localeCompare(a.id)
+    })
+  }, [projectList, sortBy])
 
   const handleAddProject = async (newProject: Project) => {
     try {
       const { id, tasks, ...projectData } = newProject
       const newId = await addProjectToDB(projectData)
-      setProjectList((prev) => [{ ...newProject, id: newId }, ...prev])
+      setProjectList((prev) => [{ ...newProject, id: newId, tasks: [] }, ...prev])
       toast.success("프로젝트가 추가되었습니다.")
     } catch (error) {
       toast.error("프로젝트 추가 실패")
     }
   }
 
+  const handleEditProject = async (updatedProject: Project) => {
+    try {
+      const { id, tasks, ...projectData } = updatedProject
+      await updateProjectInDB(id, projectData)
+      setProjectList((prev) =>
+        prev.map((p) => (p.id === id ? updatedProject : p))
+      )
+      toast.success("프로젝트 정보가 수정되었습니다.")
+    } catch (error) {
+      toast.error("프로젝트 수정 실패")
+    }
+  }
+
+  const handleDeleteProject = async (projectId: string) => {
+    try {
+      if (confirm("프로젝트를 삭제하면 모든 하위 업무도 함께 삭제됩니다. 계속하시겠습니까?")) {
+        await deleteProjectFromDB(projectId)
+        setProjectList((prev) => prev.filter((p) => p.id !== projectId))
+        toast.success("프로젝트가 삭제되었습니다.")
+      }
+    } catch (error) {
+      toast.error("프로젝트 삭제 실패")
+    }
+  }
+
   const handleAddTask = async (newTask: Task) => {
     try {
-      const { id, ...taskData } = newTask
+      const { id, subTasks, ...taskData } = newTask
       const newId = await addTaskToDB(taskData)
-      setProjectList((prev) =>
-        prev.map((p) => {
-          if (p.id === newTask.projectId) {
-            return { ...p, tasks: [...p.tasks, { ...newTask, id: newId }] }
-          }
-          return p
-        })
-      )
+      await loadData()
       toast.success("업무가 추가되었습니다.")
     } catch (error) {
+      console.error("Add task error:", error)
       toast.error("업무 추가 실패")
     }
   }
 
   const handleEditTask = async (updatedTask: Task) => {
     try {
-      const { id, ...updates } = updatedTask
+      const { id, subTasks, ...updates } = updatedTask
       await updateTaskInDB(id, updates)
-      setProjectList((prev) =>
-        prev.map((p) => {
-          if (p.id === updatedTask.projectId) {
-            return {
-              ...p,
-              tasks: p.tasks.map((t) => (t.id === updatedTask.id ? updatedTask : t)),
-            }
-          }
-          return p
-        })
-      )
+      await loadData()
       toast.success("업무가 수정되었습니다.")
     } catch (error) {
       toast.error("업무 수정 실패")
@@ -112,17 +155,7 @@ export default function DashboardPage() {
   const handleDeleteTask = async (taskId: string, projectId: string) => {
     try {
       await deleteTaskFromDB(taskId)
-      setProjectList((prev) =>
-        prev.map((p) => {
-          if (p.id === projectId) {
-            return {
-              ...p,
-              tasks: p.tasks.filter((t) => t.id !== taskId),
-            }
-          }
-          return p
-        })
-      )
+      await loadData()
       toast.success("업무가 삭제되었습니다.")
     } catch (error) {
       toast.error("업무 삭제 실패")
@@ -131,14 +164,14 @@ export default function DashboardPage() {
 
   const counts = useMemo(() => {
     return {
-      total: allTasks.length,
-      "완료": allTasks.filter((t) => t.status === "완료").length,
-      "진행": allTasks.filter((t) => t.status === "진행").length,
-      "대기": allTasks.filter((t) => t.status === "대기").length,
-      "보류": allTasks.filter((t) => t.status === "보류").length,
-      "미정": allTasks.filter((t) => t.status === "미정").length,
+      total: allTasksFlat.length,
+      "완료": allTasksFlat.filter((t) => t.status === "완료").length,
+      "진행": allTasksFlat.filter((t) => t.status === "진행").length,
+      "대기": allTasksFlat.filter((t) => t.status === "대기").length,
+      "보류": allTasksFlat.filter((t) => t.status === "보류").length,
+      "미정": allTasksFlat.filter((t) => t.status === "미정").length,
     }
-  }, [allTasks])
+  }, [allTasksFlat])
 
   const today = new Date()
   const formattedDate = `${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일`
@@ -223,6 +256,8 @@ export default function DashboardPage() {
               onDepartmentChange={setDepartmentFilter}
               personFilter={personFilter}
               onPersonChange={setPersonFilter}
+              sortBy={sortBy}
+              onSortByChange={setSortBy}
               departments={departments}
               persons={persons}
               onAddProject={handleAddProject}
@@ -237,7 +272,7 @@ export default function DashboardPage() {
               </div>
             ) : viewMode === "list" ? (
               <ProjectList
-                projects={projectList}
+                projects={sortedProjects}
                 statusFilter={statusFilter}
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
@@ -245,10 +280,12 @@ export default function DashboardPage() {
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
                 onDeleteTask={handleDeleteTask}
+                onEditProject={handleEditProject}
+                onDeleteProject={handleDeleteProject}
               />
             ) : viewMode === "gantt" ? (
               <GanttView
-                projects={projectList}
+                projects={sortedProjects}
                 statusFilter={statusFilter}
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
@@ -256,7 +293,7 @@ export default function DashboardPage() {
               />
             ) : (
               <ProjectCardView
-                projects={projectList}
+                projects={sortedProjects}
                 statusFilter={statusFilter}
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
