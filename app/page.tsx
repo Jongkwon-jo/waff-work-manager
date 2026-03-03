@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from "react"
 import type { Project, Task, TaskStatus } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import { 
-  subscribeToData, // 실시간 구독 함수 추가
+  subscribeToData,
   addProjectToDB, 
   updateProjectInDB,
   deleteProjectFromDB,
@@ -34,13 +34,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setLoading(true)
-    // 실시간 구독 시작
     const unsubscribe = subscribeToData((data) => {
       setProjectList(data)
       setLoading(false)
     })
-
-    // 컴포넌트가 사라질 때 구독 해제
     return () => unsubscribe()
   }, [])
 
@@ -91,7 +88,6 @@ export default function DashboardPage() {
     try {
       const { id, tasks, ...projectData } = newProject
       await addProjectToDB(projectData)
-      // loadData 호출 제거 (onSnapshot이 자동 업데이트)
       toast.success("프로젝트가 추가되었습니다.")
     } catch (error) {
       toast.error("프로젝트 추가 실패")
@@ -165,9 +161,9 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-50 border-b border-border bg-card/95 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 lg:px-6">
+        <div className="mx-auto flex max-w-full items-center justify-between px-4 py-3 lg:px-10">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary shadow-sm">
               <Building2 className="h-5 w-5 text-primary-foreground" />
             </div>
             <div>
@@ -180,14 +176,14 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <div className="mr-2 flex overflow-hidden rounded-md border border-border">
+            <div className="mr-4 flex overflow-hidden rounded-md border border-border bg-background shadow-sm">
               <button
                 onClick={() => setViewMode("list")}
                 className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors",
+                  "flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition-colors",
                   viewMode === "list"
                     ? "bg-primary text-primary-foreground"
-                    : "bg-card text-muted-foreground hover:bg-accent"
+                    : "bg-background text-muted-foreground hover:bg-accent"
                 )}
               >
                 <List className="h-3.5 w-3.5" />
@@ -196,10 +192,10 @@ export default function DashboardPage() {
               <button
                 onClick={() => setViewMode("gantt")}
                 className={cn(
-                  "flex items-center gap-1.5 border-l border-border px-3 py-1.5 text-xs font-medium transition-colors",
+                  "flex items-center gap-1.5 border-l border-border px-4 py-1.5 text-xs font-medium transition-colors",
                   viewMode === "gantt"
                     ? "bg-primary text-primary-foreground"
-                    : "bg-card text-muted-foreground hover:bg-accent"
+                    : "bg-background text-muted-foreground hover:bg-accent"
                 )}
               >
                 <BarChart3 className="h-3.5 w-3.5" />
@@ -208,30 +204,32 @@ export default function DashboardPage() {
               <button
                 onClick={() => setViewMode("card")}
                 className={cn(
-                  "flex items-center gap-1.5 border-l border-border px-3 py-1.5 text-xs font-medium transition-colors",
+                  "flex items-center gap-1.5 border-l border-border px-4 py-1.5 text-xs font-medium transition-colors",
                   viewMode === "card"
                     ? "bg-primary text-primary-foreground"
-                    : "bg-card text-muted-foreground hover:bg-accent"
+                    : "bg-background text-muted-foreground hover:bg-accent"
                 )}
               >
                 <LayoutGrid className="h-3.5 w-3.5" />
                 {"카드"}
               </button>
             </div>
-            <CalendarDays className="h-3.5 w-3.5" />
-            <span>{formattedDate}</span>
+            <div className="flex items-center gap-1.5 font-medium">
+              <CalendarDays className="h-4 w-4" />
+              <span>{formattedDate}</span>
+            </div>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-6 lg:px-6">
+      <main className="mx-auto max-w-full px-4 py-6 lg:px-10">
         {loading ? (
           <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
             <p className="text-sm text-muted-foreground">데이터를 불러오는 중...</p>
           </div>
         ) : (
-          <div className="space-y-5">
+          <div className="space-y-4">
             <StatusSummary counts={counts} />
             <FilterBar
               searchQuery={searchQuery}
@@ -276,6 +274,8 @@ export default function DashboardPage() {
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
                 searchQuery={searchQuery}
+                onEditTask={handleEditTask}
+                onDeleteTask={handleDeleteTask}
               />
             ) : (
               <ProjectCardView

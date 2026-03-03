@@ -31,9 +31,10 @@ import type { Task, TaskStatus, TaskCategory } from "@/lib/data"
 interface EditTaskDialogProps {
   task: Task
   onEditTask: (task: Task) => void
+  trigger?: React.ReactNode
 }
 
-export function EditTaskDialog({ task, onEditTask }: EditTaskDialogProps) {
+export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProps) {
   const [open, setOpen] = useState(false)
   const [taskName, setTaskName] = useState(task.task)
   const [category, setCategory] = useState<TaskCategory>(task.category)
@@ -45,20 +46,35 @@ export function EditTaskDialog({ task, onEditTask }: EditTaskDialogProps) {
   const [startDate, setStartDate] = useState<Date | undefined>()
   const [endDate, setEndDate] = useState<Date | undefined>()
 
+  // 의존성 배열을 [open]으로 고정하고 내부에서 task를 참조하도록 하여 크기 변화를 방지합니다.
   useEffect(() => {
     if (open) {
-      // 기존 "MM월 dd일" 형식을 Date 객체로 변환 시도
+      setTaskName(task.task)
+      setCategory(task.category)
+      setDepartment(task.department)
+      setPerson(task.person)
+      setStatus(task.status)
+      setManDays(task.manDays.toString())
+      
       try {
         const currentYear = new Date().getFullYear()
-        const sDate = parse(`${currentYear}년 ${task.startDate}`, "yyyy년 MM월 dd일", new Date(), { locale: ko })
-        const eDate = parse(`${currentYear}년 ${task.endDate}`, "yyyy년 MM월 dd일", new Date(), { locale: ko })
-        if (!isNaN(sDate.getTime())) setStartDate(sDate)
-        if (!isNaN(eDate.getTime())) setEndDate(eDate)
+        // 날짜 파싱 시 "3월 3일" 형식을 처리
+        const cleanStart = task.startDate.replace(/월|일/g, "").split(/\s+/).filter(Boolean)
+        const cleanEnd = task.endDate.replace(/월|일/g, "").split(/\s+/).filter(Boolean)
+        
+        if (cleanStart.length >= 2) {
+          const sDate = new Date(currentYear, parseInt(cleanStart[0]) - 1, parseInt(cleanStart[1]))
+          setStartDate(sDate)
+        }
+        if (cleanEnd.length >= 2) {
+          const eDate = new Date(currentYear, parseInt(cleanEnd[0]) - 1, parseInt(cleanEnd[1]))
+          setEndDate(eDate)
+        }
       } catch (e) {
         console.error("Date parsing error", e)
       }
     }
-  }, [open, task.startDate, task.endDate])
+  }, [open, task.id]) // task.id를 추가하여 특정 업무가 바뀔 때만 실행되도록 함 (배열 크기 고정)
 
   const formatDate = (date: Date | undefined) => {
     if (!date) return ""
@@ -88,10 +104,12 @@ export function EditTaskDialog({ task, onEditTask }: EditTaskDialogProps) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary">
-          <Pencil className="h-3.5 w-3.5" />
-          <span className="sr-only">수정</span>
-        </Button>
+        {trigger || (
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary">
+            <Pencil className="h-3.5 w-3.5" />
+            <span className="sr-only">수정</span>
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[500px]">
         <form onSubmit={handleSubmit}>
