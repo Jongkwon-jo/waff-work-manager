@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from "react"
 import type { Project, Task, TaskStatus } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import { 
-  fetchProjectsWithTasks, 
+  subscribeToData, // 실시간 구독 함수 추가
   addProjectToDB, 
   updateProjectInDB,
   deleteProjectFromDB,
@@ -29,27 +29,21 @@ export default function DashboardPage() {
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all")
   const [departmentFilter, setDepartmentFilter] = useState("all")
   const [personFilter, setPersonFilter] = useState("all")
-  const [sortBy, setSortBy] = useState<ProjectSortType>("latest") // 정렬 상태 추가
+  const [sortBy, setSortBy] = useState<ProjectSortType>("latest")
   const [viewMode, setViewMode] = useState<"list" | "gantt" | "card">("list")
 
   useEffect(() => {
-    loadData()
+    setLoading(true)
+    // 실시간 구독 시작
+    const unsubscribe = subscribeToData((data) => {
+      setProjectList(data)
+      setLoading(false)
+    })
+
+    // 컴포넌트가 사라질 때 구독 해제
+    return () => unsubscribe()
   }, [])
 
-  const loadData = async () => {
-    try {
-      setLoading(true)
-      const data = await fetchProjectsWithTasks()
-      setProjectList(data)
-    } catch (error) {
-      console.error("Error loading data:", error)
-      toast.error("데이터를 불러오는 중 오류가 발생했습니다.")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // 모든 업무를 평면화하여 계산 (상태 요약용)
   const flattenTasks = (tasks: Task[]): Task[] => {
     return tasks.reduce((acc, task) => {
       return [...acc, task, ...flattenTasks(task.subTasks || [])]
@@ -73,7 +67,6 @@ export default function DashboardPage() {
 
   const departments = getDepartmentList()
 
-  // 프로젝트 정렬 로직 적용
   const sortedProjects = useMemo(() => {
     const list = [...projectList]
     
@@ -88,16 +81,17 @@ export default function DashboardPage() {
         }
         return getProgress(b) - getProgress(a)
       }
-      // latest (기본값) - ID 역순 (또는 나중에 생성일 필드가 있다면 그것으로)
-      return b.id.localeCompare(a.id)
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0
+      return timeB - timeA
     })
   }, [projectList, sortBy])
 
   const handleAddProject = async (newProject: Project) => {
     try {
       const { id, tasks, ...projectData } = newProject
-      const newId = await addProjectToDB(projectData)
-      setProjectList((prev) => [{ ...newProject, id: newId, tasks: [] }, ...prev])
+      await addProjectToDB(projectData)
+      // loadData 호출 제거 (onSnapshot이 자동 업데이트)
       toast.success("프로젝트가 추가되었습니다.")
     } catch (error) {
       toast.error("프로젝트 추가 실패")
@@ -108,9 +102,6 @@ export default function DashboardPage() {
     try {
       const { id, tasks, ...projectData } = updatedProject
       await updateProjectInDB(id, projectData)
-      setProjectList((prev) =>
-        prev.map((p) => (p.id === id ? updatedProject : p))
-      )
       toast.success("프로젝트 정보가 수정되었습니다.")
     } catch (error) {
       toast.error("프로젝트 수정 실패")
@@ -121,7 +112,6 @@ export default function DashboardPage() {
     try {
       if (confirm("프로젝트를 삭제하면 모든 하위 업무도 함께 삭제됩니다. 계속하시겠습니까?")) {
         await deleteProjectFromDB(projectId)
-        setProjectList((prev) => prev.filter((p) => p.id !== projectId))
         toast.success("프로젝트가 삭제되었습니다.")
       }
     } catch (error) {
@@ -132,11 +122,9 @@ export default function DashboardPage() {
   const handleAddTask = async (newTask: Task) => {
     try {
       const { id, subTasks, ...taskData } = newTask
-      const newId = await addTaskToDB(taskData)
-      await loadData()
+      await addTaskToDB(taskData)
       toast.success("업무가 추가되었습니다.")
     } catch (error) {
-      console.error("Add task error:", error)
       toast.error("업무 추가 실패")
     }
   }
@@ -145,7 +133,6 @@ export default function DashboardPage() {
     try {
       const { id, subTasks, ...updates } = updatedTask
       await updateTaskInDB(id, updates)
-      await loadData()
       toast.success("업무가 수정되었습니다.")
     } catch (error) {
       toast.error("업무 수정 실패")
@@ -155,7 +142,6 @@ export default function DashboardPage() {
   const handleDeleteTask = async (taskId: string, projectId: string) => {
     try {
       await deleteTaskFromDB(taskId)
-      await loadData()
       toast.success("업무가 삭제되었습니다.")
     } catch (error) {
       toast.error("업무 삭제 실패")

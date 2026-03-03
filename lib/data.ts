@@ -25,6 +25,7 @@ export interface Project {
   type: ProjectType
   period?: string
   tasks: Task[]
+  createdAt?: Date
 }
 
 export const projects: Project[] = [
