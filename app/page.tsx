@@ -96,7 +96,10 @@ export default function DashboardPage() {
       if (targetIndex < 0 || targetIndex >= tasks.length) {
         return { tasks, movedSiblingIds: null }
       }
-      const moved = moveArrayItem(tasks, foundIndex, targetIndex)
+      const moved = moveArrayItem(tasks, foundIndex, targetIndex).map((task, index) => ({
+        ...task,
+        displayOrder: index,
+      }))
       return { tasks: moved, movedSiblingIds: moved.map((task) => task.id) }
     }
 
@@ -268,7 +271,10 @@ export default function DashboardPage() {
       const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
       if (targetIndex < 0 || targetIndex >= prev.length) return prev
 
-      const moved = moveArrayItem(prev, currentIndex, targetIndex)
+      const moved = moveArrayItem(prev, currentIndex, targetIndex).map((project, index) => ({
+        ...project,
+        displayOrder: index,
+      }))
       movedProjectIds = moved.map((project) => project.id)
       return moved
     })

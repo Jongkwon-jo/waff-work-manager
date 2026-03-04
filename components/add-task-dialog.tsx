@@ -38,8 +38,8 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
   const [person, setPerson] = useState("")
   const [status, setStatus] = useState<TaskStatus>("대기")
   const [manDays, setManDays] = useState("0")
-  const [startDate, setStartDate] = useState<Date>()
-  const [endDate, setEndDate] = useState<Date>()
+  const [startDate, setStartDate] = useState<Date | undefined>(new Date())
+  const [endDate, setEndDate] = useState<Date | undefined>(new Date())
 
   const personOptions = useMemo(() => getPersonList(), [])
 
@@ -79,8 +79,8 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
     setPerson("")
     setStatus("대기")
     setManDays("0")
-    setStartDate(undefined)
-    setEndDate(undefined)
+    setStartDate(new Date())
+    setEndDate(new Date())
   }
 
   return (

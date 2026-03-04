@@ -55,7 +55,7 @@ function getDaysInMonth(year: number, month: number) {
 }
 
 function getDayOfWeek(year: number, month: number, day: number) {
-  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+  const days = ["일", "월", "화", "수", "목", "금", "토"]
   return days[new Date(year, month, day).getDay()]
 }
 
@@ -413,7 +413,7 @@ export function GanttView({
           day: d,
           label: `${d}`,
           dow,
-          isWeekend: dow === "Sun" || dow === "Sat",
+          isWeekend: dow === "일" || dow === "토",
           isToday:
             today.getFullYear() === m.year && today.getMonth() === m.month && today.getDate() === d,
         })
@@ -646,16 +646,16 @@ export function GanttView({
                     key={i}
                     style={{ width: CELL_WIDTH }}
                     className={cn(
-                      "shrink-0 border-r border-border py-1.5 text-center",
+                      "shrink-0 border-r border-border/40 py-1.5 text-center",
                       d.isWeekend && "bg-muted/50",
-                      d.isToday && "bg-primary/10",
+                      d.isToday && "bg-yellow-100",
                     )}
                   >
                     <div className="text-[10px] leading-tight font-medium text-muted-foreground">{d.label}</div>
                     <div
                       className={cn(
                         "text-[8px] leading-tight font-bold",
-                        d.isWeekend ? "text-rose-400" : "text-muted-foreground/60",
+                        d.isToday ? "text-yellow-700" : d.isWeekend ? "text-rose-400" : "text-muted-foreground/60",
                       )}
                     >
                       {d.dow}
@@ -744,6 +744,7 @@ export function GanttView({
                       const bar = getBarPosition(task.startDate, task.endDate)
                       const isTaskCollapsed = collapsedTaskIds.has(task.id)
                       const barStyle = getStatusBarStyle(task.status)
+                      const isParentTask = task.hasChildren
 
                       const currentOwners = parseOwners(task.person || "")
                       const ownerValues = Array.from(new Set([...ownerOptions, ...currentOwners])).filter(Boolean)
@@ -777,20 +778,28 @@ export function GanttView({
                                   <span className="w-5" />
                                 )}
 
-                                <EditTaskDialog
-                                  task={task}
-                                  onEditTask={onEditTask}
-                                  trigger={
-                                    <button className="flex items-center gap-2 text-left hover:text-primary transition-colors min-w-0 flex-1 overflow-hidden">
-                                      <div className="shrink-0 w-[60px] flex justify-center">
-                                        <StatusBadge status={task.status} />
-                                      </div>
-                                      <span className="truncate text-xs text-foreground font-semibold" title={task.task}>
-                                        {task.task}
-                                      </span>
-                                    </button>
-                                  }
-                                />
+                                {isParentTask ? (
+                                  <div className="flex min-w-0 flex-1 items-center">
+                                    <span className="truncate text-xs font-bold text-foreground" title={task.task}>
+                                      {task.task}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <EditTaskDialog
+                                    task={task}
+                                    onEditTask={onEditTask}
+                                    trigger={
+                                      <button className="flex items-center gap-2 text-left hover:text-primary transition-colors min-w-0 flex-1 overflow-hidden">
+                                        <div className="shrink-0 w-[60px] flex justify-center">
+                                          <StatusBadge status={task.status} />
+                                        </div>
+                                        <span className="truncate text-xs text-foreground font-normal" title={task.task}>
+                                          {task.task}
+                                        </span>
+                                      </button>
+                                    }
+                                  />
+                                )}
 
                                 <AddTaskDialog
                                   projectId={task.projectId}
@@ -846,44 +855,48 @@ export function GanttView({
                                 className="sticky z-20 shrink-0 border-r border-border px-3 py-1 shadow-[2px_0_5px_rgba(0,0,0,0.03)] bg-background group-hover/task:bg-accent/10"
                                 style={{ left: leftPanelWidth, width: detailPanelWidth }}
                               >
-                                <div
-                                  className="grid gap-2 text-[11px] text-foreground"
-                                  style={{ gridTemplateColumns: detailGridTemplate }}
-                                >
-                                  <DepartmentMultiSelect
-                                    value={task.department || ""}
-                                    options={departmentValues}
-                                    onChange={(value) => updateTaskInline(task, { department: value })}
-                                  />
+                                {!isParentTask ? (
+                                  <div
+                                    className="grid gap-2 text-[11px] text-foreground"
+                                    style={{ gridTemplateColumns: detailGridTemplate }}
+                                  >
+                                    <DepartmentMultiSelect
+                                      value={task.department || ""}
+                                      options={departmentValues}
+                                      onChange={(value) => updateTaskInline(task, { department: value })}
+                                    />
 
-                                  <OwnerMultiSelect
-                                    value={task.person || ""}
-                                    options={ownerValues}
-                                    onChange={(value) => updateTaskInline(task, { person: value })}
-                                  />
+                                    <OwnerMultiSelect
+                                      value={task.person || ""}
+                                      options={ownerValues}
+                                      onChange={(value) => updateTaskInline(task, { person: value })}
+                                    />
 
-                                  <DateCell
-                                    value={task.startDate}
-                                    onChange={(value) => updateTaskInline(task, { startDate: value })}
-                                  />
+                                    <DateCell
+                                      value={task.startDate}
+                                      onChange={(value) => updateTaskInline(task, { startDate: value })}
+                                    />
 
-                                  <DateCell
-                                    value={task.endDate}
-                                    onChange={(value) => updateTaskInline(task, { endDate: value })}
-                                  />
+                                    <DateCell
+                                      value={task.endDate}
+                                      onChange={(value) => updateTaskInline(task, { endDate: value })}
+                                    />
 
-                                  <input
-                                    type="number"
-                                    step="0.5"
-                                    min="0"
-                                    value={Number.isFinite(task.manDays) ? task.manDays : 0}
-                                    onChange={(e) => {
-                                      const next = Number.parseFloat(e.target.value)
-                                      updateTaskInline(task, { manDays: Number.isNaN(next) ? 0 : next })
-                                    }}
-                                    className="h-7 w-full rounded-md border border-input bg-background px-2 text-[11px]"
-                                  />
-                                </div>
+                                    <input
+                                      type="number"
+                                      step="0.5"
+                                      min="0"
+                                      value={Number.isFinite(task.manDays) ? task.manDays : 0}
+                                      onChange={(e) => {
+                                        const next = Number.parseFloat(e.target.value)
+                                        updateTaskInline(task, { manDays: Number.isNaN(next) ? 0 : next })
+                                      }}
+                                      className="h-7 w-full rounded-md border border-input bg-background px-2 text-[11px]"
+                                    />
+                                  </div>
+                                ) : (
+                                  <div className="h-7" />
+                                )}
                               </div>
                             )}
 
@@ -891,7 +904,7 @@ export function GanttView({
                               {allDays.map((d, i) => (
                                 <div
                                   key={i}
-                                  className="absolute inset-y-0 pointer-events-none"
+                                  className="absolute inset-y-0 pointer-events-none border-r border-border/25"
                                   style={{ left: i * CELL_WIDTH, width: CELL_WIDTH }}
                                 >
                                   {d.isWeekend && <div className="absolute inset-0 bg-muted/15" />}
@@ -901,7 +914,7 @@ export function GanttView({
                                 </div>
                               ))}
 
-                              {bar && (
+                              {bar && !isParentTask && (
                                 <div
                                   id={`bar-${task.id}`}
                                   className={cn(

@@ -1,0 +1,4 @@
+﻿project_key,project_id,project_name,project_type,project_period,project_display_order,task_key,task_id,parent_task_key,task_name,task_category,task_department,task_person,task_start_date,task_end_date,task_status,task_man_days,task_display_order,is_sub_task
+P-ALPHA,,스마트팩토리 구축,SI,2026.01 ~ 2026.06,0,T-REQ,,,요구사항 정리,일반,전략,홍길동,03월 04일,03월 08일,진행,3,0,false
+P-ALPHA,,스마트팩토리 구축,SI,2026.01 ~ 2026.06,0,T-INT,,T-REQ,인터뷰 일정 조율,일반,전략,김철수,03월 04일,03월 05일,대기,1,0,true
+P-BETA,,AI RAG 고도화,R&D,2026.02 ~ 2026.08,1,T-RAG,,,벡터DB 구성,중요,ICT,배승우,03월 10일,03월 20일,대기,8,0,false
