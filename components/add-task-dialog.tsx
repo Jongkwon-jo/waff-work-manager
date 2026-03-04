@@ -98,22 +98,14 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
           <DialogHeader>
             <DialogTitle>{parentId ? "하위 업무 추가" : "새 업무 추가"}</DialogTitle>
             <DialogDescription>
-              {parentId
-                ? "선택한 업무의 하위 업무 정보를 입력하세요."
-                : "프로젝트의 새 업무 정보를 입력하세요."}
+              {parentId ? "선택한 업무의 하위 업무 정보를 입력하세요." : "프로젝트의 새 업무 정보를 입력하세요."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="task">업무내용</Label>
-              <Input
-                id="task"
-                value={taskName}
-                onChange={(e) => setTaskName(e.target.value)}
-                placeholder="수행할 업무를 입력하세요"
-                required
-              />
+              <Input id="task" value={taskName} onChange={(e) => setTaskName(e.target.value)} placeholder="수행할 업무를 입력하세요" required />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -127,6 +119,7 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
                     <SelectItem value="일반">일반</SelectItem>
                     <SelectItem value="중요">중요</SelectItem>
                     <SelectItem value="정기">정기</SelectItem>
+                    <SelectItem value="상시">상시</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -165,13 +158,7 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="manDays">공수 (일)</Label>
-                <Input
-                  id="manDays"
-                  type="number"
-                  step="0.5"
-                  value={manDays}
-                  onChange={(e) => setManDays(e.target.value)}
-                />
+                <Input id="manDays" type="number" step="0.5" value={manDays} onChange={(e) => setManDays(e.target.value)} />
               </div>
             </div>
 
@@ -180,10 +167,7 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
                 <Label>시작일</Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn("w-full justify-start text-left font-normal", !startDate && "text-muted-foreground")}
-                    >
+                    <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !startDate && "text-muted-foreground")}>
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {startDate ? format(startDate, "MM월 dd일", { locale: ko }) : <span>날짜 선택</span>}
                     </Button>
@@ -197,10 +181,7 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
                 <Label>종료일</Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn("w-full justify-start text-left font-normal", !endDate && "text-muted-foreground")}
-                    >
+                    <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !endDate && "text-muted-foreground")}>
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {endDate ? format(endDate, "MM월 dd일", { locale: ko }) : <span>날짜 선택</span>}
                     </Button>

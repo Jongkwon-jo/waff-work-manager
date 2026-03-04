@@ -121,6 +121,7 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
                     <SelectItem value="일반">일반</SelectItem>
                     <SelectItem value="중요">중요</SelectItem>
                     <SelectItem value="정기">정기</SelectItem>
+                    <SelectItem value="상시">상시</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -159,13 +160,7 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="edit-manDays">공수 (일)</Label>
-                <Input
-                  id="edit-manDays"
-                  type="number"
-                  step="0.5"
-                  value={manDays}
-                  onChange={(e) => setManDays(e.target.value)}
-                />
+                <Input id="edit-manDays" type="number" step="0.5" value={manDays} onChange={(e) => setManDays(e.target.value)} />
               </div>
             </div>
 
@@ -174,10 +169,7 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
                 <Label>시작일</Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn("w-full justify-start text-left font-normal", !startDate && "text-muted-foreground")}
-                    >
+                    <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !startDate && "text-muted-foreground")}>
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {startDate ? format(startDate, "MM월 dd일", { locale: ko }) : <span>날짜 선택</span>}
                     </Button>
@@ -191,10 +183,7 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
                 <Label>종료일</Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn("w-full justify-start text-left font-normal", !endDate && "text-muted-foreground")}
-                    >
+                    <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !endDate && "text-muted-foreground")}>
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {endDate ? format(endDate, "MM월 dd일", { locale: ko }) : <span>날짜 선택</span>}
                     </Button>

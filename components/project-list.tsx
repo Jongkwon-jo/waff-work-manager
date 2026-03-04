@@ -91,7 +91,9 @@ export function ProjectList({
           // 3. 필터 적용
           return processed.filter(task => {
             const matchesFilter = (
-              (statusFilter === "all" || task.status === statusFilter) &&
+              ((statusFilter === "all"
+                ? task.status !== "완료" || (task.subTasks?.length || 0) > 0
+                : task.status === statusFilter)) &&
               (departmentFilter === "all" || task.department.includes(departmentFilter)) &&
               (personFilter === "all" || task.person.includes(personFilter)) &&
               (!searchQuery || task.task.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -298,7 +300,8 @@ function RecursiveTaskRow({
             
             <span className={cn(
               "text-sm leading-snug",
-              hasSubTasks ? "font-semibold text-card-foreground" : "font-normal text-card-foreground",
+              hasSubTasks ? "font-semibold" : "font-normal",
+              task.status === "완료" && !hasSubTasks ? "text-muted-foreground/50" : "text-card-foreground",
               depth > 0 && "text-xs"
             )}>
               {task.task}

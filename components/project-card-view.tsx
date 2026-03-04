@@ -41,6 +41,7 @@ export function ProjectCardView({
     return projects
       .map((project) => {
         const filteredTasks = project.tasks.filter((task) => {
+          if (statusFilter === "all" && task.status === "완료" && (task.subTasks?.length || 0) === 0) return false
           if (statusFilter !== "all" && task.status !== statusFilter) return false
           if (departmentFilter !== "all" && !task.department.includes(departmentFilter))
             return false
@@ -319,7 +320,14 @@ function ProjectCard({
                   {importantTasks.map((task) => (
                     <li key={task.id} className="flex items-start gap-2">
                       <CategoryBadge category={task.category} />
-                      <span className="flex-1 text-xs font-medium leading-snug text-card-foreground">
+                      <span
+                        className={cn(
+                          "flex-1 text-xs font-medium leading-snug",
+                          task.status === "완료" && (task.subTasks?.length || 0) === 0
+                            ? "text-muted-foreground/50"
+                            : "text-card-foreground",
+                        )}
+                      >
                         {task.task}
                       </span>
                       <StatusBadge status={task.status} />
@@ -351,7 +359,14 @@ function ProjectCard({
                                   : "bg-rose-400"
                         )}
                       />
-                      <span className="flex-1 truncate text-xs text-muted-foreground">
+                      <span
+                        className={cn(
+                          "flex-1 truncate text-xs",
+                          task.status === "완료" && (task.subTasks?.length || 0) === 0
+                            ? "text-muted-foreground/50"
+                            : "text-muted-foreground",
+                        )}
+                      >
                         {task.task}
                       </span>
                       <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">

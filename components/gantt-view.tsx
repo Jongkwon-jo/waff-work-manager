@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useMemo, useState, useRef, useEffect } from "react"
 import type { Project, Task, TaskStatus } from "@/lib/data"
@@ -50,6 +50,12 @@ const LEFT_PANEL_MIN_WIDTH = 320
 const LEFT_PANEL_MAX_WIDTH = 680
 const DETAIL_PANEL_MIN_WIDTH = 700
 const DETAIL_PANEL_MAX_WIDTH = 1100
+const HEADER_APPROX_HEIGHT = 110
+const PROJECT_ROW_HEIGHT = 36
+const TASK_ROW_HEIGHT = 36
+const VIRTUAL_OVERSCAN_ROWS = 20
+let textMeasureCanvas: HTMLCanvasElement | null = null
+const textWidthCache = new Map<string, number>()
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate()
 }
@@ -94,26 +100,32 @@ function getMeasuredTextWidth(text: string, font: string) {
     return text.length * 8
   }
 
-  const canvas = document.createElement("canvas")
-  const context = canvas.getContext("2d")
+  const cacheKey = `${font}__${text}`
+  const cached = textWidthCache.get(cacheKey)
+  if (cached !== undefined) return cached
+
+  if (!textMeasureCanvas) textMeasureCanvas = document.createElement("canvas")
+  const context = textMeasureCanvas.getContext("2d")
   if (!context) return text.length * 8
   context.font = font
-  return context.measureText(text).width
+  const width = context.measureText(text).width
+  textWidthCache.set(cacheKey, width)
+  return width
 }
 
 function getStatusBarStyle(status: string): { barClass: string; textClass: string } {
   const normalized = status.trim().toLowerCase()
 
-  if (normalized === "완료" || normalized.includes("done")) {
+  if (normalized === "?꾨즺" || normalized.includes("done")) {
     return { barClass: "bg-slate-500", textClass: "text-slate-50" }
   }
-  if (normalized === "진행" || normalized.includes("progress")) {
+  if (normalized === "吏꾪뻾" || normalized.includes("progress")) {
     return { barClass: "bg-blue-500", textClass: "text-blue-50" }
   }
   if (normalized === "대기" || normalized.includes("wait")) {
     return { barClass: "bg-gray-300", textClass: "text-gray-900" }
   }
-  if (normalized === "보류" || normalized.includes("hold")) {
+  if (normalized === "蹂대쪟" || normalized.includes("hold")) {
     return { barClass: "bg-yellow-200", textClass: "text-yellow-800" }
   }
   return { barClass: "bg-rose-600", textClass: "text-rose-50" }
@@ -132,6 +144,8 @@ export function GanttView({
   onMoveTask,
 }: GanttViewProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const scrollRafRef = useRef<number | null>(null)
+  const pendingScrollTopRef = useRef(0)
 
   const [dragInfo, setDragInfo] = useState<{
     taskId: string
@@ -143,6 +157,9 @@ export function GanttView({
 
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(new Set())
   const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<string>>(new Set())
+  const [collapsedCompletedParentIds, setCollapsedCompletedParentIds] = useState<Set<string>>(new Set())
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(700)
   const [isDetailColumnsOpen, setIsDetailColumnsOpen] = useState(false)
   const [recentlyAddedTaskId, setRecentlyAddedTaskId] = useState<string | null>(null)
 
@@ -203,6 +220,15 @@ export function GanttView({
 
   const toggleTaskCollapse = (taskId: string) => {
     setCollapsedTaskIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(taskId)) next.delete(taskId)
+      else next.add(taskId)
+      return next
+    })
+  }
+
+  const toggleCompletedCollapse = (taskId: string) => {
+    setCollapsedCompletedParentIds((prev) => {
       const next = new Set(prev)
       if (next.has(taskId)) next.delete(taskId)
       else next.add(taskId)
@@ -274,11 +300,24 @@ export function GanttView({
       .map((project) => {
         const projectMatchesSearch = lowerQuery.length > 0 && project.name.toLowerCase().includes(lowerQuery)
 
-        const collectVisibleRows = (tasks: Task[], depth = 0): FlattenedTask[] => {
+        const collectVisibleRows = (tasks: Task[], depth = 0, showCompleted = false): FlattenedTask[] => {
           return tasks.reduce((acc, task) => {
-            const childRows = collectVisibleRows(task.subTasks || [], depth + 1)
+            const hasChildren = (task.subTasks?.length || 0) > 0
+            if (!showCompleted && statusFilter === "all" && task.status === "완료" && !hasChildren) {
+              return acc
+            }
 
-            const matchesStatus = statusFilter === "all" || task.status === statusFilter
+            const nextShowCompleted = showCompleted || collapsedCompletedParentIds.has(task.id)
+            const childRows = collectVisibleRows(
+              task.subTasks || [],
+              depth + 1,
+              nextShowCompleted,
+            )
+
+            const matchesStatus =
+              statusFilter === "all"
+                ? task.status !== "완료" || showCompleted || hasChildren
+                : task.status === statusFilter
             const matchesDepartment = departmentFilter === "all" || task.department.includes(departmentFilter)
             const matchesPerson = personFilter === "all" || task.person.includes(personFilter)
             const matchesSearch =
@@ -290,7 +329,6 @@ export function GanttView({
               return acc
             }
 
-            const hasChildren = (task.subTasks?.length || 0) > 0
             acc.push({ ...task, depth, hasChildren })
 
             if (hasChildren && !collapsedTaskIds.has(task.id)) {
@@ -315,7 +353,7 @@ export function GanttView({
         }
         return true
       })
-  }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds])
+  }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds, collapsedCompletedParentIds])
 
   const months = useMemo(() => {
     const now = new Date()
@@ -413,7 +451,7 @@ export function GanttView({
           day: d,
           label: `${d}`,
           dow,
-          isWeekend: dow === "일" || dow === "토",
+          isWeekend: dow === "토" || dow === "일",
           isToday:
             today.getFullYear() === m.year && today.getMonth() === m.month && today.getDate() === d,
         })
@@ -421,6 +459,26 @@ export function GanttView({
     }
     return days
   }, [months])
+
+  const dayIndexByMonthDay = useMemo(() => {
+    const map = new Map<string, number>()
+    allDays.forEach((d, index) => {
+      map.set(`${d.month}-${d.day}`, index)
+    })
+    return map
+  }, [allDays])
+
+  const taskById = useMemo(() => {
+    const map = new Map<string, Task>()
+    const walk = (tasks: Task[]) => {
+      tasks.forEach((task) => {
+        map.set(task.id, task)
+        if (task.subTasks?.length) walk(task.subTasks)
+      })
+    }
+    projects.forEach((project) => walk(project.tasks))
+    return map
+  }, [projects])
 
   const timelineWidth = allDays.length * CELL_WIDTH
   const showDetailColumns = isDetailColumnsOpen
@@ -453,14 +511,112 @@ export function GanttView({
     })
   }, [months])
 
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    const flushScrollState = () => {
+      scrollRafRef.current = null
+      setScrollTop((prev) => (prev === pendingScrollTopRef.current ? prev : pendingScrollTopRef.current))
+    }
+
+    const onScroll = () => {
+      pendingScrollTopRef.current = container.scrollTop
+      if (scrollRafRef.current !== null) return
+      scrollRafRef.current = window.requestAnimationFrame(flushScrollState)
+    }
+
+    const updateViewportHeight = () => {
+      setViewportHeight((prev) => (prev === container.clientHeight ? prev : container.clientHeight))
+    }
+
+    pendingScrollTopRef.current = container.scrollTop
+    setScrollTop(container.scrollTop)
+    updateViewportHeight()
+
+    container.addEventListener("scroll", onScroll, { passive: true })
+    window.addEventListener("resize", updateViewportHeight)
+    return () => {
+      container.removeEventListener("scroll", onScroll)
+      window.removeEventListener("resize", updateViewportHeight)
+      if (scrollRafRef.current !== null) {
+        window.cancelAnimationFrame(scrollRafRef.current)
+        scrollRafRef.current = null
+      }
+    }
+  }, [])
+
+  const virtualizedBody = useMemo(() => {
+    const overscanPx = VIRTUAL_OVERSCAN_ROWS * TASK_ROW_HEIGHT
+    const bodyScrollTop = Math.max(0, scrollTop - HEADER_APPROX_HEIGHT)
+    const windowTop = Math.max(0, bodyScrollTop - overscanPx)
+    const windowBottom = bodyScrollTop + viewportHeight + overscanPx
+
+    type Item = {
+      project: FilteredProject
+      isProjectCollapsed: boolean
+      topTaskSpacer: number
+      bottomTaskSpacer: number
+      startTaskIndex: number
+      endTaskIndex: number
+      startY: number
+      endY: number
+    }
+
+    const items: Item[] = []
+    let cursorY = 0
+
+    for (const project of filteredProjects) {
+      const isProjectCollapsed = collapsedProjectIds.has(project.id)
+      const taskCount = isProjectCollapsed ? 0 : project.tasks.length
+      const projectStartY = cursorY
+      const projectEndY = projectStartY + PROJECT_ROW_HEIGHT + taskCount * TASK_ROW_HEIGHT
+      cursorY = projectEndY
+
+      if (projectEndY < windowTop || projectStartY > windowBottom) continue
+
+      let startTaskIndex = 0
+      let endTaskIndex = taskCount
+      let topTaskSpacer = 0
+      let bottomTaskSpacer = 0
+
+      if (!isProjectCollapsed && taskCount > 0) {
+        const tasksStartY = projectStartY + PROJECT_ROW_HEIGHT
+        const rawStart = Math.floor((windowTop - tasksStartY) / TASK_ROW_HEIGHT)
+        const rawEnd = Math.ceil((windowBottom - tasksStartY) / TASK_ROW_HEIGHT)
+        startTaskIndex = Math.max(0, Math.min(taskCount, rawStart))
+        endTaskIndex = Math.max(startTaskIndex, Math.min(taskCount, rawEnd))
+        topTaskSpacer = startTaskIndex * TASK_ROW_HEIGHT
+        bottomTaskSpacer = (taskCount - endTaskIndex) * TASK_ROW_HEIGHT
+      }
+
+      items.push({
+        project,
+        isProjectCollapsed,
+        topTaskSpacer,
+        bottomTaskSpacer,
+        startTaskIndex,
+        endTaskIndex,
+        startY: projectStartY,
+        endY: projectEndY,
+      })
+    }
+
+    const totalHeight = cursorY
+    const topSpacer = items.length > 0 ? items[0].startY : totalHeight
+    const bottomSpacer = items.length > 0 ? Math.max(0, totalHeight - items[items.length - 1].endY) : 0
+
+    return { items, topSpacer, bottomSpacer }
+  }, [filteredProjects, collapsedProjectIds, scrollTop, viewportHeight])
+
   const getBarPosition = (startStr: string, endStr: string) => {
     const start = parseDate(startStr)
     const end = parseDate(endStr)
 
     if (!start || !end) return null
 
-    const startIdx = allDays.findIndex((d) => d.month === start.month && d.day === start.day)
-    const endIdx = allDays.findIndex((d) => d.month === end.month && d.day === end.day)
+    const startIdx = dayIndexByMonthDay.get(`${start.month}-${start.day}`) ?? -1
+    const endIdx = dayIndexByMonthDay.get(`${end.month}-${end.day}`) ?? -1
 
     if (startIdx === -1 || endIdx === -1) return null
 
@@ -524,14 +680,7 @@ export function GanttView({
       const deltaX = e.clientX - dragInfo.initialX
       const daysDelta = Math.round(deltaX / CELL_WIDTH)
 
-      const allFlattenedTasks = projects.flatMap((p) => {
-        const flatten = (tasks: Task[]): Task[] =>
-          tasks.reduce((acc, t) => [...acc, t, ...flatten(t.subTasks || [])], [] as Task[])
-
-        return flatten(p.tasks)
-      })
-
-      const task = allFlattenedTasks.find((t) => t.id === dragInfo.taskId)
+      const task = taskById.get(dragInfo.taskId)
 
       if (task && daysDelta !== 0) {
         const start = parseDate(task.startDate)
@@ -573,7 +722,7 @@ export function GanttView({
       window.removeEventListener("mousemove", handleMouseMove)
       window.removeEventListener("mouseup", handleMouseUp)
     }
-  }, [dragInfo, allDays, onEditTask, projects])
+  }, [dragInfo, allDays, dayIndexByMonthDay, onEditTask, taskById])
 
   return (
     <div className="rounded-lg border border-border bg-card shadow-sm overflow-hidden flex flex-col h-[65vh]">
@@ -667,8 +816,10 @@ export function GanttView({
           </div>
 
           <div className="flex flex-col">
-            {filteredProjects.map((project) => {
-              const isProjectCollapsed = collapsedProjectIds.has(project.id)
+            {virtualizedBody.topSpacer > 0 && <div style={{ height: virtualizedBody.topSpacer }} />}
+            {virtualizedBody.items.map((virtualItem) => {
+              const project = virtualItem.project
+              const isProjectCollapsed = virtualItem.isProjectCollapsed
 
               return (
                 <div key={project.id}>
@@ -739,8 +890,12 @@ export function GanttView({
                     <div style={{ width: timelineWidth }} className="shrink-0 h-7" />
                   </div>
 
-                  {!isProjectCollapsed &&
-                    project.tasks.map((task) => {
+                  {!isProjectCollapsed && (
+                    <>
+                      {virtualItem.topTaskSpacer > 0 && <div style={{ height: virtualItem.topTaskSpacer }} />}
+                      {project.tasks
+                        .slice(virtualItem.startTaskIndex, virtualItem.endTaskIndex)
+                        .map((task) => {
                       const bar = getBarPosition(task.startDate, task.endDate)
                       const isTaskCollapsed = collapsedTaskIds.has(task.id)
                       const barStyle = getStatusBarStyle(task.status)
@@ -751,7 +906,7 @@ export function GanttView({
                       const currentDepartments = parseDepartments(task.department || "")
                       const departmentValues = Array.from(new Set([...departmentOptions, ...currentDepartments])).filter(Boolean)
 
-                      return (
+                          return (
                         <div key={task.id} id={`task-row-${task.id}`}>
                           <div className="group/task flex border-b border-border/50 transition-colors hover:bg-accent/5">
                             <div
@@ -780,7 +935,21 @@ export function GanttView({
 
                                 {isParentTask ? (
                                   <div className="flex min-w-0 flex-1 items-center">
-                                    <span className="truncate text-xs font-bold text-foreground" title={task.task}>
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleCompletedCollapse(task.id)}
+                                      className="order-last ml-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[11px] leading-none text-muted-foreground hover:bg-accent"
+                                      title={collapsedCompletedParentIds.has(task.id) ? "완료 업무 접기" : "완료 업무 펼치기"}
+                                    >
+                                      {collapsedCompletedParentIds.has(task.id) ? "-" : "+"}
+                                    </button>
+                                    <span
+                                      className={cn(
+                                        "truncate text-xs font-bold",
+                                        "text-foreground",
+                                      )}
+                                      title={task.task}
+                                    >
                                       {task.task}
                                     </span>
                                   </div>
@@ -793,7 +962,13 @@ export function GanttView({
                                         <div className="shrink-0 w-[60px] flex justify-center">
                                           <StatusBadge status={task.status} />
                                         </div>
-                                        <span className="truncate text-xs text-foreground font-normal" title={task.task}>
+                                        <span
+                                          className={cn(
+                                            "truncate text-xs font-normal",
+                                            task.status === "완료" ? "text-muted-foreground/50" : "text-foreground",
+                                          )}
+                                          title={task.task}
+                                        >
                                           {task.task}
                                         </span>
                                       </button>
@@ -900,7 +1075,7 @@ export function GanttView({
                               </div>
                             )}
 
-                            <div style={{ width: timelineWidth }} className="relative shrink-0 h-9">
+                            <div style={{ width: timelineWidth }} className="relative z-0 shrink-0 h-9 overflow-hidden">
                               {allDays.map((d, i) => (
                                 <div
                                   key={i}
@@ -921,7 +1096,7 @@ export function GanttView({
                                     "absolute top-1/2 -translate-y-1/2 rounded-md h-6 shadow-sm transition-all select-none cursor-grab active:cursor-grabbing",
                                     barStyle.barClass,
                                     dragInfo?.taskId === task.id
-                                      ? "opacity-100 scale-y-110 z-50 shadow-md ring-2 ring-white/50"
+                                      ? "opacity-100 scale-y-110 z-10 shadow-md ring-2 ring-white/50"
                                       : "opacity-90 hover:opacity-100",
                                   )}
                                   style={{ left: bar.left + 2, width: bar.width - 4 }}
@@ -943,11 +1118,15 @@ export function GanttView({
                             </div>
                           </div>
                         </div>
-                      )
-                    })}
+                          )
+                        })}
+                      {virtualItem.bottomTaskSpacer > 0 && <div style={{ height: virtualItem.bottomTaskSpacer }} />}
+                    </>
+                  )}
                 </div>
               )
             })}
+            {virtualizedBody.bottomSpacer > 0 && <div style={{ height: virtualizedBody.bottomSpacer }} />}
           </div>
         </div>
       </div>
@@ -982,7 +1161,7 @@ function DateCell({ value, onChange }: { value: string; onChange: (value: string
       <PopoverTrigger asChild>
         <Button variant="outline" className="h-7 justify-start px-2 text-[11px] font-normal">
           <CalendarIcon className="mr-1 h-3.5 w-3.5" />
-          <span className="truncate">{value || "날짜"}</span>
+          <span className="truncate">{value || "?좎쭨"}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align="start">
@@ -1039,7 +1218,7 @@ function DepartmentMultiSelect({
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" className="h-7 w-full justify-between px-2 text-[11px] font-normal">
-          <span className="truncate">{selected.length > 0 ? selected.join(", ") : "부서 선택"}</span>
+          <span className="truncate">{selected.length > 0 ? selected.join(", ") : "遺???좏깮"}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </Button>
       </PopoverTrigger>
@@ -1096,7 +1275,7 @@ function OwnerMultiSelect({
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" className="h-7 w-full justify-between px-2 text-[11px] font-normal">
-          <span className="truncate">{selected.length > 0 ? selected.join(", ") : "담당자 선택"}</span>
+          <span className="truncate">{selected.length > 0 ? selected.join(", ") : "?대떦???좏깮"}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </Button>
       </PopoverTrigger>
@@ -1111,11 +1290,11 @@ function OwnerMultiSelect({
                 addCustomOwner()
               }
             }}
-            placeholder="직접 입력"
+            placeholder="吏곸젒 ?낅젰"
             className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs"
           />
           <Button type="button" size="sm" className="h-8 px-2 text-xs" onClick={addCustomOwner}>
-            추가
+            異붽?
           </Button>
         </div>
         <div className="max-h-44 space-y-1 overflow-auto pr-1">
@@ -1138,3 +1317,5 @@ function OwnerMultiSelect({
     </Popover>
   )
 }
+
+

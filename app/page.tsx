@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useDeferredValue } from "react"
 import type { Project, Task, TaskStatus } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import {
@@ -33,6 +33,7 @@ export default function DashboardPage() {
   const [personFilter, setPersonFilter] = useState("all")
   const [sortBy, setSortBy] = useState<ProjectSortType>("latest")
   const [viewMode, setViewMode] = useState<"list" | "gantt" | "card">("gantt")
+  const deferredSearchQuery = useDeferredValue(searchQuery)
 
   useEffect(() => {
     setLoading(true)
@@ -423,7 +424,7 @@ export default function DashboardPage() {
                 statusFilter={statusFilter}
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
-                searchQuery={searchQuery}
+                searchQuery={deferredSearchQuery}
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
                 onDeleteTask={handleDeleteTask}
@@ -436,7 +437,7 @@ export default function DashboardPage() {
                 statusFilter={statusFilter}
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
-                searchQuery={searchQuery}
+                searchQuery={deferredSearchQuery}
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
                 onDeleteTask={handleDeleteTask}
@@ -449,7 +450,7 @@ export default function DashboardPage() {
                 statusFilter={statusFilter}
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
-                searchQuery={searchQuery}
+                searchQuery={deferredSearchQuery}
               />
             )}
           </div>
