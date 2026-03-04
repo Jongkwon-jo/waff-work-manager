@@ -4,11 +4,11 @@ import type { TaskStatus, TaskCategory } from "@/lib/data"
 import { cn } from "@/lib/utils"
 
 const statusConfig: Record<TaskStatus, { bg: string; text: string; dot: string }> = {
-  "완료": { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
-  "진행": { bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-500" },
-  "대기": { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-500" },
-  "보류": { bg: "bg-slate-100", text: "text-slate-600", dot: "bg-slate-400" },
-  "미정": { bg: "bg-rose-50", text: "text-rose-600", dot: "bg-rose-400" },
+  "완료": { bg: "bg-slate-600", text: "text-slate-50", dot: "bg-slate-50" },
+  "진행": { bg: "bg-blue-500", text: "text-blue-50", dot: "bg-blue-50" },
+  "대기": { bg: "bg-gray-200", text: "text-gray-600", dot: "bg-gray-600" },
+  "보류": { bg: "bg-yellow-200", text: "text-yellow-800", dot: "bg-yellow-800" },
+  "미정": { bg: "bg-rose-50", text: "text-rose-600", dot: "bg-rose-600" },
 }
 
 export function StatusBadge({ status }: { status: TaskStatus }) {

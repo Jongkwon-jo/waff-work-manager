@@ -1,16 +1,18 @@
-"use client"
+﻿"use client"
 
 import { useState, useMemo, useEffect } from "react"
 import type { Project, Task, TaskStatus } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
-import { 
+import {
   subscribeToData,
-  addProjectToDB, 
+  addProjectToDB,
   updateProjectInDB,
   deleteProjectFromDB,
-  addTaskToDB, 
-  updateTaskInDB, 
-  deleteTaskFromDB
+  addTaskToDB,
+  updateTaskInDB,
+  deleteTaskFromDB,
+  updateProjectOrdersInDB,
+  updateTaskOrdersInDB,
 } from "@/lib/firestore-service"
 import { StatusSummary } from "@/components/status-summary"
 import { FilterBar, ProjectSortType } from "@/components/filter-bar"
@@ -30,7 +32,7 @@ export default function DashboardPage() {
   const [departmentFilter, setDepartmentFilter] = useState("all")
   const [personFilter, setPersonFilter] = useState("all")
   const [sortBy, setSortBy] = useState<ProjectSortType>("latest")
-  const [viewMode, setViewMode] = useState<"list" | "gantt" | "card">("list")
+  const [viewMode, setViewMode] = useState<"list" | "gantt" | "card">("gantt")
 
   useEffect(() => {
     setLoading(true)
@@ -45,6 +47,72 @@ export default function DashboardPage() {
     return tasks.reduce((acc, task) => {
       return [...acc, task, ...flattenTasks(task.subTasks || [])]
     }, [] as Task[])
+  }
+
+  const insertTaskIntoTree = (tasks: Task[], parentId: string, taskToInsert: Task): Task[] => {
+    return tasks.map((task) => {
+      if (task.id === parentId) {
+        return {
+          ...task,
+          subTasks: [...(task.subTasks || []), taskToInsert],
+        }
+      }
+
+      if (task.subTasks && task.subTasks.length > 0) {
+        return {
+          ...task,
+          subTasks: insertTaskIntoTree(task.subTasks, parentId, taskToInsert),
+        }
+      }
+
+      return task
+    })
+  }
+
+  const removeTaskFromTree = (tasks: Task[], taskId: string): Task[] => {
+    return tasks
+      .filter((task) => task.id !== taskId)
+      .map((task) => ({
+        ...task,
+        subTasks: task.subTasks ? removeTaskFromTree(task.subTasks, taskId) : task.subTasks,
+      }))
+  }
+
+  const moveArrayItem = <T,>(items: T[], fromIndex: number, toIndex: number): T[] => {
+    const next = [...items]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, moved)
+    return next
+  }
+
+  const moveTaskInTree = (
+    tasks: Task[],
+    taskId: string,
+    direction: "up" | "down",
+  ): { tasks: Task[]; movedSiblingIds: string[] | null } => {
+    const foundIndex = tasks.findIndex((task) => task.id === taskId)
+    if (foundIndex !== -1) {
+      const targetIndex = direction === "up" ? foundIndex - 1 : foundIndex + 1
+      if (targetIndex < 0 || targetIndex >= tasks.length) {
+        return { tasks, movedSiblingIds: null }
+      }
+      const moved = moveArrayItem(tasks, foundIndex, targetIndex)
+      return { tasks: moved, movedSiblingIds: moved.map((task) => task.id) }
+    }
+
+    for (let i = 0; i < tasks.length; i++) {
+      const current = tasks[i]
+      if (!current.subTasks || current.subTasks.length === 0) continue
+
+      const nested = moveTaskInTree(current.subTasks, taskId, direction)
+      if (nested.movedSiblingIds) {
+        const updated = [...tasks]
+        updated[i] = { ...current, subTasks: nested.tasks }
+        return { tasks: updated, movedSiblingIds: nested.movedSiblingIds }
+      }
+    }
+
+    return { tasks, movedSiblingIds: null }
   }
 
   const allTasksFlat = useMemo(() => {
@@ -66,15 +134,20 @@ export default function DashboardPage() {
 
   const sortedProjects = useMemo(() => {
     const list = [...projectList]
-    
+
     return list.sort((a, b) => {
+      if (sortBy === "latest") {
+        const orderA = typeof a.displayOrder === "number" ? a.displayOrder : Number.MAX_SAFE_INTEGER
+        const orderB = typeof b.displayOrder === "number" ? b.displayOrder : Number.MAX_SAFE_INTEGER
+        if (orderA !== orderB) return orderA - orderB
+      }
       if (sortBy === "name") return a.name.localeCompare(b.name)
       if (sortBy === "type") return a.type.localeCompare(b.type)
       if (sortBy === "progress") {
         const getProgress = (p: Project) => {
           const tasks = flattenTasks(p.tasks)
           if (tasks.length === 0) return 0
-          return tasks.filter(t => t.status === "완료").length / tasks.length
+          return tasks.filter((t) => t.status === "완료").length / tasks.length
         }
         return getProgress(b) - getProgress(a)
       }
@@ -116,11 +189,52 @@ export default function DashboardPage() {
   }
 
   const handleAddTask = async (newTask: Task) => {
+    const optimisticTask: Task = {
+      ...newTask,
+      subTasks: newTask.subTasks || [],
+    }
+
+    setProjectList((prev) =>
+      prev.map((project) => {
+        if (project.id !== newTask.projectId) return project
+
+        if (newTask.parentId) {
+          return {
+            ...project,
+            tasks: insertTaskIntoTree(project.tasks, newTask.parentId, optimisticTask),
+          }
+        }
+
+        return {
+          ...project,
+          tasks: [optimisticTask, ...project.tasks],
+        }
+      }),
+    )
+
     try {
       const { id, subTasks, ...taskData } = newTask
-      await addTaskToDB(taskData)
+      const sanitizedTaskData = { ...taskData } as Omit<Task, "id">
+      if (sanitizedTaskData.parentId === undefined) {
+        delete sanitizedTaskData.parentId
+      }
+      if (sanitizedTaskData.isSubTask === undefined) {
+        delete sanitizedTaskData.isSubTask
+      }
+
+      await addTaskToDB(sanitizedTaskData)
       toast.success("업무가 추가되었습니다.")
     } catch (error) {
+      setProjectList((prev) =>
+        prev.map((project) =>
+          project.id === newTask.projectId
+            ? {
+                ...project,
+                tasks: removeTaskFromTree(project.tasks, newTask.id),
+              }
+            : project,
+        ),
+      )
       toast.error("업무 추가 실패")
     }
   }
@@ -141,6 +255,55 @@ export default function DashboardPage() {
       toast.success("업무가 삭제되었습니다.")
     } catch (error) {
       toast.error("업무 삭제 실패")
+    }
+  }
+
+  const handleMoveProject = async (projectId: string, direction: "up" | "down") => {
+    let movedProjectIds: string[] | null = null
+
+    setProjectList((prev) => {
+      const currentIndex = prev.findIndex((project) => project.id === projectId)
+      if (currentIndex === -1) return prev
+
+      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev
+
+      const moved = moveArrayItem(prev, currentIndex, targetIndex)
+      movedProjectIds = moved.map((project) => project.id)
+      return moved
+    })
+
+    if (!movedProjectIds) return
+
+    try {
+      await updateProjectOrdersInDB(movedProjectIds)
+    } catch (error) {
+      toast.error("프로젝트 순서 저장 실패")
+    }
+  }
+
+  const handleMoveTask = async (
+    projectId: string,
+    taskId: string,
+    direction: "up" | "down",
+  ) => {
+    let movedSiblingIds: string[] | null = null
+
+    setProjectList((prev) =>
+      prev.map((project) => {
+        if (project.id !== projectId) return project
+        const moved = moveTaskInTree(project.tasks, taskId, direction)
+        movedSiblingIds = moved.movedSiblingIds
+        return { ...project, tasks: moved.tasks }
+      }),
+    )
+
+    if (!movedSiblingIds) return
+
+    try {
+      await updateTaskOrdersInDB(movedSiblingIds)
+    } catch (error) {
+      toast.error("업무 순서 저장 실패")
     }
   }
 
@@ -167,39 +330,35 @@ export default function DashboardPage() {
               <Building2 className="h-5 w-5 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-base font-bold text-card-foreground leading-tight">
-                {"전략기획부 사업일정표"}
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                {"업무 관리 대시보드"}
-              </p>
+              <h1 className="text-base font-bold text-card-foreground leading-tight">{"전략기획부 사업일정표"}</h1>
+              <p className="text-xs text-muted-foreground">{"업무 관리 대시보드"}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <div className="mr-4 flex overflow-hidden rounded-md border border-border bg-background shadow-sm">
               <button
-                onClick={() => setViewMode("list")}
-                className={cn(
-                  "flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition-colors",
-                  viewMode === "list"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-background text-muted-foreground hover:bg-accent"
-                )}
-              >
-                <List className="h-3.5 w-3.5" />
-                {"목록"}
-              </button>
-              <button
                 onClick={() => setViewMode("gantt")}
                 className={cn(
-                  "flex items-center gap-1.5 border-l border-border px-4 py-1.5 text-xs font-medium transition-colors",
+                  "flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition-colors",
                   viewMode === "gantt"
                     ? "bg-primary text-primary-foreground"
-                    : "bg-background text-muted-foreground hover:bg-accent"
+                    : "bg-background text-muted-foreground hover:bg-accent",
                 )}
               >
                 <BarChart3 className="h-3.5 w-3.5" />
                 {"간트"}
+              </button>
+              <button
+                onClick={() => setViewMode("list")}
+                className={cn(
+                  "flex items-center gap-1.5 border-l border-border px-4 py-1.5 text-xs font-medium transition-colors",
+                  viewMode === "list"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-background text-muted-foreground hover:bg-accent",
+                )}
+              >
+                <List className="h-3.5 w-3.5" />
+                {"목록"}
               </button>
               <button
                 onClick={() => setViewMode("card")}
@@ -207,7 +366,7 @@ export default function DashboardPage() {
                   "flex items-center gap-1.5 border-l border-border px-4 py-1.5 text-xs font-medium transition-colors",
                   viewMode === "card"
                     ? "bg-primary text-primary-foreground"
-                    : "bg-background text-muted-foreground hover:bg-accent"
+                    : "bg-background text-muted-foreground hover:bg-accent",
                 )}
               >
                 <LayoutGrid className="h-3.5 w-3.5" />
@@ -250,9 +409,7 @@ export default function DashboardPage() {
               <div className="flex h-[40vh] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 text-center p-8">
                 <Building2 className="h-10 w-10 text-muted-foreground/50 mb-4" />
                 <h3 className="text-lg font-semibold">표시할 데이터가 없습니다</h3>
-                <p className="text-sm text-muted-foreground mt-2">
-                  새로운 프로젝트를 추가하여 업무 관리를 시작해 보세요.
-                </p>
+                <p className="text-sm text-muted-foreground mt-2">새로운 프로젝트를 추가하여 업무 관리를 시작해 보세요.</p>
               </div>
             ) : viewMode === "list" ? (
               <ProjectList
@@ -274,8 +431,11 @@ export default function DashboardPage() {
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
                 searchQuery={searchQuery}
+                onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
                 onDeleteTask={handleDeleteTask}
+                onMoveProject={handleMoveProject}
+                onMoveTask={handleMoveTask}
               />
             ) : (
               <ProjectCardView

@@ -1,6 +1,6 @@
-"use client"
+﻿"use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Plus, CalendarIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -14,25 +14,20 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import { cn } from "@/lib/utils"
+import { getPersonList } from "@/lib/data"
 import type { Task, TaskStatus, TaskCategory } from "@/lib/data"
 
 interface AddTaskDialogProps {
   projectId: string
-  parentId?: string // 부모 업무 ID 추가
+  parentId?: string
   onAddTask: (task: Task) => void
-  trigger?: React.ReactNode // 커스텀 트리거 버튼 지원
+  trigger?: React.ReactNode
 }
 
 export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTaskDialogProps) {
@@ -43,9 +38,10 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
   const [person, setPerson] = useState("")
   const [status, setStatus] = useState<TaskStatus>("대기")
   const [manDays, setManDays] = useState("0")
-  
   const [startDate, setStartDate] = useState<Date>()
   const [endDate, setEndDate] = useState<Date>()
+
+  const personOptions = useMemo(() => getPersonList(), [])
 
   const formatDate = (date: Date | undefined) => {
     if (!date) return ""
@@ -59,7 +55,7 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
     const newTask: Task = {
       id: `t${Date.now()}`,
       projectId,
-      parentId, // 부모 ID 설정
+      parentId,
       task: taskName,
       category,
       department,
@@ -68,7 +64,7 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
       endDate: formatDate(endDate),
       status,
       manDays: parseFloat(manDays) || 0,
-      isSubTask: !!parentId, // 부모가 있으면 하위 업무로 표시
+      isSubTask: !!parentId,
     }
 
     onAddTask(newTask)
@@ -93,23 +89,24 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
         {trigger || (
           <Button variant="outline" size="sm" className="h-7 gap-1 px-2 text-[11px]">
             <Plus className="h-3 w-3" />
-            {"업무 추가"}
+            업무 추가
           </Button>
         )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[500px]">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>{parentId ? "하위 업무 추가" : "새 세부 업무 추가"}</DialogTitle>
+            <DialogTitle>{parentId ? "하위 업무 추가" : "새 업무 추가"}</DialogTitle>
             <DialogDescription>
-              {parentId 
-                ? "선택한 업무의 하위 업무 정보를 입력하세요." 
-                : "프로젝트의 새로운 세부 업무 정보를 입력하세요."}
+              {parentId
+                ? "선택한 업무의 하위 업무 정보를 입력하세요."
+                : "프로젝트의 새 업무 정보를 입력하세요."}
             </DialogDescription>
           </DialogHeader>
+
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="task">{"업무내용"}</Label>
+              <Label htmlFor="task">업무내용</Label>
               <Input
                 id="task"
                 value={taskName}
@@ -118,32 +115,32 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
                 required
               />
             </div>
-            
+
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label>{"구분"}</Label>
+                <Label>구분</Label>
                 <Select value={category} onValueChange={(v) => setCategory(v as TaskCategory)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="일반">{"일반"}</SelectItem>
-                    <SelectItem value="중요">{"중요"}</SelectItem>
-                    <SelectItem value="정기">{"정기"}</SelectItem>
+                    <SelectItem value="일반">일반</SelectItem>
+                    <SelectItem value="중요">중요</SelectItem>
+                    <SelectItem value="정기">정기</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label>{"부서"}</Label>
+                <Label>부서</Label>
                 <Select value={department} onValueChange={setDepartment}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="전략">{"전략"}</SelectItem>
-                    <SelectItem value="ICT">{"ICT"}</SelectItem>
-                    <SelectItem value="FA">{"FA"}</SelectItem>
-                    <SelectItem value="기술고문">{"기술고문"}</SelectItem>
+                    <SelectItem value="전략">전략</SelectItem>
+                    <SelectItem value="ICT">ICT</SelectItem>
+                    <SelectItem value="FA">FA</SelectItem>
+                    <SelectItem value="기술고문">기술고문</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -151,16 +148,23 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="person">{"담당자"}</Label>
-                <Input
-                  id="person"
-                  value={person}
-                  onChange={(e) => setPerson(e.target.value)}
-                  placeholder="예: 홍길동"
-                />
+                <Label htmlFor="person">담당자</Label>
+                <Select value={person || "__none__"} onValueChange={(v) => setPerson(v === "__none__" ? "" : v)}>
+                  <SelectTrigger id="person">
+                    <SelectValue placeholder="담당자 선택" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">담당자 미지정</SelectItem>
+                    {personOptions.map((owner) => (
+                      <SelectItem key={owner} value={owner}>
+                        {owner}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="manDays">{"공수 (일)"}</Label>
+                <Label htmlFor="manDays">공수 (일)</Label>
                 <Input
                   id="manDays"
                   type="number"
@@ -173,78 +177,63 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label>{"시작일"}</Label>
+                <Label>시작일</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
-                      variant={"outline"}
-                      className={cn(
-                        "w-full justify-start text-left font-normal",
-                        !startDate && "text-muted-foreground"
-                      )}
+                      variant="outline"
+                      className={cn("w-full justify-start text-left font-normal", !startDate && "text-muted-foreground")}
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {startDate ? format(startDate, "PPP", { locale: ko }) : <span>날짜 선택</span>}
+                      {startDate ? format(startDate, "MM월 dd일", { locale: ko }) : <span>날짜 선택</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
-                    <Calendar
-                      mode="single"
-                      selected={startDate}
-                      onSelect={setStartDate}
-                      initialFocus
-                    />
+                    <Calendar mode="single" selected={startDate} onSelect={setStartDate} initialFocus />
                   </PopoverContent>
                 </Popover>
               </div>
               <div className="grid gap-2">
-                <Label>{"종료일"}</Label>
+                <Label>종료일</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
-                      variant={"outline"}
-                      className={cn(
-                        "w-full justify-start text-left font-normal",
-                        !endDate && "text-muted-foreground"
-                      )}
+                      variant="outline"
+                      className={cn("w-full justify-start text-left font-normal", !endDate && "text-muted-foreground")}
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {endDate ? format(endDate, "PPP", { locale: ko }) : <span>날짜 선택</span>}
+                      {endDate ? format(endDate, "MM월 dd일", { locale: ko }) : <span>날짜 선택</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
-                    <Calendar
-                      mode="single"
-                      selected={endDate}
-                      onSelect={setEndDate}
-                      initialFocus
-                    />
+                    <Calendar mode="single" selected={endDate} onSelect={setEndDate} initialFocus />
                   </PopoverContent>
                 </Popover>
               </div>
             </div>
 
             <div className="grid gap-2">
-              <Label>{"상태"}</Label>
+              <Label>상태</Label>
               <Select value={status} onValueChange={(v) => setStatus(v as TaskStatus)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="대기">{"대기"}</SelectItem>
-                  <SelectItem value="진행">{"진행"}</SelectItem>
-                  <SelectItem value="완료">{"완료"}</SelectItem>
-                  <SelectItem value="보류">{"보류"}</SelectItem>
-                  <SelectItem value="미정">{"미정"}</SelectItem>
+                  <SelectItem value="대기">대기</SelectItem>
+                  <SelectItem value="진행">진행</SelectItem>
+                  <SelectItem value="완료">완료</SelectItem>
+                  <SelectItem value="보류">보류</SelectItem>
+                  <SelectItem value="미정">미정</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
+
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              {"취소"}
+              취소
             </Button>
-            <Button type="submit">{"저장"}</Button>
+            <Button type="submit">저장</Button>
           </DialogFooter>
         </form>
       </DialogContent>

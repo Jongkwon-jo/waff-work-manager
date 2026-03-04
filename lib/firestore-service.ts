@@ -22,7 +22,14 @@ const TASKS_COLLECTION = "tasks";
 function buildProjectTree(projectsData: any[], allTasksData: any[]): Project[] {
   const projectsList: Project[] = [];
 
-  for (const projectData of projectsData) {
+  const orderedProjects = [...projectsData].sort((a, b) => {
+    const orderA = typeof a.displayOrder === "number" ? a.displayOrder : Number.MAX_SAFE_INTEGER;
+    const orderB = typeof b.displayOrder === "number" ? b.displayOrder : Number.MAX_SAFE_INTEGER;
+    if (orderA !== orderB) return orderA - orderB;
+    return (a.name || "").localeCompare(b.name || "");
+  });
+
+  for (const projectData of orderedProjects) {
     const projectId = projectData.id;
     const projectTasks = allTasksData.filter(t => t.projectId === projectId);
 
@@ -33,7 +40,14 @@ function buildProjectTree(projectsData: any[], allTasksData: any[]): Project[] {
       taskMap[task.id] = { ...task, subTasks: [] };
     });
 
-    projectTasks.forEach(task => {
+    const orderedTasks = [...projectTasks].sort((a, b) => {
+      const orderA = typeof a.displayOrder === "number" ? a.displayOrder : Number.MAX_SAFE_INTEGER;
+      const orderB = typeof b.displayOrder === "number" ? b.displayOrder : Number.MAX_SAFE_INTEGER;
+      if (orderA !== orderB) return orderA - orderB;
+      return (a.task || "").localeCompare(b.task || "");
+    });
+
+    orderedTasks.forEach(task => {
       const taskWithSub = taskMap[task.id];
       if (task.parentId && taskMap[task.parentId]) {
         taskMap[task.parentId].subTasks?.push(taskWithSub);
@@ -102,6 +116,7 @@ export async function fetchProjectsWithTasks(): Promise<Project[]> {
 export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Promise<string> {
   const docRef = await addDoc(collection(db, PROJECTS_COLLECTION), {
     ...project,
+    displayOrder: Date.now(),
     createdAt: serverTimestamp()
   });
   return docRef.id;
@@ -125,7 +140,10 @@ export async function deleteProjectFromDB(projectId: string): Promise<void> {
 }
 
 export async function addTaskToDB(task: Omit<Task, "id">): Promise<string> {
-  const docRef = await addDoc(collection(db, TASKS_COLLECTION), task);
+  const docRef = await addDoc(collection(db, TASKS_COLLECTION), {
+    ...task,
+    displayOrder: typeof task.displayOrder === "number" ? task.displayOrder : Date.now(),
+  });
   return docRef.id;
 }
 
@@ -137,4 +155,20 @@ export async function updateTaskInDB(taskId: string, updates: Partial<Task>): Pr
 export async function deleteTaskFromDB(taskId: string): Promise<void> {
   const taskRef = doc(db, TASKS_COLLECTION, taskId);
   await deleteDoc(taskRef);
+}
+
+export async function updateProjectOrdersInDB(projectIds: string[]): Promise<void> {
+  const batch = writeBatch(db);
+  projectIds.forEach((id, index) => {
+    batch.update(doc(db, PROJECTS_COLLECTION, id), { displayOrder: index });
+  });
+  await batch.commit();
+}
+
+export async function updateTaskOrdersInDB(taskIds: string[]): Promise<void> {
+  const batch = writeBatch(db);
+  taskIds.forEach((id, index) => {
+    batch.update(doc(db, TASKS_COLLECTION, id), { displayOrder: index });
+  });
+  await batch.commit();
 }

@@ -3,6 +3,7 @@ export type TaskCategory = "일반" | "중요" | "정기"
 
 export interface Task {
   id: string
+  displayOrder?: number
   projectId: string
   parentId?: string // 부모 업무 ID (루트 업무는 없음)
   task: string
@@ -21,6 +22,7 @@ export type ProjectType = "SI" | "R&D" | "S/F" | "Etc"
 
 export interface Project {
   id: string
+  displayOrder?: number
   name: string
   type: ProjectType
   period?: string

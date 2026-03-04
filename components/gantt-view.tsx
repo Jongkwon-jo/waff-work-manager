@@ -2,10 +2,25 @@
 
 import { useMemo, useState, useRef, useEffect } from "react"
 import type { Project, Task, TaskStatus } from "@/lib/data"
+import { getDepartmentList } from "@/lib/data"
 import { ProjectTypeBadge, StatusBadge } from "@/components/status-badge"
 import { EditTaskDialog } from "./edit-task-dialog"
+import { AddTaskDialog } from "./add-task-dialog"
 import { Button } from "./ui/button"
-import { Trash2 } from "lucide-react"
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover"
+import { Calendar } from "./ui/calendar"
+import {
+  Trash2,
+  ChevronDown,
+  ChevronRight,
+  PanelRight,
+  CalendarIcon,
+  Plus,
+  ArrowUp,
+  ArrowDown,
+  ChevronsUp,
+  ChevronsDown,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface GanttViewProps {
@@ -14,33 +29,95 @@ interface GanttViewProps {
   departmentFilter: string
   personFilter: string
   searchQuery: string
+  onAddTask: (task: Task) => void
   onEditTask: (task: Task) => void
   onDeleteTask: (taskId: string, projectId: string) => void
+  onMoveProject: (projectId: string, direction: "up" | "down") => void
+  onMoveTask: (projectId: string, taskId: string, direction: "up" | "down") => void
 }
 
+type FlattenedTask = Task & {
+  depth: number
+  hasChildren: boolean
+}
+
+type FilteredProject = Omit<Project, "tasks"> & {
+  tasks: FlattenedTask[]
+}
+
+const CELL_WIDTH = 28
+const LEFT_PANEL_MIN_WIDTH = 320
+const LEFT_PANEL_MAX_WIDTH = 680
+const DETAIL_PANEL_MIN_WIDTH = 700
+const DETAIL_PANEL_MAX_WIDTH = 1100
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate()
 }
 
 function getDayOfWeek(year: number, month: number, day: number) {
-  const days = ["일", "월", "화", "수", "목", "금", "토"]
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
   return days[new Date(year, month, day).getDay()]
 }
 
 function parseDate(dateStr: string): { month: number; day: number } | null {
-  const match = dateStr.match(/(\d{1,2})월\s*(\d{1,2})일/)
-  if (match) {
-    return { month: parseInt(match[1]) - 1, day: parseInt(match[2]) }
-  }
-  return null
+  const match = dateStr.match(/(\d{1,2})\D+(\d{1,2})/)
+  if (!match) return null
+  return { month: Number.parseInt(match[1], 10) - 1, day: Number.parseInt(match[2], 10) }
 }
 
-const CELL_WIDTH = 28
-const MONTHS = [
-  { year: 2026, month: 1, label: "2월" },
-  { year: 2026, month: 2, label: "3월" },
-  { year: 2026, month: 3, label: "4월" },
-]
+function parseDateToDate(dateStr: string): Date | undefined {
+  const parsed = parseDate(dateStr)
+  if (!parsed) return undefined
+  const year = new Date().getFullYear()
+  return new Date(year, parsed.month, parsed.day)
+}
+
+function formatDateKorean(date: Date) {
+  const mm = String(date.getMonth() + 1).padStart(2, "0")
+  const dd = String(date.getDate()).padStart(2, "0")
+  return `${mm}\uC6D4 ${dd}\uC77C`
+}
+
+function parseListValue(value: string): string[] {
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+function joinListValue(values: string[]): string {
+  return Array.from(new Set(values.map((v) => v.trim()).filter(Boolean))).join(", ")
+}
+
+function getMeasuredTextWidth(text: string, font: string) {
+  if (typeof document === "undefined") {
+    return text.length * 8
+  }
+
+  const canvas = document.createElement("canvas")
+  const context = canvas.getContext("2d")
+  if (!context) return text.length * 8
+  context.font = font
+  return context.measureText(text).width
+}
+
+function getStatusBarStyle(status: string): { barClass: string; textClass: string } {
+  const normalized = status.trim().toLowerCase()
+
+  if (normalized === "완료" || normalized.includes("done")) {
+    return { barClass: "bg-slate-500", textClass: "text-slate-50" }
+  }
+  if (normalized === "진행" || normalized.includes("progress")) {
+    return { barClass: "bg-blue-500", textClass: "text-blue-50" }
+  }
+  if (normalized === "대기" || normalized.includes("wait")) {
+    return { barClass: "bg-gray-300", textClass: "text-gray-900" }
+  }
+  if (normalized === "보류" || normalized.includes("hold")) {
+    return { barClass: "bg-yellow-200", textClass: "text-yellow-800" }
+  }
+  return { barClass: "bg-rose-600", textClass: "text-rose-50" }
+}
 
 export function GanttView({
   projects,
@@ -48,48 +125,285 @@ export function GanttView({
   departmentFilter,
   personFilter,
   searchQuery,
+  onAddTask,
   onEditTask,
   onDeleteTask,
+  onMoveProject,
+  onMoveTask,
 }: GanttViewProps) {
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [dragInfo, setDragInfo] = useState<{
-    taskId: string;
-    type: "move" | "resize-left" | "resize-right";
-    initialX: number;
-    initialLeft: number;
-    initialWidth: number;
-  } | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
-  const filteredProjects = useMemo(() => {
+  const [dragInfo, setDragInfo] = useState<{
+    taskId: string
+    type: "move" | "resize-left" | "resize-right"
+    initialX: number
+    initialLeft: number
+    initialWidth: number
+  } | null>(null)
+
+  const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(new Set())
+  const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<string>>(new Set())
+  const [isDetailColumnsOpen, setIsDetailColumnsOpen] = useState(false)
+  const [recentlyAddedTaskId, setRecentlyAddedTaskId] = useState<string | null>(null)
+
+  const allProjectIds = useMemo(() => projects.map((project) => project.id), [projects])
+  const allCollapsibleTaskIds = useMemo(() => {
+    const ids: string[] = []
+    const walk = (tasks: Task[]) => {
+      tasks.forEach((task) => {
+        if ((task.subTasks?.length || 0) > 0) ids.push(task.id)
+        walk(task.subTasks || [])
+      })
+    }
+    projects.forEach((project) => walk(project.tasks))
+    return ids
+  }, [projects])
+
+  const departmentOptions = useMemo(() => {
+    const base = getDepartmentList()
+    const extra = new Set<string>()
+    projects.forEach((p) => {
+      const walk = (tasks: Task[]) => {
+        tasks.forEach((t) => {
+          parseListValue(t.department || "").forEach((department) => extra.add(department))
+          walk(t.subTasks || [])
+        })
+      }
+      walk(p.tasks)
+    })
+    return Array.from(new Set([...base, ...Array.from(extra)])).filter(Boolean)
+  }, [projects])
+
+  const ownerOptions = useMemo(() => {
+    const owners = new Set<string>()
+    projects.forEach((p) => {
+      const walk = (tasks: Task[]) => {
+        tasks.forEach((t) => {
+          t.person
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .forEach((o) => owners.add(o))
+          walk(t.subTasks || [])
+        })
+      }
+      walk(p.tasks)
+    })
+    return Array.from(owners).sort((a, b) => a.localeCompare(b))
+  }, [projects])
+
+  const toggleProjectCollapse = (projectId: string) => {
+    setCollapsedProjectIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(projectId)) next.delete(projectId)
+      else next.add(projectId)
+      return next
+    })
+  }
+
+  const toggleTaskCollapse = (taskId: string) => {
+    setCollapsedTaskIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(taskId)) next.delete(taskId)
+      else next.add(taskId)
+      return next
+    })
+  }
+
+  const updateTaskInline = (task: Task, updates: Partial<Task>) => {
+    onEditTask({ ...task, ...updates })
+  }
+
+  const handleAddProjectLevelTask = (newTask: Task) => {
+    const normalizedTask: Task = {
+      ...newTask,
+      parentId: undefined,
+      isSubTask: false,
+    }
+
+    setCollapsedProjectIds((prev) => {
+      if (!prev.has(normalizedTask.projectId)) return prev
+      const next = new Set(prev)
+      next.delete(normalizedTask.projectId)
+      return next
+    })
+
+    setRecentlyAddedTaskId(normalizedTask.id)
+    onAddTask(normalizedTask)
+  }
+
+  const handleAddNestedSubTask = (newTask: Task) => {
+    if (!newTask.parentId) return
+
+    const normalizedTask: Task = {
+      ...newTask,
+      isSubTask: true,
+    }
+
+    setCollapsedProjectIds((prev) => {
+      if (!prev.has(normalizedTask.projectId)) return prev
+      const next = new Set(prev)
+      next.delete(normalizedTask.projectId)
+      return next
+    })
+
+    setCollapsedTaskIds((prev) => {
+      if (!prev.has(normalizedTask.parentId!)) return prev
+      const next = new Set(prev)
+      next.delete(normalizedTask.parentId!)
+      return next
+    })
+
+    setRecentlyAddedTaskId(normalizedTask.id)
+    onAddTask(normalizedTask)
+  }
+
+  useEffect(() => {
+    if (!recentlyAddedTaskId) return
+    const target = document.getElementById(`task-row-${recentlyAddedTaskId}`)
+    if (!target) return
+
+    target.scrollIntoView({ behavior: "smooth", block: "center" })
+    setRecentlyAddedTaskId(null)
+  }, [projects, recentlyAddedTaskId])
+
+  const filteredProjects = useMemo<FilteredProject[]>(() => {
+    const lowerQuery = searchQuery.trim().toLowerCase()
+
     return projects
       .map((project) => {
-        const flattenWithDepth = (tasks: Task[], depth = 0): (Task & { depth: number })[] => {
+        const projectMatchesSearch = lowerQuery.length > 0 && project.name.toLowerCase().includes(lowerQuery)
+
+        const collectVisibleRows = (tasks: Task[], depth = 0): FlattenedTask[] => {
           return tasks.reduce((acc, task) => {
-            const taskWithDepth = { ...task, depth };
-            return [...acc, taskWithDepth, ...flattenWithDepth(task.subTasks || [], depth + 1)];
-          }, [] as (Task & { depth: number })[])
+            const childRows = collectVisibleRows(task.subTasks || [], depth + 1)
+
+            const matchesStatus = statusFilter === "all" || task.status === statusFilter
+            const matchesDepartment = departmentFilter === "all" || task.department.includes(departmentFilter)
+            const matchesPerson = personFilter === "all" || task.person.includes(personFilter)
+            const matchesSearch =
+              lowerQuery.length === 0 || task.task.toLowerCase().includes(lowerQuery) || projectMatchesSearch
+
+            const matchesCurrentTask = matchesStatus && matchesDepartment && matchesPerson && matchesSearch
+
+            if (!matchesCurrentTask && childRows.length === 0) {
+              return acc
+            }
+
+            const hasChildren = (task.subTasks?.length || 0) > 0
+            acc.push({ ...task, depth, hasChildren })
+
+            if (hasChildren && !collapsedTaskIds.has(task.id)) {
+              acc.push(...childRows)
+            }
+
+            return acc
+          }, [] as FlattenedTask[])
         }
-        const allTasks = flattenWithDepth(project.tasks)
-        const filteredTasks = allTasks.filter((task) => {
-          if (statusFilter !== "all" && task.status !== statusFilter) return false
-          if (departmentFilter !== "all" && !task.department.includes(departmentFilter)) return false
-          if (personFilter !== "all" && !task.person.includes(personFilter)) return false
-          if (searchQuery && !task.task.toLowerCase().includes(searchQuery.toLowerCase()) && !project.name.toLowerCase().includes(searchQuery.toLowerCase())) return false
-          return true
-        })
-        return { ...project, tasks: filteredTasks }
+
+        return {
+          ...project,
+          tasks: collectVisibleRows(project.tasks),
+        }
       })
       .filter((project) => {
-        if (searchQuery) return project.tasks.length > 0 || project.name.toLowerCase().includes(searchQuery.toLowerCase())
-        if (statusFilter !== "all" || departmentFilter !== "all" || personFilter !== "all") return project.tasks.length > 0
+        if (lowerQuery.length > 0) {
+          return project.tasks.length > 0 || project.name.toLowerCase().includes(lowerQuery)
+        }
+        if (statusFilter !== "all" || departmentFilter !== "all" || personFilter !== "all") {
+          return project.tasks.length > 0
+        }
         return true
       })
-  }, [projects, statusFilter, departmentFilter, personFilter, searchQuery])
+  }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds])
+
+  const months = useMemo(() => {
+    const now = new Date()
+    const baseYear = now.getFullYear()
+    const baseMonth = now.getMonth()
+
+    return Array.from({ length: 7 }, (_, i) => {
+      const offset = i - 3
+      const d = new Date(baseYear, baseMonth + offset, 1)
+      return {
+        year: d.getFullYear(),
+        month: d.getMonth(),
+        label: `${d.getFullYear()}년 ${d.getMonth() + 1}월`,
+      }
+    })
+  }, [])
+
+  const { leftPanelWidth, detailPanelWidth, detailGridTemplate } = useMemo(() => {
+    const font = typeof document !== "undefined" ? getComputedStyle(document.body).font : "12px sans-serif"
+    const leftTexts = [
+      "Project & Task Details",
+      ...projects.map((project) => project.name),
+      ...projects.flatMap((project) => {
+        const flattenTaskNames = (tasks: Task[]): string[] =>
+          tasks.flatMap((task) => [task.task, ...flattenTaskNames(task.subTasks || [])])
+        return flattenTaskNames(project.tasks)
+      }),
+    ]
+    const maxLeftTextWidth = Math.max(...leftTexts.map((text) => getMeasuredTextWidth(text, font)), 200)
+    const computedLeftPanelWidth = Math.min(
+      LEFT_PANEL_MAX_WIDTH,
+      Math.max(LEFT_PANEL_MIN_WIDTH, Math.ceil(maxLeftTextWidth + 170)),
+    )
+
+    const maxDepartmentTextWidth = Math.max(
+      getMeasuredTextWidth("Department", font),
+      ...departmentOptions.map((text) => getMeasuredTextWidth(text, font)),
+      ...projects.flatMap((project) => {
+        const flattenDepartments = (tasks: Task[]): string[] =>
+          tasks.flatMap((task) => [task.department || "", ...flattenDepartments(task.subTasks || [])])
+        return flattenDepartments(project.tasks)
+      }).map((text) => getMeasuredTextWidth(text, font)),
+    )
+
+    const maxOwnerTextWidth = Math.max(
+      getMeasuredTextWidth("Owner", font),
+      ...ownerOptions.map((text) => getMeasuredTextWidth(text, font)),
+      ...projects.flatMap((project) => {
+        const flattenOwners = (tasks: Task[]): string[] =>
+          tasks.flatMap((task) => [task.person || "", ...flattenOwners(task.subTasks || [])])
+        return flattenOwners(project.tasks)
+      }).map((text) => getMeasuredTextWidth(text, font)),
+    )
+
+    const departmentColumnWidth = Math.max(120, Math.min(280, Math.ceil(maxDepartmentTextWidth + 54)))
+    const ownerColumnWidth = Math.max(190, Math.min(380, Math.ceil(maxOwnerTextWidth + 54)))
+    const startColumnWidth = Math.max(110, Math.ceil(getMeasuredTextWidth("12월 30일", font) + 48))
+    const endColumnWidth = Math.max(110, Math.ceil(getMeasuredTextWidth("12월 30일", font) + 48))
+    const manDayColumnWidth = Math.max(40, Math.ceil(getMeasuredTextWidth("99.5", font) + 28))
+
+    const computedDetailPanelWidth = Math.min(
+      DETAIL_PANEL_MAX_WIDTH,
+      Math.max(
+        DETAIL_PANEL_MIN_WIDTH,
+        departmentColumnWidth + ownerColumnWidth + startColumnWidth + endColumnWidth + manDayColumnWidth + 40,
+      ),
+    )
+
+    return {
+      leftPanelWidth: computedLeftPanelWidth,
+      detailPanelWidth: computedDetailPanelWidth,
+      detailGridTemplate: `${departmentColumnWidth}px ${ownerColumnWidth}px ${startColumnWidth}px ${endColumnWidth}px ${manDayColumnWidth}px`,
+    }
+  }, [projects, departmentOptions, ownerOptions])
 
   const allDays = useMemo(() => {
     const today = new Date()
-    const days: any[] = []
-    for (const m of MONTHS) {
+    const days: Array<{
+      year: number
+      month: number
+      day: number
+      label: string
+      dow: string
+      isWeekend: boolean
+      isToday: boolean
+    }> = []
+
+    for (const m of months) {
       const daysInMonth = getDaysInMonth(m.year, m.month)
       for (let d = 1; d <= daysInMonth; d++) {
         const dow = getDayOfWeek(m.year, m.month, d)
@@ -99,139 +413,253 @@ export function GanttView({
           day: d,
           label: `${d}`,
           dow,
-          isWeekend: dow === "토" || dow === "일",
-          isToday: today.getFullYear() === m.year && today.getMonth() === m.month && today.getDate() === d,
+          isWeekend: dow === "Sun" || dow === "Sat",
+          isToday:
+            today.getFullYear() === m.year && today.getMonth() === m.month && today.getDate() === d,
         })
       }
     }
     return days
-  }, [])
+  }, [months])
+
+  const timelineWidth = allDays.length * CELL_WIDTH
+  const showDetailColumns = isDetailColumnsOpen
+  const isAllExpanded = collapsedProjectIds.size === 0 && collapsedTaskIds.size === 0
+
+  const toggleAllRows = () => {
+    if (isAllExpanded) {
+      setCollapsedProjectIds(new Set(allProjectIds))
+      setCollapsedTaskIds(new Set(allCollapsibleTaskIds))
+      return
+    }
+
+    setCollapsedProjectIds(new Set())
+    setCollapsedTaskIds(new Set())
+  }
+
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    const daysBeforeCurrentMonth = months
+      .slice(0, 3)
+      .reduce((sum, m) => sum + getDaysInMonth(m.year, m.month), 0)
+
+    const currentMonthStartX = daysBeforeCurrentMonth * CELL_WIDTH
+    const targetScrollLeft = Math.max(0, currentMonthStartX - CELL_WIDTH * 2)
+
+    requestAnimationFrame(() => {
+      container.scrollLeft = targetScrollLeft
+    })
+  }, [months])
 
   const getBarPosition = (startStr: string, endStr: string) => {
     const start = parseDate(startStr)
     const end = parseDate(endStr)
+
     if (!start || !end) return null
-    const startIdx = allDays.findIndex(d => d.month === start.month && d.day === start.day)
-    const endIdx = allDays.findIndex(d => d.month === end.month && d.day === end.day)
+
+    const startIdx = allDays.findIndex((d) => d.month === start.month && d.day === start.day)
+    const endIdx = allDays.findIndex((d) => d.month === end.month && d.day === end.day)
+
     if (startIdx === -1 || endIdx === -1) return null
-    return { left: startIdx * CELL_WIDTH, width: (endIdx - startIdx + 1) * CELL_WIDTH }
+
+    return {
+      left: startIdx * CELL_WIDTH,
+      width: (endIdx - startIdx + 1) * CELL_WIDTH,
+    }
   }
 
-  const handleMouseDown = (e: React.MouseEvent, task: Task, type: "move" | "resize-left" | "resize-right") => {
-    e.preventDefault();
-    e.stopPropagation();
-    const pos = getBarPosition(task.startDate, task.endDate);
-    if (!pos) return;
+  const handleMouseDown = (
+    e: React.MouseEvent,
+    task: Task,
+    type: "move" | "resize-left" | "resize-right",
+  ) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const pos = getBarPosition(task.startDate, task.endDate)
+    if (!pos) return
+
     setDragInfo({
       taskId: task.id,
       type,
       initialX: e.clientX,
       initialLeft: pos.left,
-      initialWidth: pos.width
-    });
-  };
+      initialWidth: pos.width,
+    })
+  }
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!dragInfo) return;
-      const barElement = document.getElementById(`bar-${dragInfo.taskId}`);
-      if (!barElement) return;
-      const deltaX = e.clientX - dragInfo.initialX;
-      
+      if (!dragInfo) return
+
+      const barElement = document.getElementById(`bar-${dragInfo.taskId}`)
+      if (!barElement) return
+
+      const deltaX = e.clientX - dragInfo.initialX
+
       if (dragInfo.type === "move") {
-        barElement.style.left = `${dragInfo.initialLeft + deltaX}px`;
+        barElement.style.left = `${dragInfo.initialLeft + deltaX}px`
       } else if (dragInfo.type === "resize-left") {
-        const newLeft = dragInfo.initialLeft + deltaX;
-        const newWidth = dragInfo.initialWidth - deltaX;
+        const newLeft = dragInfo.initialLeft + deltaX
+        const newWidth = dragInfo.initialWidth - deltaX
+
         if (newWidth >= CELL_WIDTH) {
-          barElement.style.left = `${newLeft}px`;
-          barElement.style.width = `${newWidth}px`;
+          barElement.style.left = `${newLeft}px`
+          barElement.style.width = `${newWidth}px`
         }
       } else if (dragInfo.type === "resize-right") {
-        const newWidth = dragInfo.initialWidth + deltaX;
+        const newWidth = dragInfo.initialWidth + deltaX
+
         if (newWidth >= CELL_WIDTH) {
-          barElement.style.width = `${newWidth}px`;
+          barElement.style.width = `${newWidth}px`
         }
       }
-    };
+    }
 
     const handleMouseUp = (e: MouseEvent) => {
-      if (!dragInfo) return;
-      const deltaX = e.clientX - dragInfo.initialX;
-      const daysDelta = Math.round(deltaX / CELL_WIDTH);
-      
-      // 모든 하위 업무를 포함한 전체 업무 리스트에서 탐색
-      const allFlattenedTasks = projects.flatMap(p => {
-        const flatten = (ts: Task[]): Task[] => ts.reduce((a, t) => [...a, t, ...flatten(t.subTasks || [])], [] as Task[]);
-        return flatten(p.tasks);
-      });
-      
-      const task = allFlattenedTasks.find(t => t.id === dragInfo.taskId);
+      if (!dragInfo) return
+
+      const deltaX = e.clientX - dragInfo.initialX
+      const daysDelta = Math.round(deltaX / CELL_WIDTH)
+
+      const allFlattenedTasks = projects.flatMap((p) => {
+        const flatten = (tasks: Task[]): Task[] =>
+          tasks.reduce((acc, t) => [...acc, t, ...flatten(t.subTasks || [])], [] as Task[])
+
+        return flatten(p.tasks)
+      })
+
+      const task = allFlattenedTasks.find((t) => t.id === dragInfo.taskId)
 
       if (task && daysDelta !== 0) {
-        const start = parseDate(task.startDate);
-        const end = parseDate(task.endDate);
+        const start = parseDate(task.startDate)
+        const end = parseDate(task.endDate)
+
         if (start && end) {
-          const startIdx = allDays.findIndex(d => d.month === start.month && d.day === start.day);
-          const endIdx = allDays.findIndex(d => d.month === end.month && d.day === end.day);
-          
-          let nS = startIdx;
-          let nE = endIdx;
+          const startIdx = allDays.findIndex((d) => d.month === start.month && d.day === start.day)
+          const endIdx = allDays.findIndex((d) => d.month === end.month && d.day === end.day)
+
+          let nextStart = startIdx
+          let nextEnd = endIdx
 
           if (dragInfo.type === "move") {
-            nS = Math.max(0, Math.min(startIdx + daysDelta, allDays.length - 1));
-            nE = Math.max(nS, Math.min(endIdx + daysDelta, allDays.length - 1));
+            nextStart = Math.max(0, Math.min(startIdx + daysDelta, allDays.length - 1))
+            nextEnd = Math.max(nextStart, Math.min(endIdx + daysDelta, allDays.length - 1))
           } else if (dragInfo.type === "resize-left") {
-            nS = Math.max(0, Math.min(startIdx + daysDelta, endIdx)); // 종료일보다 늦어질 수 없음
+            nextStart = Math.max(0, Math.min(startIdx + daysDelta, endIdx))
           } else if (dragInfo.type === "resize-right") {
-            nE = Math.max(startIdx, Math.min(endIdx + daysDelta, allDays.length - 1)); // 시작일보다 빨라질 수 없음
+            nextEnd = Math.max(startIdx, Math.min(endIdx + daysDelta, allDays.length - 1))
           }
 
           onEditTask({
             ...task,
-            startDate: `${allDays[nS].month + 1}월 ${allDays[nS].day}일`,
-            endDate: `${allDays[nE].month + 1}월 ${allDays[nE].day}일`
-          });
+            startDate: formatDateKorean(new Date(new Date().getFullYear(), allDays[nextStart].month, allDays[nextStart].day)),
+            endDate: formatDateKorean(new Date(new Date().getFullYear(), allDays[nextEnd].month, allDays[nextEnd].day)),
+          })
         }
       }
-      setDragInfo(null);
-    };
+
+      setDragInfo(null)
+    }
 
     if (dragInfo) {
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
+      window.addEventListener("mousemove", handleMouseMove)
+      window.addEventListener("mouseup", handleMouseUp)
     }
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [dragInfo, allDays, onEditTask, projects]);
 
-  const statusColor: Record<TaskStatus, string> = {
-    "완료": "bg-emerald-400", "진행": "bg-blue-400", "대기": "bg-amber-400", "보류": "bg-slate-300", "미정": "bg-rose-300",
-  }
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove)
+      window.removeEventListener("mouseup", handleMouseUp)
+    }
+  }, [dragInfo, allDays, onEditTask, projects])
 
   return (
     <div className="rounded-lg border border-border bg-card shadow-sm overflow-hidden flex flex-col h-[65vh]">
       <div ref={scrollContainerRef} className="flex-1 overflow-auto custom-scrollbar">
         <div className="relative min-w-fit flex flex-col">
           <div className="sticky top-0 z-40 flex bg-card border-b border-border shadow-sm">
-            <div className="sticky left-0 z-50 w-80 shrink-0 border-r border-border bg-card px-4 py-3 flex items-end">
-              <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">{"Project & Task Details"}</span>
+            <div
+              className="sticky left-0 z-50 shrink-0 border-r border-border bg-card px-4 py-3 flex items-end"
+              style={{ width: leftPanelWidth }}
+            >
+              <div className="flex w-full items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                  Project & Task Details
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-[11px]"
+                  onClick={toggleAllRows}
+                >
+                  {isAllExpanded ? <ChevronsUp className="h-3.5 w-3.5" /> : <ChevronsDown className="h-3.5 w-3.5" />}
+                  {isAllExpanded ? "전체 접기" : "전체 펼치기"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-[11px]"
+                  onClick={() => setIsDetailColumnsOpen((prev) => !prev)}
+                >
+                  <PanelRight className="h-3.5 w-3.5" />
+                  {showDetailColumns ? "상세 숨기기" : "상세 보기"}
+                </Button>
+              </div>
             </div>
+
+            {showDetailColumns && (
+              <div
+                className="sticky z-50 shrink-0 border-r border-border bg-card px-3 py-2"
+                style={{ left: leftPanelWidth, width: detailPanelWidth }}
+              >
+                <div
+                  className="grid gap-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
+                  style={{ gridTemplateColumns: detailGridTemplate }}
+                >
+                  <span>Department</span>
+                  <span>Owner</span>
+                  <span>Start</span>
+                  <span>End</span>
+                  <span>Man-day</span>
+                </div>
+              </div>
+            )}
+
             <div className="shrink-0">
               <div className="flex border-b border-border bg-muted/20">
-                {MONTHS.map((m) => (
-                  <div key={`${m.year}-${m.month}`} style={{ width: getDaysInMonth(m.year, m.month) * CELL_WIDTH }} className="border-r border-border px-2 py-2 text-center text-[10px] font-bold text-card-foreground">
-                    {`${m.year}년 ${m.label}`}
+                {months.map((m) => (
+                  <div
+                    key={`${m.year}-${m.month}`}
+                    style={{ width: getDaysInMonth(m.year, m.month) * CELL_WIDTH }}
+                    className="border-r border-border px-2 py-2 text-center text-[10px] font-bold text-card-foreground"
+                  >
+                    {m.label}
                   </div>
                 ))}
               </div>
+
               <div className="flex bg-card">
                 {allDays.map((d, i) => (
-                  <div key={i} style={{ width: CELL_WIDTH }} className={cn("shrink-0 border-r border-border py-1.5 text-center", d.isWeekend && "bg-muted/50", d.isToday && "bg-primary/10")}>
+                  <div
+                    key={i}
+                    style={{ width: CELL_WIDTH }}
+                    className={cn(
+                      "shrink-0 border-r border-border py-1.5 text-center",
+                      d.isWeekend && "bg-muted/50",
+                      d.isToday && "bg-primary/10",
+                    )}
+                  >
                     <div className="text-[10px] leading-tight font-medium text-muted-foreground">{d.label}</div>
-                    <div className={cn("text-[8px] leading-tight font-bold", d.isWeekend ? "text-rose-400" : "text-muted-foreground/60")}>{d.dow}</div>
+                    <div
+                      className={cn(
+                        "text-[8px] leading-tight font-bold",
+                        d.isWeekend ? "text-rose-400" : "text-muted-foreground/60",
+                      )}
+                    >
+                      {d.dow}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -239,90 +667,461 @@ export function GanttView({
           </div>
 
           <div className="flex flex-col">
-            {filteredProjects.map((project) => (
-              <div key={project.id}>
-                <div className="flex border-b border-border bg-muted/40 sticky top-[55px] z-30">
-                  <div className="sticky left-0 z-30 flex w-80 shrink-0 items-center gap-3 border-r border-border bg-muted/40 px-4 py-1.5 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
-                    <ProjectTypeBadge type={project.type} />
-                    <span className="truncate text-xs font-bold text-card-foreground">{project.name}</span>
-                  </div>
-                  <div style={{ width: allDays.length * CELL_WIDTH }} className="shrink-0 h-7" />
-                </div>
+            {filteredProjects.map((project) => {
+              const isProjectCollapsed = collapsedProjectIds.has(project.id)
 
-                {project.tasks.map((task: any) => {
-                  const bar = getBarPosition(task.startDate, task.endDate)
-                  return (
-                    <div key={task.id} className="group/task flex border-b border-border/50 transition-colors hover:bg-accent/5">
-                      <div className="sticky left-0 z-20 flex w-80 shrink-0 items-center border-r border-border bg-card px-4 py-1.5 group-hover/task:bg-accent/10 shadow-[2px_0_5px_rgba(0,0,0,0.05)] overflow-hidden">
-                        <div className="flex items-center gap-2 w-full min-w-0">
-                          <div style={{ width: task.depth * 12 }} className="shrink-0" />
-                          {task.depth > 0 && <span className="text-[10px] text-muted-foreground/50 shrink-0">{"└"}</span>}
-                          <EditTaskDialog task={task} onEditTask={onEditTask} trigger={
-                            <button className="flex items-center gap-3 text-left hover:text-primary transition-colors min-w-0 flex-1 overflow-hidden">
-                              <div className="shrink-0 w-[60px] flex justify-center"><StatusBadge status={task.status} /></div>
-                              <span className="truncate text-xs text-foreground font-semibold" title={task.task}>{task.task}</span>
-                            </button>
-                          } />
-                          <Button variant="ghost" size="icon" className="ml-1 h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100" onClick={() => { if (confirm("삭제하시겠습니까?")) onDeleteTask(task.id, task.projectId) }}>
-                            <Trash2 className="h-3 w-3" />
+              return (
+                <div key={project.id}>
+                  <div className="flex border-b border-border bg-muted/40 sticky top-[55px] z-30">
+                    <div
+                      className="sticky left-0 z-30 flex shrink-0 items-center gap-2 border-r border-border bg-muted/40 px-4 py-1.5 shadow-[2px_0_5px_rgba(0,0,0,0.05)]"
+                      style={{ width: leftPanelWidth }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleProjectCollapse(project.id)}
+                        className="flex h-5 w-5 items-center justify-center rounded hover:bg-accent"
+                        aria-label={isProjectCollapsed ? "Expand project" : "Collapse project"}
+                      >
+                        {isProjectCollapsed ? (
+                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                        )}
+                      </button>
+                      <ProjectTypeBadge type={project.type} />
+                      <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                        <span className="truncate text-xs font-bold text-card-foreground">{project.name}</span>
+                        <AddTaskDialog
+                          projectId={project.id}
+                          onAddTask={handleAddProjectLevelTask}
+                          trigger={
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-6 shrink-0 px-2 text-[10px]"
+                            >
+                              업무 추가
+                            </Button>
+                          }
+                        />
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => onMoveProject(project.id, "up")}
+                          >
+                            <ArrowUp className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => onMoveProject(project.id, "down")}
+                          >
+                            <ArrowDown className="h-3 w-3" />
                           </Button>
                         </div>
                       </div>
-                      
-                      <div style={{ width: allDays.length * CELL_WIDTH }} className="relative shrink-0 h-9">
-                        {allDays.map((d, i) => (
-                          <div key={i} className="absolute inset-y-0 pointer-events-none" style={{ left: i * CELL_WIDTH, width: CELL_WIDTH }}>
-                            {d.isWeekend && <div className="absolute inset-0 bg-muted/15" />}
-                            {d.isToday && (
-                              <div className="absolute inset-0 bg-yellow-400/10 ring-1 ring-yellow-400/30 z-10" />
+                    </div>
+
+                    {showDetailColumns && (
+                      <div
+                        className="sticky z-30 shrink-0 border-r border-border bg-muted/40 px-3 py-1.5"
+                        style={{ left: leftPanelWidth, width: detailPanelWidth }}
+                      />
+                    )}
+
+                    <div style={{ width: timelineWidth }} className="shrink-0 h-7" />
+                  </div>
+
+                  {!isProjectCollapsed &&
+                    project.tasks.map((task) => {
+                      const bar = getBarPosition(task.startDate, task.endDate)
+                      const isTaskCollapsed = collapsedTaskIds.has(task.id)
+                      const barStyle = getStatusBarStyle(task.status)
+
+                      const currentOwners = parseOwners(task.person || "")
+                      const ownerValues = Array.from(new Set([...ownerOptions, ...currentOwners])).filter(Boolean)
+                      const currentDepartments = parseDepartments(task.department || "")
+                      const departmentValues = Array.from(new Set([...departmentOptions, ...currentDepartments])).filter(Boolean)
+
+                      return (
+                        <div key={task.id} id={`task-row-${task.id}`}>
+                          <div className="group/task flex border-b border-border/50 transition-colors hover:bg-accent/5">
+                            <div
+                              className="sticky left-0 z-20 flex shrink-0 items-center border-r border-border bg-card px-4 py-1.5 group-hover/task:bg-accent/10 shadow-[2px_0_5px_rgba(0,0,0,0.05)] overflow-hidden"
+                              style={{ width: leftPanelWidth }}
+                            >
+                              <div className="flex items-center gap-1.5 w-full min-w-0">
+                                <div style={{ width: task.depth * 12 }} className="shrink-0" />
+
+                                {task.hasChildren ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleTaskCollapse(task.id)}
+                                    className="flex h-5 w-5 items-center justify-center rounded hover:bg-accent"
+                                    aria-label={isTaskCollapsed ? "Expand sub tasks" : "Collapse sub tasks"}
+                                  >
+                                    {isTaskCollapsed ? (
+                                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                                    ) : (
+                                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                                    )}
+                                  </button>
+                                ) : (
+                                  <span className="w-5" />
+                                )}
+
+                                <EditTaskDialog
+                                  task={task}
+                                  onEditTask={onEditTask}
+                                  trigger={
+                                    <button className="flex items-center gap-2 text-left hover:text-primary transition-colors min-w-0 flex-1 overflow-hidden">
+                                      <div className="shrink-0 w-[60px] flex justify-center">
+                                        <StatusBadge status={task.status} />
+                                      </div>
+                                      <span className="truncate text-xs text-foreground font-semibold" title={task.task}>
+                                        {task.task}
+                                      </span>
+                                    </button>
+                                  }
+                                />
+
+                                <AddTaskDialog
+                                  projectId={task.projectId}
+                                  parentId={task.id}
+                                  onAddTask={handleAddNestedSubTask}
+                                  trigger={
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
+                                    >
+                                      <Plus className="h-3 w-3" />
+                                    </Button>
+                                  }
+                                />
+
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="ml-0.5 h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
+                                  onClick={() => {
+                                    if (confirm("Delete this task?")) {
+                                      onDeleteTask(task.id, task.projectId)
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
+                                  onClick={() => onMoveTask(task.projectId, task.id, "up")}
+                                >
+                                  <ArrowUp className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
+                                  onClick={() => onMoveTask(task.projectId, task.id, "down")}
+                                >
+                                  <ArrowDown className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
+
+                            {showDetailColumns && (
+                              <div
+                                className="sticky z-20 shrink-0 border-r border-border px-3 py-1 shadow-[2px_0_5px_rgba(0,0,0,0.03)] bg-background group-hover/task:bg-accent/10"
+                                style={{ left: leftPanelWidth, width: detailPanelWidth }}
+                              >
+                                <div
+                                  className="grid gap-2 text-[11px] text-foreground"
+                                  style={{ gridTemplateColumns: detailGridTemplate }}
+                                >
+                                  <DepartmentMultiSelect
+                                    value={task.department || ""}
+                                    options={departmentValues}
+                                    onChange={(value) => updateTaskInline(task, { department: value })}
+                                  />
+
+                                  <OwnerMultiSelect
+                                    value={task.person || ""}
+                                    options={ownerValues}
+                                    onChange={(value) => updateTaskInline(task, { person: value })}
+                                  />
+
+                                  <DateCell
+                                    value={task.startDate}
+                                    onChange={(value) => updateTaskInline(task, { startDate: value })}
+                                  />
+
+                                  <DateCell
+                                    value={task.endDate}
+                                    onChange={(value) => updateTaskInline(task, { endDate: value })}
+                                  />
+
+                                  <input
+                                    type="number"
+                                    step="0.5"
+                                    min="0"
+                                    value={Number.isFinite(task.manDays) ? task.manDays : 0}
+                                    onChange={(e) => {
+                                      const next = Number.parseFloat(e.target.value)
+                                      updateTaskInline(task, { manDays: Number.isNaN(next) ? 0 : next })
+                                    }}
+                                    className="h-7 w-full rounded-md border border-input bg-background px-2 text-[11px]"
+                                  />
+                                </div>
+                              </div>
                             )}
-                          </div>
-                        ))}
-                        
-                        {bar && (
-                          <div
-                            id={`bar-${task.id}`}
-                            className={cn(
-                              "absolute top-1/2 -translate-y-1/2 rounded-md h-6 shadow-sm transition-all select-none cursor-grab active:cursor-grabbing",
-                              statusColor[task.status as TaskStatus],
-                              dragInfo?.taskId === task.id ? "opacity-100 scale-y-110 z-50 shadow-md ring-2 ring-white/50" : "opacity-90 hover:opacity-100"
-                            )}
-                            style={{ left: bar.left + 2, width: bar.width - 4 }}
-                            onMouseDown={(e) => handleMouseDown(e, task, "move")}
-                          >
-                            {/* Resize Handle - Left */}
-                            <div 
-                              className="absolute left-0 top-0 bottom-0 w-3 cursor-w-resize hover:bg-black/10 rounded-l-md z-10" 
-                              onMouseDown={(e) => handleMouseDown(e, task, "resize-left")} 
-                            />
-                            
-                            {/* Resize Handle - Right */}
-                            <div 
-                              className="absolute right-0 top-0 bottom-0 w-3 cursor-e-resize hover:bg-black/10 rounded-r-md z-10" 
-                              onMouseDown={(e) => handleMouseDown(e, task, "resize-right")} 
-                            />
-                            
-                            <div className="px-3 text-[10px] text-white font-bold truncate h-full flex items-center pointer-events-none">
-                              {task.task}
+
+                            <div style={{ width: timelineWidth }} className="relative shrink-0 h-9">
+                              {allDays.map((d, i) => (
+                                <div
+                                  key={i}
+                                  className="absolute inset-y-0 pointer-events-none"
+                                  style={{ left: i * CELL_WIDTH, width: CELL_WIDTH }}
+                                >
+                                  {d.isWeekend && <div className="absolute inset-0 bg-muted/15" />}
+                                  {d.isToday && (
+                                    <div className="absolute inset-0 bg-yellow-400/10 ring-1 ring-yellow-400/30 z-10" />
+                                  )}
+                                </div>
+                              ))}
+
+                              {bar && (
+                                <div
+                                  id={`bar-${task.id}`}
+                                  className={cn(
+                                    "absolute top-1/2 -translate-y-1/2 rounded-md h-6 shadow-sm transition-all select-none cursor-grab active:cursor-grabbing",
+                                    barStyle.barClass,
+                                    dragInfo?.taskId === task.id
+                                      ? "opacity-100 scale-y-110 z-50 shadow-md ring-2 ring-white/50"
+                                      : "opacity-90 hover:opacity-100",
+                                  )}
+                                  style={{ left: bar.left + 2, width: bar.width - 4 }}
+                                  onMouseDown={(e) => handleMouseDown(e, task, "move")}
+                                >
+                                  <div
+                                    className="absolute left-0 top-0 bottom-0 w-3 cursor-w-resize hover:bg-black/10 rounded-l-md z-10"
+                                    onMouseDown={(e) => handleMouseDown(e, task, "resize-left")}
+                                  />
+                                  <div
+                                    className="absolute right-0 top-0 bottom-0 w-3 cursor-e-resize hover:bg-black/10 rounded-r-md z-10"
+                                    onMouseDown={(e) => handleMouseDown(e, task, "resize-right")}
+                                  />
+                                  <div className={cn("px-3 text-[10px] font-bold truncate h-full flex items-center pointer-events-none", barStyle.textClass)}>
+                                    {task.task}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            ))}
+                        </div>
+                      )
+                    })}
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>
 
       <style jsx global>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 10px; height: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 5px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 5px; border: 2px solid #f1f1f1; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 10px;
+          height: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: #f1f1f1;
+          border-radius: 5px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 5px;
+          border: 2px solid #f1f1f1;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #94a3b8;
+        }
       `}</style>
     </div>
+  )
+}
+
+function DateCell({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const selected = parseDateToDate(value)
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" className="h-7 justify-start px-2 text-[11px] font-normal">
+          <CalendarIcon className="mr-1 h-3.5 w-3.5" />
+          <span className="truncate">{value || "날짜"}</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar
+          mode="single"
+          selected={selected}
+          onSelect={(date) => {
+            if (!date) return
+            onChange(formatDateKorean(date))
+          }}
+          initialFocus
+        />
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function parseOwners(value: string): string[] {
+  return parseListValue(value)
+}
+
+function joinOwners(values: string[]): string {
+  return joinListValue(values)
+}
+
+function parseDepartments(value: string): string[] {
+  return parseListValue(value)
+}
+
+function joinDepartments(values: string[]): string {
+  return joinListValue(values)
+}
+
+function DepartmentMultiSelect({
+  value,
+  options,
+  onChange,
+}: {
+  value: string
+  options: string[]
+  onChange: (value: string) => void
+}) {
+  const selected = parseDepartments(value)
+  const allOptions = Array.from(new Set([...options, ...selected])).filter(Boolean)
+
+  const toggleDepartment = (department: string) => {
+    const selectedSet = new Set(selected)
+    if (selectedSet.has(department)) selectedSet.delete(department)
+    else selectedSet.add(department)
+    onChange(joinDepartments(Array.from(selectedSet)))
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" className="h-7 w-full justify-between px-2 text-[11px] font-normal">
+          <span className="truncate">{selected.length > 0 ? selected.join(", ") : "부서 선택"}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[240px] p-2">
+        <div className="max-h-44 space-y-1 overflow-auto pr-1">
+          {allOptions.map((department) => {
+            const checked = selected.includes(department)
+            return (
+              <button
+                key={department}
+                type="button"
+                onClick={() => toggleDepartment(department)}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
+              >
+                <input type="checkbox" readOnly checked={checked} className="h-3.5 w-3.5" />
+                <span className="truncate">{department}</span>
+              </button>
+            )
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function OwnerMultiSelect({
+  value,
+  options,
+  onChange,
+}: {
+  value: string
+  options: string[]
+  onChange: (value: string) => void
+}) {
+  const [newOwner, setNewOwner] = useState("")
+  const selected = parseOwners(value)
+  const allOptions = Array.from(new Set([...options, ...selected])).filter(Boolean)
+
+  const toggleOwner = (owner: string) => {
+    const selectedSet = new Set(selected)
+    if (selectedSet.has(owner)) selectedSet.delete(owner)
+    else selectedSet.add(owner)
+    onChange(joinOwners(Array.from(selectedSet)))
+  }
+
+  const addCustomOwner = () => {
+    const trimmed = newOwner.trim()
+    if (!trimmed) return
+    onChange(joinOwners([...selected, trimmed]))
+    setNewOwner("")
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" className="h-7 w-full justify-between px-2 text-[11px] font-normal">
+          <span className="truncate">{selected.length > 0 ? selected.join(", ") : "담당자 선택"}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[280px] p-2">
+        <div className="mb-2 flex gap-1.5">
+          <input
+            value={newOwner}
+            onChange={(e) => setNewOwner(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                addCustomOwner()
+              }
+            }}
+            placeholder="직접 입력"
+            className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs"
+          />
+          <Button type="button" size="sm" className="h-8 px-2 text-xs" onClick={addCustomOwner}>
+            추가
+          </Button>
+        </div>
+        <div className="max-h-44 space-y-1 overflow-auto pr-1">
+          {allOptions.map((owner) => {
+            const checked = selected.includes(owner)
+            return (
+              <button
+                key={owner}
+                type="button"
+                onClick={() => toggleOwner(owner)}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
+              >
+                <input type="checkbox" readOnly checked={checked} className="h-3.5 w-3.5" />
+                <span className="truncate">{owner}</span>
+              </button>
+            )
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
