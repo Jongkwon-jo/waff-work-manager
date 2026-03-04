@@ -1,0 +1,49 @@
+﻿# Work Manager 대화/작업 기록
+저장일시: 2026-03-04 (Asia/Seoul)
+
+## 주요 요청 및 반영 이력 요약
+1. DEPARTMENT 다중 선택, 패널/내부 너비 동적 조정
+2. Man-day 너비 축소, 상세 패널 너비 확장
+3. 날짜 포맷 `MM월 DD일` 적용
+4. 프로젝트명 오른쪽 하위업무/업무 추가 기능 및 즉시 간트 반영
+5. 상위/하위 업무 추가 로직 분리 및 의미 정리
+6. Firestore 저장/반영 이슈 수정
+7. 담당자 입력을 드롭다운 방식으로 통일 (추가/수정)
+8. 기본 뷰를 간트로, 메뉴 순서 `간트/목록/카드`로 조정
+9. 상태 배지/간트 막대 색상 통일성 개선
+10. 간트 정렬 이동 고정, 달력 범위 이전3/이후3개월, 한글 월 표기/현재월 포커스
+11. 전체 접기/펼치기 토글 및 아이콘 반영
+12. 요일 한글 한 글자, 오늘 날짜 노란색, 달력 격자 강화
+13. 하위업무 있는 부모업무는 상세/일정 바 숨김 처리, 부모 Bold/자식 Normal
+14. CSV/엑셀 업로드용 스크립트 관련 대응
+15. 업무 추가 기본 시작/종료일 현재일 설정
+16. 토글 상태 고정(새로고침/세션 간 유지)
+17. Category 컬럼 추가(Department 왼쪽), `중요` 시 업무명 빨간색
+18. Category-Department 간격 조정, Category 옵션 `상시` 추가
+19. 셀 높이/정렬 통일(h-8 등) 및 롤백/재조정 반복 반영
+20. 하위업무 수기 입력 Firestore 반영 보강(필드명 유연 파싱)
+21. 완료 업무 글자 연하게 처리 (부모/자식 조건 분리)
+22. 부모 업무명 우측 `+/-`로 완료 하위업무 펼침/접기
+23. 간트 성능 개선: 텍스트폭 캐시, deferred 검색, 맵 기반 조회 최적화
+24. virtualization 적용/롤백/재적용 반복
+25. 완료 기본 숨김(필터 all), 단 하위업무 있는 완료 부모는 표시
+26. Project & Task Details 영역과 bar 겹침 완화(z-index/overflow)
+27. 스크롤 버벅임 완화(rAF 기반 scroll state 업데이트)
+28. 프로젝트명 우측 버튼 정렬 고정: `업무 추가`를 정렬 아이콘 앞에 고정 배치
+
+## 현재 상태 체크 포인트
+- 간트 virtualization: 적용됨
+- 완료 기본 숨김: 적용됨
+- 하위업무 있는 완료 부모 표시: 적용됨
+- 상위업무 `+/-` 완료 하위업무 토글: 적용됨
+- 프로젝트 행 우측 `업무 추가` 버튼 고정 정렬: 적용됨
+
+## 관련 핵심 파일
+- components/gantt-view.tsx
+- components/project-list.tsx
+- components/project-card-view.tsx
+- components/add-task-dialog.tsx
+- components/edit-task-dialog.tsx
+- components/status-badge.tsx
+- lib/firestore-service.ts
+- app/page.tsx

@@ -841,23 +841,23 @@ export function GanttView({
                         )}
                       </button>
                       <ProjectTypeBadge type={project.type} />
-                      <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                      <div className="flex min-w-0 flex-1 items-center gap-2">
                         <span className="truncate text-xs font-bold text-card-foreground">{project.name}</span>
-                        <AddTaskDialog
-                          projectId={project.id}
-                          onAddTask={handleAddProjectLevelTask}
-                          trigger={
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-6 shrink-0 px-2 text-[10px]"
-                            >
-                              업무 추가
-                            </Button>
-                          }
-                        />
-                        <div className="flex shrink-0 items-center gap-1">
+                        <div className="ml-auto flex shrink-0 items-center gap-1">
+                          <AddTaskDialog
+                            projectId={project.id}
+                            onAddTask={handleAddProjectLevelTask}
+                            trigger={
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-6 shrink-0 px-2 text-[10px]"
+                              >
+                                업무 추가
+                              </Button>
+                            }
+                          />
                           <Button
                             type="button"
                             variant="ghost"
