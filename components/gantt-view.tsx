@@ -1,12 +1,13 @@
 ﻿"use client"
 
 import { useMemo, useState, useRef, useEffect } from "react"
-import type { Project, Task, TaskStatus } from "@/lib/data"
+import type { Project, Task, TaskStatus, TaskCategory } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
-import { ProjectTypeBadge, StatusBadge } from "@/components/status-badge"
+import { ProjectTypeBadge } from "@/components/status-badge"
 import { EditTaskDialog } from "./edit-task-dialog"
 import { AddTaskDialog } from "./add-task-dialog"
 import { Button } from "./ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover"
 import { Calendar } from "./ui/calendar"
 import {
@@ -144,6 +145,7 @@ export function GanttView({
   onMoveTask,
 }: GanttViewProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const timelineScrollRef = useRef<HTMLDivElement>(null)
   const scrollRafRef = useRef<number | null>(null)
   const pendingScrollTopRef = useRef(0)
 
@@ -162,6 +164,7 @@ export function GanttView({
   const [viewportHeight, setViewportHeight] = useState(700)
   const [isDetailColumnsOpen, setIsDetailColumnsOpen] = useState(false)
   const [recentlyAddedTaskId, setRecentlyAddedTaskId] = useState<string | null>(null)
+  const [timelineScrollLeft, setTimelineScrollLeft] = useState(0)
 
   const allProjectIds = useMemo(() => projects.map((project) => project.id), [projects])
   const allCollapsibleTaskIds = useMemo(() => {
@@ -388,6 +391,17 @@ export function GanttView({
       Math.max(LEFT_PANEL_MIN_WIDTH, Math.ceil(maxLeftTextWidth + 170)),
     )
 
+    const maxCategoryTextWidth = Math.max(
+      getMeasuredTextWidth("Category", font),
+      ...projects
+        .flatMap((project) => {
+          const flattenCategories = (tasks: Task[]): string[] =>
+            tasks.flatMap((task) => [task.category || "", ...flattenCategories(task.subTasks || [])])
+          return flattenCategories(project.tasks)
+        })
+        .map((text) => getMeasuredTextWidth(text, font)),
+    )
+
     const maxDepartmentTextWidth = Math.max(
       getMeasuredTextWidth("Department", font),
       ...departmentOptions.map((text) => getMeasuredTextWidth(text, font)),
@@ -408,7 +422,8 @@ export function GanttView({
       }).map((text) => getMeasuredTextWidth(text, font)),
     )
 
-    const departmentColumnWidth = Math.max(120, Math.min(280, Math.ceil(maxDepartmentTextWidth + 54)))
+    const categoryColumnWidth = Math.max(68, Math.min(96, Math.ceil(maxCategoryTextWidth + 24)))
+    const departmentColumnWidth = Math.max(108, Math.min(240, Math.ceil(maxDepartmentTextWidth + 42)))
     const ownerColumnWidth = Math.max(190, Math.min(380, Math.ceil(maxOwnerTextWidth + 54)))
     const startColumnWidth = Math.max(110, Math.ceil(getMeasuredTextWidth("12월 30일", font) + 48))
     const endColumnWidth = Math.max(110, Math.ceil(getMeasuredTextWidth("12월 30일", font) + 48))
@@ -418,14 +433,20 @@ export function GanttView({
       DETAIL_PANEL_MAX_WIDTH,
       Math.max(
         DETAIL_PANEL_MIN_WIDTH,
-        departmentColumnWidth + ownerColumnWidth + startColumnWidth + endColumnWidth + manDayColumnWidth + 40,
+        categoryColumnWidth +
+          departmentColumnWidth +
+          ownerColumnWidth +
+          startColumnWidth +
+          endColumnWidth +
+          manDayColumnWidth +
+          40,
       ),
     )
 
     return {
       leftPanelWidth: computedLeftPanelWidth,
       detailPanelWidth: computedDetailPanelWidth,
-      detailGridTemplate: `${departmentColumnWidth}px ${ownerColumnWidth}px ${startColumnWidth}px ${endColumnWidth}px ${manDayColumnWidth}px`,
+      detailGridTemplate: `${categoryColumnWidth}px ${departmentColumnWidth}px ${ownerColumnWidth}px ${startColumnWidth}px ${endColumnWidth}px ${manDayColumnWidth}px`,
     }
   }, [projects, departmentOptions, ownerOptions])
 
@@ -496,8 +517,8 @@ export function GanttView({
   }
 
   useEffect(() => {
-    const container = scrollContainerRef.current
-    if (!container) return
+    const timelineScroller = timelineScrollRef.current
+    if (!timelineScroller) return
 
     const daysBeforeCurrentMonth = months
       .slice(0, 3)
@@ -507,7 +528,8 @@ export function GanttView({
     const targetScrollLeft = Math.max(0, currentMonthStartX - CELL_WIDTH * 2)
 
     requestAnimationFrame(() => {
-      container.scrollLeft = targetScrollLeft
+      timelineScroller.scrollLeft = targetScrollLeft
+      setTimelineScrollLeft(targetScrollLeft)
     })
   }, [months])
 
@@ -726,11 +748,11 @@ export function GanttView({
 
   return (
     <div className="rounded-lg border border-border bg-card shadow-sm overflow-hidden flex flex-col h-[65vh]">
-      <div ref={scrollContainerRef} className="flex-1 overflow-auto custom-scrollbar">
-        <div className="relative min-w-fit flex flex-col">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
+        <div className="relative min-w-fit flex flex-col isolate">
           <div className="sticky top-0 z-40 flex bg-card border-b border-border shadow-sm">
             <div
-              className="sticky left-0 z-50 shrink-0 border-r border-border bg-card px-4 py-3 flex items-end"
+              className="sticky left-0 z-[80] shrink-0 border-r border-border bg-card px-4 py-3 flex items-end overflow-hidden"
               style={{ width: leftPanelWidth }}
             >
               <div className="flex w-full items-center justify-between gap-2">
@@ -764,9 +786,10 @@ export function GanttView({
                 style={{ left: leftPanelWidth, width: detailPanelWidth }}
               >
                 <div
-                  className="grid gap-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
+                  className="grid gap-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
                   style={{ gridTemplateColumns: detailGridTemplate }}
                 >
+                  <span>Category</span>
                   <span>Department</span>
                   <span>Owner</span>
                   <span>Start</span>
@@ -776,41 +799,51 @@ export function GanttView({
               </div>
             )}
 
-            <div className="shrink-0">
-              <div className="flex border-b border-border bg-muted/20">
-                {months.map((m) => (
-                  <div
-                    key={`${m.year}-${m.month}`}
-                    style={{ width: getDaysInMonth(m.year, m.month) * CELL_WIDTH }}
-                    className="border-r border-border px-2 py-2 text-center text-[10px] font-bold text-card-foreground"
-                  >
-                    {m.label}
-                  </div>
-                ))}
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <div className="border-b border-border bg-muted/20">
+                <div
+                  className="flex will-change-transform"
+                  style={{ width: timelineWidth, transform: `translateX(-${timelineScrollLeft}px)` }}
+                >
+                  {months.map((m) => (
+                    <div
+                      key={`${m.year}-${m.month}`}
+                      style={{ width: getDaysInMonth(m.year, m.month) * CELL_WIDTH }}
+                      className="border-r border-border px-2 py-2 text-center text-[10px] font-bold text-card-foreground"
+                    >
+                      {m.label}
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              <div className="flex bg-card">
-                {allDays.map((d, i) => (
-                  <div
-                    key={i}
-                    style={{ width: CELL_WIDTH }}
-                    className={cn(
-                      "shrink-0 border-r border-border/40 py-1.5 text-center",
-                      d.isWeekend && "bg-muted/50",
-                      d.isToday && "bg-yellow-100",
-                    )}
-                  >
-                    <div className="text-[10px] leading-tight font-medium text-muted-foreground">{d.label}</div>
+              <div className="bg-card">
+                <div
+                  className="flex will-change-transform"
+                  style={{ width: timelineWidth, transform: `translateX(-${timelineScrollLeft}px)` }}
+                >
+                  {allDays.map((d, i) => (
                     <div
+                      key={i}
+                      style={{ width: CELL_WIDTH }}
                       className={cn(
-                        "text-[8px] leading-tight font-bold",
-                        d.isToday ? "text-yellow-700" : d.isWeekend ? "text-rose-400" : "text-muted-foreground/60",
+                        "shrink-0 border-r border-border/40 py-1.5 text-center",
+                        d.isWeekend && "bg-muted/50",
+                        d.isToday && "bg-yellow-100",
                       )}
                     >
-                      {d.dow}
+                      <div className="text-[10px] leading-tight font-medium text-muted-foreground">{d.label}</div>
+                      <div
+                        className={cn(
+                          "text-[8px] leading-tight font-bold",
+                          d.isToday ? "text-yellow-700" : d.isWeekend ? "text-rose-400" : "text-muted-foreground/60",
+                        )}
+                      >
+                        {d.dow}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -823,9 +856,9 @@ export function GanttView({
 
               return (
                 <div key={project.id}>
-                  <div className="flex border-b border-border bg-muted/40 sticky top-[55px] z-30">
+                  <div className="flex min-h-9 border-b border-border bg-muted/40 sticky top-[70px] z-30">
                     <div
-                      className="sticky left-0 z-30 flex shrink-0 items-center gap-2 border-r border-border bg-muted/40 px-4 py-1.5 shadow-[2px_0_5px_rgba(0,0,0,0.05)]"
+                      className="sticky left-0 z-30 flex shrink-0 items-center gap-2 border-r border-border bg-muted/40 px-4 py-1.5 shadow-[2px_0_5px_rgba(0,0,0,0.05)] overflow-hidden"
                       style={{ width: leftPanelWidth }}
                     >
                       <button
@@ -887,7 +920,7 @@ export function GanttView({
                       />
                     )}
 
-                    <div style={{ width: timelineWidth }} className="shrink-0 h-7" />
+                    <div className="min-w-0 flex-1 h-7" />
                   </div>
 
                   {!isProjectCollapsed && (
@@ -946,7 +979,7 @@ export function GanttView({
                                     <span
                                       className={cn(
                                         "truncate text-xs font-bold",
-                                        "text-foreground",
+                                        task.category === "중요" ? "text-red-600" : "text-foreground",
                                       )}
                                       title={task.task}
                                     >
@@ -954,26 +987,35 @@ export function GanttView({
                                     </span>
                                   </div>
                                 ) : (
-                                  <EditTaskDialog
-                                    task={task}
-                                    onEditTask={onEditTask}
-                                    trigger={
-                                      <button className="flex items-center gap-2 text-left hover:text-primary transition-colors min-w-0 flex-1 overflow-hidden">
-                                        <div className="shrink-0 w-[60px] flex justify-center">
-                                          <StatusBadge status={task.status} />
-                                        </div>
-                                        <span
-                                          className={cn(
-                                            "truncate text-xs font-normal",
-                                            task.status === "완료" ? "text-muted-foreground/50" : "text-foreground",
-                                          )}
-                                          title={task.task}
-                                        >
-                                          {task.task}
-                                        </span>
-                                      </button>
-                                    }
-                                  />
+                                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                                    <EditTaskDialog
+                                      task={task}
+                                      onEditTask={onEditTask}
+                                      trigger={
+                                        <button className="min-w-0 flex-1 truncate text-left text-xs font-normal transition-colors hover:text-primary">
+                                          <span
+                                            className={cn(
+                                              "truncate",
+                                              task.category === "중요"
+                                                ? "text-red-600"
+                                                : task.status === "완료"
+                                                  ? "text-muted-foreground/50"
+                                                  : "text-foreground",
+                                            )}
+                                            title={task.task}
+                                          >
+                                            {task.task}
+                                          </span>
+                                        </button>
+                                      }
+                                    />
+                                    <div className="w-[66px] shrink-0">
+                                      <StatusInlineSelect
+                                        value={task.status}
+                                        onChange={(value) => updateTaskInline(task, { status: value })}
+                                      />
+                                    </div>
+                                  </div>
                                 )}
 
                                 <AddTaskDialog
@@ -1027,14 +1069,19 @@ export function GanttView({
 
                             {showDetailColumns && (
                               <div
-                                className="sticky z-20 shrink-0 border-r border-border px-3 py-1 shadow-[2px_0_5px_rgba(0,0,0,0.03)] bg-background group-hover/task:bg-accent/10"
+                                className="sticky z-20 shrink-0 border-r border-border px-3 py-1 shadow-[2px_0_5px_rgba(0,0,0,0.03)] bg-background group-hover/task:bg-accent/10 overflow-hidden"
                                 style={{ left: leftPanelWidth, width: detailPanelWidth }}
                               >
                                 {!isParentTask ? (
                                   <div
-                                    className="grid gap-2 text-[11px] text-foreground"
+                                    className="grid gap-1 text-[11px] text-foreground"
                                     style={{ gridTemplateColumns: detailGridTemplate }}
                                   >
+                                    <CategorySingleSelect
+                                      value={task.category}
+                                      onChange={(value) => updateTaskInline(task, { category: value })}
+                                    />
+
                                     <DepartmentMultiSelect
                                       value={task.department || ""}
                                       options={departmentValues}
@@ -1075,46 +1122,57 @@ export function GanttView({
                               </div>
                             )}
 
-                            <div style={{ width: timelineWidth }} className="relative z-0 shrink-0 h-9 overflow-hidden">
-                              {allDays.map((d, i) => (
-                                <div
-                                  key={i}
-                                  className="absolute inset-y-0 pointer-events-none border-r border-border/25"
-                                  style={{ left: i * CELL_WIDTH, width: CELL_WIDTH }}
-                                >
-                                  {d.isWeekend && <div className="absolute inset-0 bg-muted/15" />}
-                                  {d.isToday && (
-                                    <div className="absolute inset-0 bg-yellow-400/10 ring-1 ring-yellow-400/30 z-10" />
-                                  )}
-                                </div>
-                              ))}
-
-                              {bar && !isParentTask && (
-                                <div
-                                  id={`bar-${task.id}`}
-                                  className={cn(
-                                    "absolute top-1/2 -translate-y-1/2 rounded-md h-6 shadow-sm transition-all select-none cursor-grab active:cursor-grabbing",
-                                    barStyle.barClass,
-                                    dragInfo?.taskId === task.id
-                                      ? "opacity-100 scale-y-110 z-10 shadow-md ring-2 ring-white/50"
-                                      : "opacity-90 hover:opacity-100",
-                                  )}
-                                  style={{ left: bar.left + 2, width: bar.width - 4 }}
-                                  onMouseDown={(e) => handleMouseDown(e, task, "move")}
-                                >
+                            <div className="relative z-0 min-w-0 flex-1 h-9 overflow-hidden">
+                              <div
+                                className="relative h-full will-change-transform"
+                                style={{ width: timelineWidth, transform: `translateX(-${timelineScrollLeft}px)` }}
+                              >
+                                {allDays.map((d, i) => (
                                   <div
-                                    className="absolute left-0 top-0 bottom-0 w-3 cursor-w-resize hover:bg-black/10 rounded-l-md z-10"
-                                    onMouseDown={(e) => handleMouseDown(e, task, "resize-left")}
-                                  />
-                                  <div
-                                    className="absolute right-0 top-0 bottom-0 w-3 cursor-e-resize hover:bg-black/10 rounded-r-md z-10"
-                                    onMouseDown={(e) => handleMouseDown(e, task, "resize-right")}
-                                  />
-                                  <div className={cn("px-3 text-[10px] font-bold truncate h-full flex items-center pointer-events-none", barStyle.textClass)}>
-                                    {task.task}
+                                    key={i}
+                                    className="absolute inset-y-0 pointer-events-none border-r border-border/25"
+                                    style={{ left: i * CELL_WIDTH, width: CELL_WIDTH }}
+                                  >
+                                    {d.isWeekend && <div className="absolute inset-0 bg-muted/15" />}
+                                    {d.isToday && (
+                                      <div className="absolute inset-0 bg-yellow-400/10 ring-1 ring-yellow-400/30 z-10" />
+                                    )}
                                   </div>
-                                </div>
-                              )}
+                                ))}
+
+                                {bar && !isParentTask && (
+                                  <div
+                                    id={`bar-${task.id}`}
+                                    title={`${task.task} (${task.startDate} ~ ${task.endDate})`}
+                                    className={cn(
+                                      "absolute top-1/2 -translate-y-1/2 rounded-md h-6 shadow-sm transition-all select-none cursor-grab active:cursor-grabbing",
+                                      barStyle.barClass,
+                                      dragInfo?.taskId === task.id
+                                        ? "opacity-100 scale-y-110 z-10 shadow-md ring-2 ring-white/50"
+                                        : "opacity-90 hover:opacity-100",
+                                    )}
+                                    style={{ left: bar.left + 2, width: bar.width - 4 }}
+                                    onMouseDown={(e) => handleMouseDown(e, task, "move")}
+                                  >
+                                    <div
+                                      className="absolute left-0 top-0 bottom-0 w-3 cursor-w-resize hover:bg-black/10 rounded-l-md z-10"
+                                      onMouseDown={(e) => handleMouseDown(e, task, "resize-left")}
+                                    />
+                                    <div
+                                      className="absolute right-0 top-0 bottom-0 w-3 cursor-e-resize hover:bg-black/10 rounded-r-md z-10"
+                                      onMouseDown={(e) => handleMouseDown(e, task, "resize-right")}
+                                    />
+                                    <div
+                                      className={cn(
+                                        "px-3 text-[10px] font-bold truncate h-full flex items-center pointer-events-none",
+                                        barStyle.textClass,
+                                      )}
+                                    >
+                                      {task.task}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1128,6 +1186,16 @@ export function GanttView({
             })}
             {virtualizedBody.bottomSpacer > 0 && <div style={{ height: virtualizedBody.bottomSpacer }} />}
           </div>
+        </div>
+      </div>
+
+      <div className="border-t border-border bg-card/80 px-3 py-1">
+        <div
+          ref={timelineScrollRef}
+          className="overflow-x-auto overflow-y-hidden custom-scrollbar"
+          onScroll={(e) => setTimelineScrollLeft((e.currentTarget as HTMLDivElement).scrollLeft)}
+        >
+          <div style={{ width: timelineWidth, height: 1 }} />
         </div>
       </div>
 
@@ -1161,7 +1229,7 @@ function DateCell({ value, onChange }: { value: string; onChange: (value: string
       <PopoverTrigger asChild>
         <Button variant="outline" className="h-7 justify-start px-2 text-[11px] font-normal">
           <CalendarIcon className="mr-1 h-3.5 w-3.5" />
-          <span className="truncate">{value || "?좎쭨"}</span>
+          <span className="truncate">{value || "날짜 선택"}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align="start">
@@ -1176,6 +1244,67 @@ function DateCell({ value, onChange }: { value: string; onChange: (value: string
         />
       </PopoverContent>
     </Popover>
+  )
+}
+
+function CategorySingleSelect({
+  value,
+  onChange,
+}: {
+  value: TaskCategory
+  onChange: (value: TaskCategory) => void
+}) {
+  return (
+    <Select value={value} onValueChange={(next) => onChange(next as TaskCategory)}>
+      <SelectTrigger className="h-7 w-full justify-between px-2 text-[11px] font-normal">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="일반">일반</SelectItem>
+        <SelectItem value="중요">중요</SelectItem>
+        <SelectItem value="정기">정기</SelectItem>
+        <SelectItem value="상시">상시</SelectItem>
+      </SelectContent>
+    </Select>
+  )
+}
+
+function StatusInlineSelect({
+  value,
+  onChange,
+}: {
+  value: TaskStatus
+  onChange: (value: TaskStatus) => void
+}) {
+  const statusClass =
+    value === "완료"
+      ? "bg-slate-100 text-slate-700"
+      : value === "진행"
+        ? "bg-blue-100 text-blue-700"
+        : value === "대기"
+          ? "bg-gray-100 text-gray-700"
+          : value === "보류"
+            ? "bg-yellow-100 text-yellow-800"
+            : "bg-rose-100 text-rose-700"
+
+  return (
+    <Select value={value} onValueChange={(next) => onChange(next as TaskStatus)}>
+      <SelectTrigger
+        className={cn(
+          "!h-5 w-10 justify-center rounded-full border-0 px-1.5 text-[10px] font-bold shadow-none ring-0 transition-colors [&>svg]:hidden",
+          statusClass,
+        )}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="진행">진행</SelectItem>
+        <SelectItem value="대기">대기</SelectItem>
+        <SelectItem value="보류">보류</SelectItem>
+        <SelectItem value="미정">미정</SelectItem>
+        <SelectItem value="완료">완료</SelectItem>
+      </SelectContent>
+    </Select>
   )
 }
 
@@ -1218,7 +1347,7 @@ function DepartmentMultiSelect({
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" className="h-7 w-full justify-between px-2 text-[11px] font-normal">
-          <span className="truncate">{selected.length > 0 ? selected.join(", ") : "遺???좏깮"}</span>
+          <span className="truncate">{selected.length > 0 ? selected.join(", ") : "부서 선택"}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </Button>
       </PopoverTrigger>
@@ -1275,7 +1404,7 @@ function OwnerMultiSelect({
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" className="h-7 w-full justify-between px-2 text-[11px] font-normal">
-          <span className="truncate">{selected.length > 0 ? selected.join(", ") : "?대떦???좏깮"}</span>
+          <span className="truncate">{selected.length > 0 ? selected.join(", ") : "담당자 선택"}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </Button>
       </PopoverTrigger>
@@ -1290,11 +1419,11 @@ function OwnerMultiSelect({
                 addCustomOwner()
               }
             }}
-            placeholder="吏곸젒 ?낅젰"
+            placeholder="직접 입력"
             className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs"
           />
           <Button type="button" size="sm" className="h-8 px-2 text-xs" onClick={addCustomOwner}>
-            異붽?
+            추가
           </Button>
         </div>
         <div className="max-h-44 space-y-1 overflow-auto pr-1">
