@@ -5,9 +5,12 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
   writeBatch,
@@ -16,6 +19,31 @@ import type { Project, Task } from "./data"
 
 const PROJECTS_COLLECTION = "projects"
 const TASKS_COLLECTION = "tasks"
+const HISTORY_COLLECTION = "history"
+
+type HistoryEntityType = "project" | "task" | "batch" | "project_bundle"
+type HistoryActionType = "create" | "update" | "delete" | "batch_update" | "project_delete"
+
+type HistoryBatchItem = {
+  entityType: "project" | "task"
+  entityId: string
+  before?: Record<string, unknown>
+  after?: Record<string, unknown>
+}
+
+export interface ChangeHistoryEntry {
+  id: string
+  entityType: HistoryEntityType
+  action: HistoryActionType
+  entityId?: string
+  projectId?: string
+  before?: Record<string, unknown>
+  after?: Record<string, unknown>
+  batch?: HistoryBatchItem[]
+  createdAt?: Date
+}
+
+export type HistoryEntryInput = Omit<ChangeHistoryEntry, "id" | "createdAt">
 
 function toStringOrEmpty(value: unknown): string {
   if (typeof value === "string") return value.trim()
@@ -37,6 +65,10 @@ function toNumberOr(value: unknown, fallback: number): number {
   return fallback
 }
 
+function compactObject<T extends Record<string, unknown>>(obj: T): T {
+  return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T
+}
+
 function todayLabel(): string {
   const now = new Date()
   const mm = String(now.getMonth() + 1).padStart(2, "0")
@@ -53,6 +85,7 @@ function normalizeTask(raw: any): Task {
 
   return {
     id: toStringOrEmpty(raw?.id),
+    depth: toNumberOr(raw?.depth, 0),
     projectId:
       toStringOrEmpty(raw?.projectId) ||
       toStringOrEmpty(raw?.project_id) ||
@@ -226,4 +259,88 @@ export async function updateTaskOrdersInDB(taskIds: string[]): Promise<void> {
     batch.update(doc(db, TASKS_COLLECTION, id), { displayOrder: index })
   })
   await batch.commit()
+}
+
+export async function addHistoryEntry(entry: HistoryEntryInput): Promise<string> {
+  const payload = compactObject({
+    ...entry,
+    createdAt: serverTimestamp(),
+  })
+  const docRef = await addDoc(collection(db, HISTORY_COLLECTION), payload)
+  return docRef.id
+}
+
+export async function fetchHistoryEntries(limitCount = 30): Promise<ChangeHistoryEntry[]> {
+  const historyQ = query(collection(db, HISTORY_COLLECTION), orderBy("createdAt", "desc"), limit(limitCount))
+  const snapshot = await getDocs(historyQ)
+
+  return snapshot.docs.map((docSnap) => {
+    const raw = docSnap.data() as any
+    return {
+      id: docSnap.id,
+      entityType: (toStringOrEmpty(raw?.entityType) as HistoryEntityType) || "batch",
+      action: (toStringOrEmpty(raw?.action) as HistoryActionType) || "batch_update",
+      entityId: toOptionalString(raw?.entityId),
+      projectId: toOptionalString(raw?.projectId),
+      before: (raw?.before as Record<string, unknown> | undefined) || undefined,
+      after: (raw?.after as Record<string, unknown> | undefined) || undefined,
+      batch: (raw?.batch as HistoryBatchItem[] | undefined) || undefined,
+      createdAt: raw?.createdAt?.toDate?.() || undefined,
+    }
+  })
+}
+
+function getCollectionForEntity(entityType: "project" | "task") {
+  return entityType === "project" ? PROJECTS_COLLECTION : TASKS_COLLECTION
+}
+
+async function rollbackSingle(entry: ChangeHistoryEntry): Promise<void> {
+  const entityType = entry.entityType === "project" ? "project" : "task"
+  if (!entry.entityId) return
+
+  const targetRef = doc(db, getCollectionForEntity(entityType), entry.entityId)
+  if (entry.action === "create") {
+    await deleteDoc(targetRef)
+    return
+  }
+  if (entry.action === "delete" && entry.before) {
+    await setDoc(targetRef, compactObject(entry.before))
+    return
+  }
+  if (entry.action === "update" && entry.before) {
+    await updateDoc(targetRef, compactObject(entry.before) as any)
+  }
+}
+
+export async function rollbackHistoryEntry(entry: ChangeHistoryEntry): Promise<void> {
+  if (entry.entityType === "batch" && entry.action === "batch_update" && entry.batch?.length) {
+    await Promise.all(
+      entry.batch.map(async (item) => {
+        if (!item.before) return
+        const ref = doc(db, getCollectionForEntity(item.entityType), item.entityId)
+        await updateDoc(ref, compactObject(item.before) as any)
+      }),
+    )
+    return
+  }
+
+  if (entry.entityType === "project_bundle" && entry.action === "project_delete" && entry.before) {
+    const project = entry.before.project as { id?: string; data?: Record<string, unknown> } | undefined
+    const tasks = (entry.before.tasks as Array<{ id: string; data: Record<string, unknown> }> | undefined) || []
+    if (!project?.id || !project.data) return
+
+    await setDoc(doc(db, PROJECTS_COLLECTION, project.id), compactObject(project.data))
+    await Promise.all(
+      tasks.map((task) => setDoc(doc(db, TASKS_COLLECTION, task.id), compactObject(task.data))),
+    )
+    return
+  }
+
+  if (entry.entityType === "project" || entry.entityType === "task") {
+    await rollbackSingle(entry)
+  }
+}
+
+export async function deleteHistoryEntry(entryId: string): Promise<void> {
+  await deleteDoc(doc(db, HISTORY_COLLECTION, entryId))
 }

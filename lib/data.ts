@@ -4,6 +4,7 @@ export type TaskCategory = "일반" | "중요" | "정기" | "상시"
 export interface Task {
   id: string
   displayOrder?: number
+  depth?: number
   projectId: string
   parentId?: string
   task: string

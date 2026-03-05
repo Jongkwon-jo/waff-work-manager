@@ -13,13 +13,18 @@ import {
   deleteTaskFromDB,
   updateProjectOrdersInDB,
   updateTaskOrdersInDB,
+  addHistoryEntry,
+  fetchHistoryEntries,
+  rollbackHistoryEntry,
+  deleteHistoryEntry,
+  type ChangeHistoryEntry,
 } from "@/lib/firestore-service"
 import { StatusSummary } from "@/components/status-summary"
 import { FilterBar, ProjectSortType } from "@/components/filter-bar"
 import { ProjectList } from "@/components/project-list"
 import { GanttView } from "@/components/gantt-view"
 import { ProjectCardView } from "@/components/project-card-view"
-import { CalendarDays, Building2, List, BarChart3, LayoutGrid } from "lucide-react"
+import { CalendarDays, Building2, List, BarChart3, LayoutGrid, RotateCcw, History, ChevronDown, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
@@ -33,6 +38,10 @@ export default function DashboardPage() {
   const [personFilter, setPersonFilter] = useState("all")
   const [sortBy, setSortBy] = useState<ProjectSortType>("latest")
   const [viewMode, setViewMode] = useState<"list" | "gantt" | "card">("gantt")
+  const [historyEntries, setHistoryEntries] = useState<ChangeHistoryEntry[]>([])
+  const [isRollingBack, setIsRollingBack] = useState(false)
+  const [rollingBackEntryId, setRollingBackEntryId] = useState<string | null>(null)
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false)
   const deferredSearchQuery = useDeferredValue(searchQuery)
 
   useEffect(() => {
@@ -43,6 +52,110 @@ export default function DashboardPage() {
     })
     return () => unsubscribe()
   }, [])
+
+  const loadHistory = async () => {
+    try {
+      const history = await fetchHistoryEntries(20)
+      setHistoryEntries(history)
+    } catch (error) {
+      console.error("History fetch failed:", error)
+    }
+  }
+
+  useEffect(() => {
+    loadHistory()
+  }, [])
+
+  const compact = <T extends Record<string, unknown>>(obj: T): T =>
+    Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T
+
+  const serializeTaskData = (task: Task) =>
+    compact({
+      projectId: task.projectId,
+      parentId: task.parentId,
+      task: task.task,
+      category: task.category,
+      department: task.department,
+      person: task.person,
+      startDate: task.startDate,
+      endDate: task.endDate,
+      status: task.status,
+      manDays: task.manDays,
+      isSubTask: task.isSubTask,
+      depth: task.depth,
+      displayOrder: task.displayOrder,
+    })
+
+  const serializeProjectData = (project: Project) =>
+    compact({
+      name: project.name,
+      type: project.type,
+      period: project.period,
+      displayOrder: project.displayOrder,
+      createdAt: project.createdAt,
+    })
+
+  const flattenTaskRecords = (tasks: Task[]): Array<{ id: string; data: Record<string, unknown> }> =>
+    tasks.flatMap((task) => [{ id: task.id, data: serializeTaskData(task) }, ...flattenTaskRecords(task.subTasks || [])])
+
+  const recordHistory = async (entry: Omit<ChangeHistoryEntry, "id" | "createdAt">) => {
+    try {
+      await addHistoryEntry(entry)
+      await loadHistory()
+    } catch (error) {
+      console.error("History write failed:", error)
+    }
+  }
+
+  const getHistoryLabel = (entry: ChangeHistoryEntry) => {
+    if (entry.entityType === "project_bundle") return "프로젝트 삭제"
+    if (entry.entityType === "batch") return "업무 이동/정렬"
+    if (entry.entityType === "project" && entry.action === "create") return "프로젝트 추가"
+    if (entry.entityType === "project" && entry.action === "update") return "프로젝트 수정"
+    if (entry.entityType === "project" && entry.action === "delete") return "프로젝트 삭제"
+    if (entry.entityType === "task" && entry.action === "create") return "업무 추가"
+    if (entry.entityType === "task" && entry.action === "update") return "업무 수정"
+    if (entry.entityType === "task" && entry.action === "delete") return "업무 삭제"
+    return "변경"
+  }
+
+  const handleRollbackLatest = async () => {
+    const latest = historyEntries[0]
+    if (!latest) {
+      toast.info("롤백할 이력이 없습니다.")
+      return
+    }
+
+    if (!confirm(`최근 변경(${getHistoryLabel(latest)})을 롤백하시겠습니까?`)) return
+
+    setIsRollingBack(true)
+    try {
+      await rollbackHistoryEntry(latest)
+      await deleteHistoryEntry(latest.id)
+      await loadHistory()
+      toast.success("최근 변경을 롤백했습니다.")
+    } catch (error) {
+      toast.error("롤백 실패")
+    } finally {
+      setIsRollingBack(false)
+    }
+  }
+
+  const handleRollbackEntry = async (entry: ChangeHistoryEntry) => {
+    if (!confirm(`선택한 변경(${getHistoryLabel(entry)})을 롤백하시겠습니까?`)) return
+
+    setRollingBackEntryId(entry.id)
+    try {
+      await rollbackHistoryEntry(entry)
+      await deleteHistoryEntry(entry.id)
+      await loadHistory()
+      toast.success("선택한 변경을 롤백했습니다.")
+    } catch (error) {
+      toast.error("선택 이력 롤백 실패")
+    } finally {
+      setRollingBackEntryId(null)
+    }
+  }
 
   const flattenTasks = (tasks: Task[]): Task[] => {
     return tasks.reduce((acc, task) => {
@@ -77,6 +190,24 @@ export default function DashboardPage() {
         ...task,
         subTasks: task.subTasks ? removeTaskFromTree(task.subTasks, taskId) : task.subTasks,
       }))
+  }
+
+  const clampDepth = (depth: number) => Math.min(3, Math.max(0, Math.floor(depth)))
+
+  const findTaskDepth = (tasks: Task[], targetId: string, currentDepth = 0): number | undefined => {
+    for (const task of tasks) {
+      if (task.id === targetId) return clampDepth(currentDepth)
+      const nested = findTaskDepth(task.subTasks || [], targetId, currentDepth + 1)
+      if (typeof nested === "number") return nested
+    }
+    return undefined
+  }
+
+  const resolveNewTaskDepth = (projectTasks: Task[], parentId?: string): number => {
+    if (!parentId) return 0
+    const parentDepth = findTaskDepth(projectTasks, parentId, 0)
+    if (typeof parentDepth !== "number") return 0
+    return clampDepth(parentDepth + 1)
   }
 
   const moveArrayItem = <T,>(items: T[], fromIndex: number, toIndex: number): T[] => {
@@ -117,6 +248,135 @@ export default function DashboardPage() {
     }
 
     return { tasks, movedSiblingIds: null }
+  }
+
+  const withDisplayOrder = (tasks: Task[]) => tasks.map((task, index) => ({ ...task, displayOrder: index }))
+
+  const normalizeDepthSubtree = (task: Task, depth: number): Task => {
+    const clamped = clampDepth(depth)
+    const subTasks = (task.subTasks || []).map((child) => normalizeDepthSubtree(child, clamped + 1))
+    return {
+      ...task,
+      depth: clamped,
+      isSubTask: clamped > 0,
+      subTasks,
+    }
+  }
+
+  const removeTaskNode = (
+    tasks: Task[],
+    taskId: string,
+    depth = 0,
+  ): { tasks: Task[]; removed?: Task; removedDepth?: number } => {
+    const foundIndex = tasks.findIndex((task) => task.id === taskId)
+    if (foundIndex !== -1) {
+      const removed = tasks[foundIndex]
+      const next = withDisplayOrder(tasks.filter((_, index) => index !== foundIndex))
+      return { tasks: next, removed, removedDepth: depth }
+    }
+
+    for (let i = 0; i < tasks.length; i++) {
+      const current = tasks[i]
+      if (!current.subTasks || current.subTasks.length === 0) continue
+
+      const nested = removeTaskNode(current.subTasks, taskId, depth + 1)
+      if (nested.removed) {
+        const next = [...tasks]
+        next[i] = { ...current, subTasks: nested.tasks }
+        return { tasks: next, removed: nested.removed, removedDepth: nested.removedDepth }
+      }
+    }
+
+    return { tasks }
+  }
+
+  const insertTaskAtTarget = (
+    tasks: Task[],
+    taskToInsert: Task,
+    targetTaskId: string,
+    position: "before" | "after" | "child",
+    depth = 0,
+    parentId?: string,
+  ): { tasks: Task[]; inserted: boolean } => {
+    const targetIndex = tasks.findIndex((task) => task.id === targetTaskId)
+    if (targetIndex !== -1) {
+      if (position === "child") {
+        const target = tasks[targetIndex]
+        const normalized = normalizeDepthSubtree(
+          { ...taskToInsert, parentId: target.id, isSubTask: true },
+          depth + 1,
+        )
+        const nextChildren = withDisplayOrder([...(target.subTasks || []), normalized])
+        const next = [...tasks]
+        next[targetIndex] = { ...target, subTasks: nextChildren }
+        return { tasks: next, inserted: true }
+      }
+
+      const normalized = normalizeDepthSubtree(
+        { ...taskToInsert, parentId, isSubTask: Boolean(parentId) },
+        depth,
+      )
+      const insertIndex = position === "before" ? targetIndex : targetIndex + 1
+      const next = [...tasks]
+      next.splice(insertIndex, 0, normalized)
+      return { tasks: withDisplayOrder(next), inserted: true }
+    }
+
+    for (let i = 0; i < tasks.length; i++) {
+      const current = tasks[i]
+      if (!current.subTasks || current.subTasks.length === 0) continue
+
+      const nested = insertTaskAtTarget(current.subTasks, taskToInsert, targetTaskId, position, depth + 1, current.id)
+      if (nested.inserted) {
+        const next = [...tasks]
+        next[i] = { ...current, subTasks: nested.tasks }
+        return { tasks: next, inserted: true }
+      }
+    }
+
+    return { tasks, inserted: false }
+  }
+
+  const collectTaskMap = (tasks: Task[], map = new Map<string, Task>()) => {
+    tasks.forEach((task) => {
+      map.set(task.id, task)
+      collectTaskMap(task.subTasks || [], map)
+    })
+    return map
+  }
+
+  const reorderTaskInTree = (
+    tasks: Task[],
+    draggedTaskId: string,
+    targetTaskId: string,
+    position: "before" | "after" | "child",
+  ): { tasks: Task[]; taskUpdates: Array<{ id: string; updates: Partial<Task> }>; moved: boolean } => {
+    const removed = removeTaskNode(tasks, draggedTaskId, 0)
+    if (!removed.removed) return { tasks, taskUpdates: [], moved: false }
+
+    const inserted = insertTaskAtTarget(removed.tasks, removed.removed, targetTaskId, position, 0, undefined)
+    if (!inserted.inserted) return { tasks, taskUpdates: [], moved: false }
+
+    const prevMap = collectTaskMap(tasks)
+    const nextMap = collectTaskMap(inserted.tasks)
+    const taskUpdates: Array<{ id: string; updates: Partial<Task> }> = []
+
+    nextMap.forEach((nextTask, id) => {
+      const prevTask = prevMap.get(id)
+      if (!prevTask) return
+
+      const updates: Partial<Task> = {}
+      if ((prevTask.parentId || undefined) !== (nextTask.parentId || undefined)) updates.parentId = nextTask.parentId
+      if ((prevTask.depth ?? 0) !== (nextTask.depth ?? 0)) updates.depth = nextTask.depth
+      if ((prevTask.displayOrder ?? -1) !== (nextTask.displayOrder ?? -1)) updates.displayOrder = nextTask.displayOrder
+      if (Boolean(prevTask.isSubTask) !== Boolean(nextTask.isSubTask)) updates.isSubTask = nextTask.isSubTask
+
+      if (Object.keys(updates).length > 0) {
+        taskUpdates.push({ id, updates })
+      }
+    })
+
+    return { tasks: inserted.tasks, taskUpdates, moved: taskUpdates.length > 0 }
   }
 
   const allTasksFlat = useMemo(() => {
@@ -164,7 +424,13 @@ export default function DashboardPage() {
   const handleAddProject = async (newProject: Project) => {
     try {
       const { id, tasks, ...projectData } = newProject
-      await addProjectToDB(projectData)
+      const newProjectId = await addProjectToDB(projectData)
+      await recordHistory({
+        entityType: "project",
+        action: "create",
+        entityId: newProjectId,
+        after: serializeProjectData({ ...newProject, id: newProjectId }),
+      })
       toast.success("프로젝트가 추가되었습니다.")
     } catch (error) {
       toast.error("프로젝트 추가 실패")
@@ -173,8 +439,16 @@ export default function DashboardPage() {
 
   const handleEditProject = async (updatedProject: Project) => {
     try {
+      const beforeProject = projectList.find((p) => p.id === updatedProject.id)
       const { id, tasks, ...projectData } = updatedProject
       await updateProjectInDB(id, projectData)
+      await recordHistory({
+        entityType: "project",
+        action: "update",
+        entityId: id,
+        before: beforeProject ? serializeProjectData(beforeProject) : undefined,
+        after: serializeProjectData(updatedProject),
+      })
       toast.success("프로젝트 정보가 수정되었습니다.")
     } catch (error) {
       toast.error("프로젝트 수정 실패")
@@ -184,7 +458,20 @@ export default function DashboardPage() {
   const handleDeleteProject = async (projectId: string) => {
     try {
       if (confirm("프로젝트를 삭제하면 모든 하위 업무도 함께 삭제됩니다. 계속하시겠습니까?")) {
+        const beforeProject = projectList.find((p) => p.id === projectId)
+        const beforeTasks = beforeProject ? flattenTaskRecords(beforeProject.tasks) : []
         await deleteProjectFromDB(projectId)
+        if (beforeProject) {
+          await recordHistory({
+            entityType: "project_bundle",
+            action: "project_delete",
+            entityId: projectId,
+            before: {
+              project: { id: beforeProject.id, data: serializeProjectData(beforeProject) },
+              tasks: beforeTasks,
+            },
+          })
+        }
         toast.success("프로젝트가 삭제되었습니다.")
       }
     } catch (error) {
@@ -193,8 +480,11 @@ export default function DashboardPage() {
   }
 
   const handleAddTask = async (newTask: Task) => {
-    const optimisticTask: Task = {
+    const targetProject = projectList.find((project) => project.id === newTask.projectId)
+    const computedDepth = resolveNewTaskDepth(targetProject?.tasks || [], newTask.parentId)
+    const taskWithDepth: Task = {
       ...newTask,
+      depth: computedDepth,
       subTasks: newTask.subTasks || [],
     }
 
@@ -205,19 +495,19 @@ export default function DashboardPage() {
         if (newTask.parentId) {
           return {
             ...project,
-            tasks: insertTaskIntoTree(project.tasks, newTask.parentId, optimisticTask),
+            tasks: insertTaskIntoTree(project.tasks, newTask.parentId, taskWithDepth),
           }
         }
 
         return {
           ...project,
-          tasks: [optimisticTask, ...project.tasks],
+          tasks: [taskWithDepth, ...project.tasks],
         }
       }),
     )
 
     try {
-      const { id, subTasks, ...taskData } = newTask
+      const { id, subTasks, ...taskData } = taskWithDepth
       const sanitizedTaskData = { ...taskData } as Omit<Task, "id">
       if (sanitizedTaskData.parentId === undefined) {
         delete sanitizedTaskData.parentId
@@ -226,7 +516,14 @@ export default function DashboardPage() {
         delete sanitizedTaskData.isSubTask
       }
 
-      await addTaskToDB(sanitizedTaskData)
+      const createdTaskId = await addTaskToDB(sanitizedTaskData)
+      await recordHistory({
+        entityType: "task",
+        action: "create",
+        entityId: createdTaskId,
+        projectId: newTask.projectId,
+        after: sanitizedTaskData as unknown as Record<string, unknown>,
+      })
       toast.success("업무가 추가되었습니다.")
     } catch (error) {
       setProjectList((prev) =>
@@ -245,8 +542,17 @@ export default function DashboardPage() {
 
   const handleEditTask = async (updatedTask: Task) => {
     try {
+      const beforeTask = allTasksFlat.find((t) => t.id === updatedTask.id)
       const { id, subTasks, ...updates } = updatedTask
       await updateTaskInDB(id, updates)
+      await recordHistory({
+        entityType: "task",
+        action: "update",
+        entityId: id,
+        projectId: updatedTask.projectId,
+        before: beforeTask ? serializeTaskData(beforeTask) : undefined,
+        after: serializeTaskData(updatedTask),
+      })
       toast.success("업무가 수정되었습니다.")
     } catch (error) {
       toast.error("업무 수정 실패")
@@ -255,7 +561,17 @@ export default function DashboardPage() {
 
   const handleDeleteTask = async (taskId: string, projectId: string) => {
     try {
+      const beforeTask = allTasksFlat.find((t) => t.id === taskId)
       await deleteTaskFromDB(taskId)
+      if (beforeTask) {
+        await recordHistory({
+          entityType: "task",
+          action: "delete",
+          entityId: taskId,
+          projectId,
+          before: serializeTaskData(beforeTask),
+        })
+      }
       toast.success("업무가 삭제되었습니다.")
     } catch (error) {
       toast.error("업무 삭제 실패")
@@ -294,21 +610,81 @@ export default function DashboardPage() {
     taskId: string,
     direction: "up" | "down",
   ) => {
-    let movedSiblingIds: string[] | null = null
+    const beforeTaskMap = new Map(allTasksFlat.map((task) => [task.id, task]))
+    let movedSiblingIds: string[] = []
 
     setProjectList((prev) =>
       prev.map((project) => {
         if (project.id !== projectId) return project
         const moved = moveTaskInTree(project.tasks, taskId, direction)
-        movedSiblingIds = moved.movedSiblingIds
+        movedSiblingIds = moved.movedSiblingIds || []
         return { ...project, tasks: moved.tasks }
       }),
     )
 
-    if (!movedSiblingIds) return
+    if (movedSiblingIds.length === 0) return
 
     try {
       await updateTaskOrdersInDB(movedSiblingIds)
+      await recordHistory({
+        entityType: "batch",
+        action: "batch_update",
+        projectId,
+        batch: movedSiblingIds.map((id, index) => ({
+          entityType: "task",
+          entityId: id,
+          before: compact({ displayOrder: beforeTaskMap.get(id)?.displayOrder }),
+          after: compact({ displayOrder: index }),
+        })),
+      })
+    } catch (error) {
+      toast.error("업무 순서 저장 실패")
+    }
+  }
+
+  const handleReorderTask = async (
+    projectId: string,
+    draggedTaskId: string,
+    targetTaskId: string,
+    position: "before" | "after" | "child",
+  ) => {
+    if (!draggedTaskId || !targetTaskId || draggedTaskId === targetTaskId) return
+
+    let taskUpdates: Array<{ id: string; updates: Partial<Task> }> = []
+    let moved = false
+
+    setProjectList((prev) =>
+      prev.map((project) => {
+        if (project.id !== projectId) return project
+        const reordered = reorderTaskInTree(project.tasks, draggedTaskId, targetTaskId, position)
+        moved = reordered.moved
+        taskUpdates = reordered.taskUpdates
+        return reordered.moved ? { ...project, tasks: reordered.tasks } : project
+      }),
+    )
+
+    if (!moved || taskUpdates.length === 0) return
+
+    try {
+      await Promise.all(taskUpdates.map((item) => updateTaskInDB(item.id, item.updates)))
+      await recordHistory({
+        entityType: "batch",
+        action: "batch_update",
+        projectId,
+        batch: taskUpdates.map((item) => {
+          const beforeTask = allTasksFlat.find((task) => task.id === item.id)
+          const afterTask = {
+            ...beforeTask,
+            ...item.updates,
+          } as Task
+          return {
+            entityType: "task" as const,
+            entityId: item.id,
+            before: beforeTask ? serializeTaskData(beforeTask) : undefined,
+            after: serializeTaskData(afterTask),
+          }
+        }),
+      })
     } catch (error) {
       toast.error("업무 순서 저장 실패")
     }
@@ -384,6 +760,17 @@ export default function DashboardPage() {
               <CalendarDays className="h-4 w-4" />
               <span>{formattedDate}</span>
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-2 h-8 gap-1.5 px-2 text-[11px]"
+              onClick={handleRollbackLatest}
+              disabled={isRollingBack || historyEntries.length === 0}
+              title={historyEntries.length === 0 ? "롤백할 이력이 없습니다." : "가장 최근 변경을 되돌립니다."}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              최근 롤백
+            </Button>
           </div>
         </div>
       </header>
@@ -397,6 +784,56 @@ export default function DashboardPage() {
         ) : (
           <div className="space-y-4">
             <StatusSummary counts={counts} />
+            <div className="rounded-lg border border-border bg-card p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-semibold text-card-foreground">
+                  <History className="h-3.5 w-3.5" />
+                  변경 이력
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 px-2 text-[11px]"
+                  onClick={() => setIsHistoryOpen((prev) => !prev)}
+                >
+                  {isHistoryOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                  {isHistoryOpen ? "접기" : "펼치기"}
+                </Button>
+              </div>
+              {isHistoryOpen && (
+                <div className="mt-2">
+                  {historyEntries.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">아직 저장된 변경 이력이 없습니다.</p>
+                  ) : (
+                    <div className="max-h-28 space-y-1 overflow-auto pr-1">
+                      {historyEntries.slice(0, 8).map((entry) => (
+                        <div key={entry.id} className="flex items-center justify-between rounded border border-border/70 px-2 py-1 text-[11px]">
+                          <div className="min-w-0">
+                            <span className="font-medium text-card-foreground">{getHistoryLabel(entry)}</span>
+                            <span className="ml-2 text-muted-foreground">
+                              {entry.createdAt
+                                ? entry.createdAt.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
+                                : ""}
+                            </span>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-6 px-2 text-[10px]"
+                            disabled={isRollingBack || rollingBackEntryId === entry.id}
+                            onClick={() => handleRollbackEntry(entry)}
+                          >
+                            롤백
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             <FilterBar
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
@@ -443,6 +880,7 @@ export default function DashboardPage() {
                 onDeleteTask={handleDeleteTask}
                 onMoveProject={handleMoveProject}
                 onMoveTask={handleMoveTask}
+                onReorderTask={handleReorderTask}
               />
             ) : (
               <ProjectCardView

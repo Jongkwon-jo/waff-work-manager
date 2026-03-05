@@ -14,6 +14,7 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  GripVertical,
   PanelRight,
   CalendarIcon,
   Plus,
@@ -35,6 +36,12 @@ interface GanttViewProps {
   onDeleteTask: (taskId: string, projectId: string) => void
   onMoveProject: (projectId: string, direction: "up" | "down") => void
   onMoveTask: (projectId: string, taskId: string, direction: "up" | "down") => void
+  onReorderTask: (
+    projectId: string,
+    draggedTaskId: string,
+    targetTaskId: string,
+    position: "before" | "after" | "child",
+  ) => void
 }
 
 type FlattenedTask = Task & {
@@ -132,6 +139,18 @@ function getStatusBarStyle(status: string): { barClass: string; textClass: strin
   return { barClass: "bg-rose-600", textClass: "text-rose-50" }
 }
 
+function getDepthRowBgClass(depth: number): string {
+  const depthClasses = [
+    "bg-blue-100/50",
+    "bg-white",
+    "bg-white",
+    "bg-white",
+  ]
+  const safeDepth = Number.isFinite(depth) ? Math.max(0, Math.floor(depth)) : 0
+  const clampedDepth = Math.min(3, safeDepth)
+  return depthClasses[clampedDepth]
+}
+
 export function GanttView({
   projects,
   statusFilter,
@@ -143,6 +162,7 @@ export function GanttView({
   onDeleteTask,
   onMoveProject,
   onMoveTask,
+  onReorderTask,
 }: GanttViewProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const timelineScrollRef = useRef<HTMLDivElement>(null)
@@ -165,6 +185,10 @@ export function GanttView({
   const [isDetailColumnsOpen, setIsDetailColumnsOpen] = useState(false)
   const [recentlyAddedTaskId, setRecentlyAddedTaskId] = useState<string | null>(null)
   const [timelineScrollLeft, setTimelineScrollLeft] = useState(0)
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
+  const [dragOverInfo, setDragOverInfo] = useState<{ taskId: string; position: "before" | "after" | "child" } | null>(
+    null,
+  )
 
   const allProjectIds = useMemo(() => projects.map((project) => project.id), [projects])
   const allCollapsibleTaskIds = useMemo(() => {
@@ -357,6 +381,28 @@ export function GanttView({
         return true
       })
   }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds, collapsedCompletedParentIds])
+
+  const visibleTaskMap = useMemo(() => {
+    const map = new Map<string, FlattenedTask>()
+    filteredProjects.forEach((project) => {
+      project.tasks.forEach((task) => {
+        map.set(task.id, task)
+      })
+    })
+    return map
+  }, [filteredProjects])
+
+  const clearDragState = () => {
+    setDraggedTaskId(null)
+    setDragOverInfo(null)
+  }
+
+  const canDropOnTask = (targetTask: FlattenedTask): boolean => {
+    if (!draggedTaskId || draggedTaskId === targetTask.id) return false
+    const draggedTask = visibleTaskMap.get(draggedTaskId)
+    if (!draggedTask) return false
+    return draggedTask.projectId === targetTask.projectId
+  }
 
   const months = useMemo(() => {
     const now = new Date()
@@ -789,7 +835,7 @@ export function GanttView({
                   className="grid gap-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
                   style={{ gridTemplateColumns: detailGridTemplate }}
                 >
-                  <span>Category</span>
+                  <span className="-mr-1">Category</span>
                   <span>Department</span>
                   <span>Owner</span>
                   <span>Start</span>
@@ -875,7 +921,9 @@ export function GanttView({
                       </button>
                       <ProjectTypeBadge type={project.type} />
                       <div className="flex min-w-0 flex-1 items-center gap-2">
-                        <span className="truncate text-xs font-bold text-card-foreground">{project.name}</span>
+                        <span className="truncate rounded-md bg-blue-600 px-2 py-0.5 text-xs font-bold text-white">
+                          {project.name}
+                        </span>
                         <div className="ml-auto flex shrink-0 items-center gap-1">
                           <AddTaskDialog
                             projectId={project.id}
@@ -932,6 +980,9 @@ export function GanttView({
                       const bar = getBarPosition(task.startDate, task.endDate)
                       const isTaskCollapsed = collapsedTaskIds.has(task.id)
                       const barStyle = getStatusBarStyle(task.status)
+                      const displayDepth = Math.min(3, Math.max(0, Math.floor(task.depth)))
+                      const depthPrefix = displayDepth >= 2 ? "• " : ""
+                      const depthRowBgClass = getDepthRowBgClass(displayDepth)
                       const isParentTask = task.hasChildren
 
                       const currentOwners = parseOwners(task.person || "")
@@ -941,13 +992,78 @@ export function GanttView({
 
                           return (
                         <div key={task.id} id={`task-row-${task.id}`}>
-                          <div className="group/task flex border-b border-border/50 transition-colors hover:bg-accent/5">
+                          <div
+                            className={cn(
+                              "group/task relative flex border-b border-border/50 transition-colors hover:bg-accent/5",
+                              depthRowBgClass,
+                              dragOverInfo?.taskId === task.id && "ring-1 ring-blue-300/70 ring-inset",
+                            )}
+                            onDragOver={(e) => {
+                              if (!canDropOnTask(task)) return
+                              e.preventDefault()
+                              e.dataTransfer.dropEffect = "move"
+                              const row = e.currentTarget as HTMLDivElement
+                              const rect = row.getBoundingClientRect()
+                              const y = e.clientY - rect.top
+                              const ratio = rect.height > 0 ? y / rect.height : 0.5
+                              const position: "before" | "after" | "child" =
+                                ratio < 0.28 ? "before" : ratio > 0.72 ? "after" : "child"
+                              if (
+                                !dragOverInfo ||
+                                dragOverInfo.taskId !== task.id ||
+                                dragOverInfo.position !== position
+                              ) {
+                                setDragOverInfo({ taskId: task.id, position })
+                              }
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault()
+                              if (!canDropOnTask(task) || !draggedTaskId || !dragOverInfo || dragOverInfo.taskId !== task.id) {
+                                clearDragState()
+                                return
+                              }
+                              onReorderTask(task.projectId, draggedTaskId, task.id, dragOverInfo.position)
+                              clearDragState()
+                            }}
+                          >
+                            {dragOverInfo?.taskId === task.id && dragOverInfo.position === "before" && (
+                              <div className="pointer-events-none absolute left-0 right-0 top-0 h-0.5 bg-blue-500 z-40" />
+                            )}
+                            {dragOverInfo?.taskId === task.id && dragOverInfo.position === "after" && (
+                              <div className="pointer-events-none absolute left-0 right-0 bottom-0 h-0.5 bg-blue-500 z-40" />
+                            )}
+                            {dragOverInfo?.taskId === task.id && dragOverInfo.position === "child" && (
+                              <div className="pointer-events-none absolute inset-y-0 left-7 right-0 bg-blue-100/25 ring-1 ring-blue-400/60 z-30" />
+                            )}
+                            {dragOverInfo?.taskId === task.id && (
+                              <div className="pointer-events-none absolute right-2 top-1 z-40 rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                                {dragOverInfo.position === "before" ? "위에 삽입" : dragOverInfo.position === "after" ? "아래에 삽입" : "하위로 삽입"}
+                              </div>
+                            )}
                             <div
-                              className="sticky left-0 z-20 flex shrink-0 items-center border-r border-border bg-card px-4 py-1.5 group-hover/task:bg-accent/10 shadow-[2px_0_5px_rgba(0,0,0,0.05)] overflow-hidden"
+                              className={cn(
+                                "sticky left-0 z-20 flex shrink-0 items-center border-r border-border px-4 py-1.5 group-hover/task:bg-accent/10 shadow-[2px_0_5px_rgba(0,0,0,0.05)] overflow-hidden",
+                                depthRowBgClass,
+                              )}
                               style={{ width: leftPanelWidth }}
                             >
                               <div className="flex items-center gap-1.5 w-full min-w-0">
-                                <div style={{ width: task.depth * 12 }} className="shrink-0" />
+                                <div style={{ width: displayDepth * 12 }} className="shrink-0" />
+                                <button
+                                  type="button"
+                                  draggable
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.effectAllowed = "move"
+                                    e.dataTransfer.setData("text/plain", task.id)
+                                    setDraggedTaskId(task.id)
+                                  }}
+                                  onDragEnd={clearDragState}
+                                  className="flex h-5 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:bg-accent hover:text-foreground cursor-grab active:cursor-grabbing"
+                                  aria-label="업무 순서 드래그 이동"
+                                  title="드래그로 순서 변경"
+                                >
+                                  <GripVertical className="h-3.5 w-3.5" />
+                                </button>
 
                                 {task.hasChildren ? (
                                   <button
@@ -983,6 +1099,7 @@ export function GanttView({
                                       )}
                                       title={task.task}
                                     >
+                                      {depthPrefix}
                                       {task.task}
                                     </span>
                                   </div>
@@ -1004,6 +1121,7 @@ export function GanttView({
                                             )}
                                             title={task.task}
                                           >
+                                            {depthPrefix}
                                             {task.task}
                                           </span>
                                         </button>
@@ -1069,7 +1187,10 @@ export function GanttView({
 
                             {showDetailColumns && (
                               <div
-                                className="sticky z-20 shrink-0 border-r border-border px-3 py-1 shadow-[2px_0_5px_rgba(0,0,0,0.03)] bg-background group-hover/task:bg-accent/10 overflow-hidden"
+                                className={cn(
+                                  "sticky z-20 shrink-0 border-r border-border px-3 py-1 shadow-[2px_0_5px_rgba(0,0,0,0.03)] group-hover/task:bg-accent/10 overflow-hidden",
+                                  depthRowBgClass,
+                                )}
                                 style={{ left: leftPanelWidth, width: detailPanelWidth }}
                               >
                                 {!isParentTask ? (
@@ -1077,10 +1198,12 @@ export function GanttView({
                                     className="grid gap-1 text-[11px] text-foreground"
                                     style={{ gridTemplateColumns: detailGridTemplate }}
                                   >
-                                    <CategorySingleSelect
-                                      value={task.category}
-                                      onChange={(value) => updateTaskInline(task, { category: value })}
-                                    />
+                                    <div className="-mr-1 flex items-center justify-center -translate-x-2">
+                                      <CategorySingleSelect
+                                        value={task.category}
+                                        onChange={(value) => updateTaskInline(task, { category: value })}
+                                      />
+                                    </div>
 
                                     <DepartmentMultiSelect
                                       value={task.department || ""}
@@ -1122,7 +1245,7 @@ export function GanttView({
                               </div>
                             )}
 
-                            <div className="relative z-0 min-w-0 flex-1 h-9 overflow-hidden">
+                            <div className={cn("relative z-0 min-w-0 flex-1 h-9 overflow-hidden", depthRowBgClass)}>
                               <div
                                 className="relative h-full will-change-transform"
                                 style={{ width: timelineWidth, transform: `translateX(-${timelineScrollLeft}px)` }}
@@ -1168,6 +1291,7 @@ export function GanttView({
                                         barStyle.textClass,
                                       )}
                                     >
+                                      {depthPrefix}
                                       {task.task}
                                     </div>
                                   </div>
@@ -1254,9 +1378,23 @@ function CategorySingleSelect({
   value: TaskCategory
   onChange: (value: TaskCategory) => void
 }) {
+  const categoryClass =
+    value === "중요"
+      ? "bg-red-700 text-red-50"
+      : value === "상시"
+        ? "bg-blue-700 text-blue-50"
+        : value === "정기"
+          ? "bg-emerald-700 text-emerald-50"
+          : "bg-slate-200 text-slate-700"
+
   return (
     <Select value={value} onValueChange={(next) => onChange(next as TaskCategory)}>
-      <SelectTrigger className="h-7 w-full justify-between px-2 text-[11px] font-normal">
+      <SelectTrigger
+        className={cn(
+          "!h-5 w-12 justify-center rounded-full border-0 px-1.5 text-[10px] font-bold shadow-none ring-0 transition-colors [&>svg]:hidden",
+          categoryClass,
+        )}
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -1278,7 +1416,7 @@ function StatusInlineSelect({
 }) {
   const statusClass =
     value === "완료"
-      ? "bg-slate-100 text-slate-700"
+      ? "bg-slate-700 text-slate-100"
       : value === "진행"
         ? "bg-blue-100 text-blue-700"
         : value === "대기"
