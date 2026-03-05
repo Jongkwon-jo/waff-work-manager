@@ -6,6 +6,7 @@ import { getDepartmentList } from "@/lib/data"
 import { ProjectTypeBadge } from "@/components/status-badge"
 import { EditTaskDialog } from "./edit-task-dialog"
 import { AddTaskDialog } from "./add-task-dialog"
+import { AddProjectDialog } from "./add-project-dialog"
 import { Button } from "./ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover"
@@ -31,6 +32,7 @@ interface GanttViewProps {
   departmentFilter: string
   personFilter: string
   searchQuery: string
+  onAddProject: (project: Project) => void
   onAddTask: (task: Task) => void
   onEditTask: (task: Task) => void
   onDeleteTask: (taskId: string, projectId: string) => void
@@ -124,19 +126,19 @@ function getMeasuredTextWidth(text: string, font: string) {
 function getStatusBarStyle(status: string): { barClass: string; textClass: string } {
   const normalized = status.trim().toLowerCase()
 
-  if (normalized === "?꾨즺" || normalized.includes("done")) {
-    return { barClass: "bg-slate-500", textClass: "text-slate-50" }
+  if (normalized === "완료" || normalized.includes("done")) {
+    return { barClass: "bg-slate-700", textClass: "text-slate-100" }
   }
-  if (normalized === "吏꾪뻾" || normalized.includes("progress")) {
+  if (normalized === "진행" || normalized.includes("progress")) {
     return { barClass: "bg-blue-500", textClass: "text-blue-50" }
   }
   if (normalized === "대기" || normalized.includes("wait")) {
-    return { barClass: "bg-gray-300", textClass: "text-gray-900" }
+    return { barClass: "bg-gray-400", textClass: "text-gray-50" }
   }
-  if (normalized === "蹂대쪟" || normalized.includes("hold")) {
-    return { barClass: "bg-yellow-200", textClass: "text-yellow-800" }
+  if (normalized === "보류" || normalized.includes("hold")) {
+    return { barClass: "bg-yellow-100", textClass: "text-yellow-800" }
   }
-  return { barClass: "bg-rose-600", textClass: "text-rose-50" }
+  return { barClass: "bg-rose-100", textClass: "text-rose-700" }
 }
 
 function getDepthRowBgClass(depth: number): string {
@@ -157,6 +159,7 @@ export function GanttView({
   departmentFilter,
   personFilter,
   searchQuery,
+  onAddProject,
   onAddTask,
   onEditTask,
   onDeleteTask,
@@ -793,7 +796,7 @@ export function GanttView({
   }, [dragInfo, allDays, dayIndexByMonthDay, onEditTask, taskById])
 
   return (
-    <div className="rounded-lg border border-border bg-card shadow-sm overflow-hidden flex flex-col h-[65vh]">
+    <div className="flex h-[calc(100dvh-200px)] min-h-[520px] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
         <div className="relative min-w-fit flex flex-col isolate">
           <div className="sticky top-0 z-40 flex bg-card border-b border-border shadow-sm">
@@ -805,24 +808,35 @@ export function GanttView({
                 <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
                   Project & Task Details
                 </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1.5 px-2 text-[11px]"
-                  onClick={toggleAllRows}
-                >
-                  {isAllExpanded ? <ChevronsUp className="h-3.5 w-3.5" /> : <ChevronsDown className="h-3.5 w-3.5" />}
-                  {isAllExpanded ? "전체 접기" : "전체 펼치기"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1.5 px-2 text-[11px]"
-                  onClick={() => setIsDetailColumnsOpen((prev) => !prev)}
-                >
-                  <PanelRight className="h-3.5 w-3.5" />
-                  {showDetailColumns ? "상세 숨기기" : "상세 보기"}
-                </Button>
+                <div className="flex items-center gap-1">
+                  <AddProjectDialog
+                    onAddProject={onAddProject}
+                    trigger={
+                      <Button size="sm" className="h-7 gap-1.5 px-2 text-[11px]">
+                        <Plus className="h-3.5 w-3.5" />
+                        새 프로젝트
+                      </Button>
+                    }
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1.5 px-2 text-[11px]"
+                    onClick={toggleAllRows}
+                  >
+                    {isAllExpanded ? <ChevronsUp className="h-3.5 w-3.5" /> : <ChevronsDown className="h-3.5 w-3.5" />}
+                    {isAllExpanded ? "전체 접기" : "전체 펼치기"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1.5 px-2 text-[11px]"
+                    onClick={() => setIsDetailColumnsOpen((prev) => !prev)}
+                  >
+                    <PanelRight className="h-3.5 w-3.5" />
+                    {showDetailColumns ? "상세 숨기기" : "상세 보기"}
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -1256,7 +1270,7 @@ export function GanttView({
                                     className="absolute inset-y-0 pointer-events-none border-r border-border/25"
                                     style={{ left: i * CELL_WIDTH, width: CELL_WIDTH }}
                                   >
-                                    {d.isWeekend && <div className="absolute inset-0 bg-muted/15" />}
+                                    {d.isWeekend && <div className="absolute inset-0 bg-muted/35" />}
                                     {d.isToday && (
                                       <div className="absolute inset-0 bg-yellow-400/10 ring-1 ring-yellow-400/30 z-10" />
                                     )}

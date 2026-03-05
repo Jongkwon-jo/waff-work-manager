@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useState } from "react"
 import { Plus } from "lucide-react"
@@ -14,20 +14,15 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { Project, ProjectType } from "@/lib/data"
 
 interface AddProjectDialogProps {
   onAddProject: (project: Project) => void
+  trigger?: React.ReactNode
 }
 
-export function AddProjectDialog({ onAddProject }: AddProjectDialogProps) {
+export function AddProjectDialog({ onAddProject, trigger }: AddProjectDialogProps) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [type, setType] = useState<ProjectType>("SI")
@@ -55,22 +50,24 @@ export function AddProjectDialog({ onAddProject }: AddProjectDialogProps) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" className="gap-1.5">
-          <Plus className="h-4 w-4" />
-          {"새 프로젝트"}
-        </Button>
+        {trigger || (
+          <Button size="sm" className="gap-1.5">
+            <Plus className="h-4 w-4" />
+            새 프로젝트
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>{"새 프로젝트 추가"}</DialogTitle>
+            <DialogTitle>새 프로젝트 추가</DialogTitle>
             <DialogDescription>
-              {"새로운 프로젝트의 기본 정보를 입력하세요. 생성 후 업무를 추가할 수 있습니다."}
+              새로운 프로젝트의 기본 정보를 입력하세요. 생성 후 업무를 추가할 수 있습니다.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="name">{"프로젝트명"}</Label>
+              <Label htmlFor="name">프로젝트명</Label>
               <Input
                 id="name"
                 value={name}
@@ -80,21 +77,21 @@ export function AddProjectDialog({ onAddProject }: AddProjectDialogProps) {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="type">{"구분"}</Label>
+              <Label htmlFor="type">구분</Label>
               <Select value={type} onValueChange={(value) => setType(value as ProjectType)}>
                 <SelectTrigger id="type">
                   <SelectValue placeholder="구분 선택" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="SI">{"SI"}</SelectItem>
-                  <SelectItem value="R&D">{"R&D"}</SelectItem>
-                  <SelectItem value="S/F">{"S/F"}</SelectItem>
-                  <SelectItem value="Etc">{"Etc"}</SelectItem>
+                  <SelectItem value="SI">SI</SelectItem>
+                  <SelectItem value="R&D">R&D</SelectItem>
+                  <SelectItem value="S/F">S/F</SelectItem>
+                  <SelectItem value="Etc">Etc</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="period">{"기간"}</Label>
+              <Label htmlFor="period">기간</Label>
               <Input
                 id="period"
                 value={period}
@@ -105,9 +102,9 @@ export function AddProjectDialog({ onAddProject }: AddProjectDialogProps) {
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              {"취소"}
+              취소
             </Button>
-            <Button type="submit">{"저장"}</Button>
+            <Button type="submit">저장</Button>
           </DialogFooter>
         </form>
       </DialogContent>

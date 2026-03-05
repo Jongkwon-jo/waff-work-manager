@@ -717,7 +717,7 @@ export default function DashboardPage() {
               <p className="text-xs text-muted-foreground">{"업무 관리 대시보드"}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="relative flex items-center gap-2 text-xs text-muted-foreground">
             <div className="mr-4 flex overflow-hidden rounded-md border border-border bg-background shadow-sm">
               <button
                 onClick={() => setViewMode("gantt")}
@@ -771,6 +771,49 @@ export default function DashboardPage() {
               <RotateCcw className="h-3.5 w-3.5" />
               최근 롤백
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 px-2 text-[11px]"
+              onClick={() => setIsHistoryOpen((prev) => !prev)}
+            >
+              <History className="h-3.5 w-3.5" />
+              변경 이력
+              {isHistoryOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            </Button>
+            {isHistoryOpen && (
+              <div className="absolute right-0 top-10 z-[70] w-[360px] rounded-lg border border-border bg-card p-3 shadow-lg">
+                {historyEntries.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">아직 저장된 변경 이력이 없습니다.</p>
+                ) : (
+                  <div className="max-h-48 space-y-1 overflow-auto pr-1">
+                    {historyEntries.slice(0, 12).map((entry) => (
+                      <div key={entry.id} className="flex items-center justify-between rounded border border-border/70 px-2 py-1 text-[11px]">
+                        <div className="min-w-0">
+                          <span className="font-medium text-card-foreground">{getHistoryLabel(entry)}</span>
+                          <span className="ml-2 text-muted-foreground">
+                            {entry.createdAt
+                              ? entry.createdAt.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
+                              : ""}
+                          </span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-6 px-2 text-[10px]"
+                          disabled={isRollingBack || rollingBackEntryId === entry.id}
+                          onClick={() => handleRollbackEntry(entry)}
+                        >
+                          롤백
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -783,72 +826,23 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <StatusSummary counts={counts} />
-            <div className="rounded-lg border border-border bg-card p-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-semibold text-card-foreground">
-                  <History className="h-3.5 w-3.5" />
-                  변경 이력
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1 px-2 text-[11px]"
-                  onClick={() => setIsHistoryOpen((prev) => !prev)}
-                >
-                  {isHistoryOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                  {isHistoryOpen ? "접기" : "펼치기"}
-                </Button>
-              </div>
-              {isHistoryOpen && (
-                <div className="mt-2">
-                  {historyEntries.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">아직 저장된 변경 이력이 없습니다.</p>
-                  ) : (
-                    <div className="max-h-28 space-y-1 overflow-auto pr-1">
-                      {historyEntries.slice(0, 8).map((entry) => (
-                        <div key={entry.id} className="flex items-center justify-between rounded border border-border/70 px-2 py-1 text-[11px]">
-                          <div className="min-w-0">
-                            <span className="font-medium text-card-foreground">{getHistoryLabel(entry)}</span>
-                            <span className="ml-2 text-muted-foreground">
-                              {entry.createdAt
-                                ? entry.createdAt.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
-                                : ""}
-                            </span>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-6 px-2 text-[10px]"
-                            disabled={isRollingBack || rollingBackEntryId === entry.id}
-                            onClick={() => handleRollbackEntry(entry)}
-                          >
-                            롤백
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+            <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_1000px]">
+              <StatusSummary counts={counts} />
+              <FilterBar
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                statusFilter={statusFilter}
+                onStatusChange={setStatusFilter}
+                departmentFilter={departmentFilter}
+                onDepartmentChange={setDepartmentFilter}
+                personFilter={personFilter}
+                onPersonChange={setPersonFilter}
+                sortBy={sortBy}
+                onSortByChange={setSortBy}
+                departments={departments}
+                persons={persons}
+              />
             </div>
-            <FilterBar
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              statusFilter={statusFilter}
-              onStatusChange={setStatusFilter}
-              departmentFilter={departmentFilter}
-              onDepartmentChange={setDepartmentFilter}
-              personFilter={personFilter}
-              onPersonChange={setPersonFilter}
-              sortBy={sortBy}
-              onSortByChange={setSortBy}
-              departments={departments}
-              persons={persons}
-              onAddProject={handleAddProject}
-            />
             {projectList.length === 0 ? (
               <div className="flex h-[40vh] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 text-center p-8">
                 <Building2 className="h-10 w-10 text-muted-foreground/50 mb-4" />
@@ -875,6 +869,7 @@ export default function DashboardPage() {
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
                 searchQuery={deferredSearchQuery}
+                onAddProject={handleAddProject}
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
                 onDeleteTask={handleDeleteTask}

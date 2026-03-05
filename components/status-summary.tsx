@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { CheckCircle2, Clock, Pause, HelpCircle, PlayCircle, LayoutList } from "lucide-react"
 
@@ -24,27 +24,30 @@ const summaryItems = [
 
 export function StatusSummary({ counts }: StatusSummaryProps) {
   return (
-    <div className="grid grid-cols-3 gap-3 lg:grid-cols-6">
-      {summaryItems.map((item) => {
-        const Icon = item.icon
-        const count = counts[item.key]
-        return (
-          <div
-            key={item.key}
-            className="flex items-center gap-3 rounded-lg border border-border bg-card p-3"
-          >
-            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${item.bg}`}>
-              <Icon className={`h-4.5 w-4.5 ${item.color}`} />
+    <div className="overflow-x-auto">
+      <div className="grid min-w-[900px] grid-cols-6 gap-3">
+        {summaryItems.map((item) => {
+          const Icon = item.icon
+          const count = counts[item.key]
+
+          return (
+            <div
+              key={item.key}
+              className="flex items-center gap-3 rounded-lg border border-border bg-card p-3"
+            >
+              <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${item.bg}`}>
+                <Icon className={`h-4.5 w-4.5 ${item.color}`} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">{item.label}</p>
+                <p className={`text-lg font-bold leading-tight ${item.key === "total" ? "text-foreground" : item.color}`}>
+                  {count}
+                </p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="text-xs text-muted-foreground">{item.label}</p>
-              <p className={`text-lg font-bold leading-tight ${item.key === "total" ? "text-foreground" : item.color}`}>
-                {count}
-              </p>
-            </div>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
     </div>
   )
 }

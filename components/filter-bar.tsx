@@ -1,8 +1,7 @@
-"use client"
+﻿"use client"
 
 import { Search, Filter, X, ArrowUpDown } from "lucide-react"
-import type { TaskStatus, Project } from "@/lib/data"
-import { AddProjectDialog } from "./add-project-dialog"
+import type { TaskStatus } from "@/lib/data"
 
 export type ProjectSortType = "name" | "type" | "progress" | "latest"
 
@@ -19,7 +18,6 @@ interface FilterBarProps {
   onSortByChange: (sortBy: ProjectSortType) => void
   departments: string[]
   persons: string[]
-  onAddProject: (project: Project) => void
 }
 
 const statusOptions: { value: TaskStatus | "all"; label: string }[] = [
@@ -51,7 +49,6 @@ export function FilterBar({
   onSortByChange,
   departments,
   persons,
-  onAddProject,
 }: FilterBarProps) {
   const hasActiveFilters =
     statusFilter !== "all" || departmentFilter !== "all" || personFilter !== "all" || searchQuery !== ""
@@ -64,27 +61,23 @@ export function FilterBar({
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 shadow-sm">
-      <div className="flex items-center gap-2">
-        <Filter className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-medium text-card-foreground">{"필터 및 정렬"}</span>
-        {hasActiveFilters && (
-          <button
-            onClick={clearAll}
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          >
-            <X className="h-3 w-3" />
-            {"초기화"}
-          </button>
-        )}
-        <div className="ml-auto">
-          <AddProjectDialog onAddProject={onAddProject} />
+    <div className="h-full rounded-lg border border-border bg-card p-3 shadow-sm">
+      <div className="flex h-full items-center gap-2 overflow-x-auto">
+        <div className="flex shrink-0 items-center gap-2">
+          <Filter className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium text-card-foreground">필터 및 정렬</span>
+          {hasActiveFilters && (
+            <button
+              onClick={clearAll}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <X className="h-3 w-3" />
+              초기화
+            </button>
+          )}
         </div>
-      </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        {/* 검색창 */}
-        <div className="relative flex-1">
+        <div className="relative min-w-[260px] flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
@@ -95,10 +88,8 @@ export function FilterBar({
           />
         </div>
 
-        {/* 필터 그룹 */}
-        <div className="flex flex-wrap gap-2">
-          {/* 정렬 드롭다운 */}
-          <div className="flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 h-9">
+        <div className="flex items-center gap-2">
+          <div className="flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-2.5">
             <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
             <select
               value={sortBy}
@@ -116,7 +107,7 @@ export function FilterBar({
           <select
             value={statusFilter}
             onChange={(e) => onStatusChange(e.target.value as TaskStatus | "all")}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            className="h-9 shrink-0 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
           >
             {statusOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -128,9 +119,9 @@ export function FilterBar({
           <select
             value={departmentFilter}
             onChange={(e) => onDepartmentChange(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            className="h-9 shrink-0 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
           >
-            <option value="all">{"전체 부서"}</option>
+            <option value="all">전체 부서</option>
             {departments.map((dept) => (
               <option key={dept} value={dept}>
                 {dept}
@@ -141,9 +132,9 @@ export function FilterBar({
           <select
             value={personFilter}
             onChange={(e) => onPersonChange(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            className="h-9 shrink-0 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
           >
-            <option value="all">{"전체 담당자"}</option>
+            <option value="all">전체 담당자</option>
             {persons.map((person) => (
               <option key={person} value={person}>
                 {person}
