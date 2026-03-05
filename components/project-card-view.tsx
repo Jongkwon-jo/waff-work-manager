@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useMemo, useState } from "react"
 import type { Project, TaskStatus } from "@/lib/data"
@@ -327,6 +327,7 @@ function ProjectCard({
                             ? "text-muted-foreground/50"
                             : "text-card-foreground",
                         )}
+                        title={task.memo?.trim() ? `${task.task}\n메모: ${task.memo}` : task.task}
                       >
                         {task.task}
                       </span>
@@ -366,6 +367,7 @@ function ProjectCard({
                             ? "text-muted-foreground/50"
                             : "text-muted-foreground",
                         )}
+                        title={task.memo?.trim() ? `${task.task}\n메모: ${task.memo}` : task.task}
                       >
                         {task.task}
                       </span>

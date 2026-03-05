@@ -74,6 +74,7 @@ export default function DashboardPage() {
       projectId: task.projectId,
       parentId: task.parentId,
       task: task.task,
+      memo: task.memo,
       category: task.category,
       department: task.department,
       person: task.person,
@@ -544,7 +545,8 @@ export default function DashboardPage() {
     try {
       const beforeTask = allTasksFlat.find((t) => t.id === updatedTask.id)
       const { id, subTasks, ...updates } = updatedTask
-      await updateTaskInDB(id, updates)
+      const sanitizedUpdates = compact(updates as Record<string, unknown>) as Partial<Task>
+      await updateTaskInDB(id, sanitizedUpdates)
       await recordHistory({
         entityType: "task",
         action: "update",
@@ -826,7 +828,7 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_1000px]">
+            <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_900px]">
               <StatusSummary counts={counts} />
               <FilterBar
                 searchQuery={searchQuery}

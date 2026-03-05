@@ -1111,7 +1111,7 @@ export function GanttView({
                                         "truncate text-xs font-bold",
                                         task.category === "중요" ? "text-red-600" : "text-foreground",
                                       )}
-                                      title={task.task}
+                                      title={task.memo?.trim() ? `${task.task}\n메모: ${task.memo}` : task.task}
                                     >
                                       {depthPrefix}
                                       {task.task}
@@ -1133,7 +1133,7 @@ export function GanttView({
                                                   ? "text-muted-foreground/50"
                                                   : "text-foreground",
                                             )}
-                                            title={task.task}
+                                            title={task.memo?.trim() ? `${task.task}\n메모: ${task.memo}` : task.task}
                                           >
                                             {depthPrefix}
                                             {task.task}
@@ -1280,7 +1280,11 @@ export function GanttView({
                                 {bar && !isParentTask && (
                                   <div
                                     id={`bar-${task.id}`}
-                                    title={`${task.task} (${task.startDate} ~ ${task.endDate})`}
+                                    title={
+                                      task.memo?.trim()
+                                        ? `${task.task} (${task.startDate} ~ ${task.endDate})\n메모: ${task.memo}`
+                                        : `${task.task} (${task.startDate} ~ ${task.endDate})`
+                                    }
                                     className={cn(
                                       "absolute top-1/2 -translate-y-1/2 rounded-md h-6 shadow-sm transition-all select-none cursor-grab active:cursor-grabbing",
                                       barStyle.barClass,

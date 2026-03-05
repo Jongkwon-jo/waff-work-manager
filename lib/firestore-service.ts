@@ -92,6 +92,7 @@ function normalizeTask(raw: any): Task {
       toStringOrEmpty(raw?.projectID),
     parentId,
     task: toStringOrEmpty(raw?.task) || toStringOrEmpty(raw?.name) || "이름 없음",
+    memo: toOptionalString(raw?.memo) ?? toOptionalString(raw?.note) ?? toOptionalString(raw?.notes),
     person: toStringOrEmpty(raw?.person),
     department: toStringOrEmpty(raw?.department),
     status: (toStringOrEmpty(raw?.status) as Task["status"]) || "미정",

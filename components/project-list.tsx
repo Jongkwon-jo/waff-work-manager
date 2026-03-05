@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useState, useMemo } from "react"
 import type { Project, Task, TaskStatus } from "@/lib/data"
@@ -303,7 +303,7 @@ function RecursiveTaskRow({
               hasSubTasks ? "font-semibold" : "font-normal",
               task.status === "완료" && !hasSubTasks ? "text-muted-foreground/50" : "text-card-foreground",
               depth > 0 && "text-xs"
-            )}>
+            )} title={task.memo?.trim() ? `${task.task}\n메모: ${task.memo}` : task.task}>
               {task.task}
             </span>
 

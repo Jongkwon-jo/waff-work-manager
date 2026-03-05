@@ -8,6 +8,7 @@ export interface Task {
   projectId: string
   parentId?: string
   task: string
+  memo?: string
   category: TaskCategory
   department: string
   person: string

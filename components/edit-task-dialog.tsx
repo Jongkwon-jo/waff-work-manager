@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
@@ -30,16 +31,35 @@ interface EditTaskDialogProps {
 }
 
 function parseKoreanDate(value: string): Date | undefined {
-  const m = value.match(/(\d{1,2})\D+(\d{1,2})/)
-  if (!m) return undefined
-  const year = new Date().getFullYear()
-  return new Date(year, Number.parseInt(m[1], 10) - 1, Number.parseInt(m[2], 10))
+  const text = (value || "").trim()
+  if (!text) return undefined
+
+  const currentYear = new Date().getFullYear()
+
+  // MM월 dd일, MM/DD, MM-DD
+  const md = text.match(/(\d{1,2})\D+(\d{1,2})/)
+  if (md) {
+    return new Date(currentYear, Number.parseInt(md[1], 10) - 1, Number.parseInt(md[2], 10))
+  }
+
+  // YYYY.MM.DD, YYYY-MM-DD, YYYY/MM/DD
+  const ymd = text.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/)
+  if (ymd) {
+    return new Date(
+      Number.parseInt(ymd[1], 10),
+      Number.parseInt(ymd[2], 10) - 1,
+      Number.parseInt(ymd[3], 10),
+    )
+  }
+
+  return undefined
 }
 
 export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProps) {
   const [open, setOpen] = useState(false)
   const [taskName, setTaskName] = useState(task.task)
   const [category, setCategory] = useState<TaskCategory>(task.category)
+  const [memo, setMemo] = useState(task.memo || "")
   const [department, setDepartment] = useState(task.department)
   const [person, setPerson] = useState(task.person)
   const [status, setStatus] = useState<TaskStatus>(task.status)
@@ -54,6 +74,7 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
 
     setTaskName(task.task)
     setCategory(task.category)
+    setMemo(task.memo || "")
     setDepartment(task.department)
     setPerson(task.person)
     setStatus(task.status)
@@ -69,16 +90,17 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!taskName || !startDate || !endDate) return
+    if (!taskName) return
 
     const updatedTask: Task = {
       ...task,
       task: taskName,
+      memo: memo.trim(),
       category,
       department,
       person,
-      startDate: formatDate(startDate),
-      endDate: formatDate(endDate),
+      startDate: startDate ? formatDate(startDate) : task.startDate,
+      endDate: endDate ? formatDate(endDate) : task.endDate,
       status,
       manDays: parseFloat(manDays) || 0,
     }
@@ -209,6 +231,17 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
                   <SelectItem value="미정">미정</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="edit-memo">메모</Label>
+              <Textarea
+                id="edit-memo"
+                value={memo}
+                onChange={(e) => setMemo(e.target.value)}
+                placeholder="업무 관련 메모를 입력하세요"
+                rows={3}
+              />
             </div>
           </div>
 

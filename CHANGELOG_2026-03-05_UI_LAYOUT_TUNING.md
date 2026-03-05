@@ -1,13 +1,13 @@
-# 변경 사항 정리 (2026-03-05, UI 레이아웃 튜닝)
+﻿# 변경 사항 정리 (2026-03-05, UI 레이아웃 튜닝)
 
 ## 개요
-상단 대시보드 레이아웃(업무 현황판 + 필터/정렬)과 간트 뷰의 시인성/밀도 개선 요청을 반영했습니다.
+상단 대시보드 레이아웃(업무 현황판 + 필터/정렬)과 간트 뷰의 시인성/밀도 개선, 업무 메모 편의 기능을 반영했습니다.
 
 ## 1) 필터/정렬 영역 개편
 - `필터 및 정렬` 카드에서 `새 프로젝트` 버튼 제거
 - 필터 컨트롤을 가로 1행으로 정렬
 - `필터 및 정렬` 제목도 같은 줄에 배치
-- 깨진 한글 라벨(정렬/상태/부서/담당자/검색 placeholder) 정상화
+- 정렬/상태/부서/담당자/검색 라벨 정상화
 
 대상 파일:
 - `components/filter-bar.tsx`
@@ -54,7 +54,36 @@
 대상 파일:
 - `components/gantt-view.tsx`
 
-## 7) 검증
+## 7) 업무 메모 기능 추가
+- 업무 수정 다이얼로그에 `메모` 필드 추가 (최하단 배치)
+- `Task` 타입에 `memo?: string` 추가
+- Firestore 로딩 시 `memo`(또는 `note`/`notes`) 파싱 지원
+- 변경 이력 직렬화에 `memo` 포함
+- 업무 제목 hover 시 메모 툴팁 노출(간트/목록/카드)
+
+대상 파일:
+- `components/edit-task-dialog.tsx`
+- `lib/data.ts`
+- `lib/firestore-service.ts`
+- `app/page.tsx`
+- `components/gantt-view.tsx`
+- `components/project-list.tsx`
+- `components/project-card-view.tsx`
+
+## 8) 업무 수정 저장 안정화
+- 특정 업무에서 수정 저장이 되지 않던 문제 수정
+- 날짜 파서 지원 포맷 확장:
+  - `MM월 dd일`
+  - `MM/DD`, `MM-DD`
+  - `YYYY.MM.DD`, `YYYY-MM-DD`, `YYYY/MM/DD`
+- 날짜 파싱 실패 시 기존 시작일/종료일 유지
+- 업데이트 payload 정리로 `undefined` 필드 제거 후 저장
+
+대상 파일:
+- `components/edit-task-dialog.tsx`
+- `app/page.tsx`
+
+## 9) 검증
 - TypeScript 타입체크 통과
 - 실행 명령:
   - `pnpm.cmd -s tsc --noEmit`
