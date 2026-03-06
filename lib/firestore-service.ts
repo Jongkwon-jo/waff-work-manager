@@ -20,6 +20,10 @@ import type { Project, Task } from "./data"
 const PROJECTS_COLLECTION = "projects"
 const TASKS_COLLECTION = "tasks"
 const HISTORY_COLLECTION = "history"
+const SETTINGS_COLLECTION = "settings"
+const DASHBOARD_PREFERENCES_DOC = "dashboard_preferences"
+
+export type DashboardSortBy = "name" | "type" | "progress" | "latest"
 
 type HistoryEntityType = "project" | "task" | "batch" | "project_bundle"
 type HistoryActionType = "create" | "update" | "delete" | "batch_update" | "project_delete"
@@ -253,7 +257,7 @@ export async function addTaskToDB(task: Omit<Task, "id">): Promise<string> {
   return docRef.id
 }
 
-export async function updateTaskInDB(taskId: string, updates: Partial<Task>): Promise<void> {
+export async function updateTaskInDB(taskId: string, updates: Omit<Partial<Task>, "parentId"> & { parentId?: string | null }): Promise<void> {
   const taskRef = doc(db, TASKS_COLLECTION, taskId)
   await updateDoc(taskRef, updates)
 }
@@ -361,4 +365,35 @@ export async function rollbackHistoryEntry(entry: ChangeHistoryEntry): Promise<v
 
 export async function deleteHistoryEntry(entryId: string): Promise<void> {
   await deleteDoc(doc(db, HISTORY_COLLECTION, entryId))
+}
+
+export function subscribeDashboardSortBy(callback: (sortBy: DashboardSortBy) => void) {
+  const preferencesRef = doc(db, SETTINGS_COLLECTION, DASHBOARD_PREFERENCES_DOC)
+  return onSnapshot(
+    preferencesRef,
+    (snapshot) => {
+      const raw = snapshot.data() as { sortBy?: unknown } | undefined
+      const candidate = toStringOrEmpty(raw?.sortBy) as DashboardSortBy
+      if (candidate === "latest" || candidate === "name" || candidate === "type" || candidate === "progress") {
+        callback(candidate)
+        return
+      }
+      callback("latest")
+    },
+    (error) => {
+      console.error("Dashboard sort snapshot error:", error)
+    },
+  )
+}
+
+export async function saveDashboardSortBy(sortBy: DashboardSortBy): Promise<void> {
+  const preferencesRef = doc(db, SETTINGS_COLLECTION, DASHBOARD_PREFERENCES_DOC)
+  await setDoc(
+    preferencesRef,
+    {
+      sortBy,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
 }

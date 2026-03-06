@@ -13,6 +13,8 @@ import {
   deleteTaskFromDB,
   updateProjectOrdersInDB,
   updateTaskOrdersInDB,
+  saveDashboardSortBy,
+  subscribeDashboardSortBy,
   addHistoryEntry,
   fetchHistoryEntries,
   rollbackHistoryEntry,
@@ -64,6 +66,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadHistory()
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = subscribeDashboardSortBy((savedSortBy) => {
+      setSortBy(savedSortBy)
+    })
+    return () => unsubscribe()
   }, [])
 
   const compact = <T extends Record<string, unknown>>(obj: T): T =>
@@ -347,12 +356,14 @@ export default function DashboardPage() {
     return map
   }
 
+  type TaskReorderUpdates = Omit<Partial<Task>, "parentId"> & { parentId?: string | null }
+
   const reorderTaskInTree = (
     tasks: Task[],
     draggedTaskId: string,
     targetTaskId: string,
     position: "before" | "after" | "child",
-  ): { tasks: Task[]; taskUpdates: Array<{ id: string; updates: Partial<Task> }>; moved: boolean } => {
+  ): { tasks: Task[]; taskUpdates: Array<{ id: string; updates: TaskReorderUpdates }>; moved: boolean } => {
     const removed = removeTaskNode(tasks, draggedTaskId, 0)
     if (!removed.removed) return { tasks, taskUpdates: [], moved: false }
 
@@ -361,14 +372,14 @@ export default function DashboardPage() {
 
     const prevMap = collectTaskMap(tasks)
     const nextMap = collectTaskMap(inserted.tasks)
-    const taskUpdates: Array<{ id: string; updates: Partial<Task> }> = []
+    const taskUpdates: Array<{ id: string; updates: TaskReorderUpdates }> = []
 
     nextMap.forEach((nextTask, id) => {
       const prevTask = prevMap.get(id)
       if (!prevTask) return
 
-      const updates: Partial<Task> = {}
-      if ((prevTask.parentId || undefined) !== (nextTask.parentId || undefined)) updates.parentId = nextTask.parentId
+      const updates: TaskReorderUpdates = {}
+      if ((prevTask.parentId || undefined) !== (nextTask.parentId || undefined)) updates.parentId = nextTask.parentId ?? null
       if ((prevTask.depth ?? 0) !== (nextTask.depth ?? 0)) updates.depth = nextTask.depth
       if ((prevTask.displayOrder ?? -1) !== (nextTask.displayOrder ?? -1)) updates.displayOrder = nextTask.displayOrder
       if (Boolean(prevTask.isSubTask) !== Boolean(nextTask.isSubTask)) updates.isSubTask = nextTask.isSubTask
@@ -457,6 +468,13 @@ export default function DashboardPage() {
     } catch (error) {
       toast.error("프로젝트 추가 실패")
     }
+  }
+
+  const handleSortByChange = (nextSortBy: ProjectSortType) => {
+    setSortBy(nextSortBy)
+    void saveDashboardSortBy(nextSortBy).catch(() => {
+      toast.error("정렬 설정 저장 실패")
+    })
   }
 
   const handleEditProject = async (updatedProject: Project) => {
@@ -673,7 +691,7 @@ export default function DashboardPage() {
   ) => {
     if (!draggedTaskId || !targetTaskId || draggedTaskId === targetTaskId) return
 
-    let taskUpdates: Array<{ id: string; updates: Partial<Task> }> = []
+    let taskUpdates: Array<{ id: string; updates: TaskReorderUpdates }> = []
     let moved = false
 
     setProjectList((prev) =>
@@ -861,7 +879,7 @@ export default function DashboardPage() {
                 personFilter={personFilter}
                 onPersonChange={setPersonFilter}
                 sortBy={sortBy}
-                onSortByChange={setSortBy}
+                onSortByChange={handleSortByChange}
                 departments={departments}
                 persons={persons}
               />

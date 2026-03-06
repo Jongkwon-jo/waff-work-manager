@@ -1051,7 +1051,7 @@ export function GanttView({
                         )}
                       </button>
                       <ProjectTypeBadge type={project.type} />
-                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
                         <EditProjectDialog
                           project={project}
                           onEditProject={onEditProject}
@@ -1085,40 +1085,41 @@ export function GanttView({
                             </span>
                           </>
                         )}
-                        <div className="ml-auto flex shrink-0 items-center gap-1">
-                          <AddTaskDialog
-                            projectId={project.id}
-                            onAddTask={handleAddProjectLevelTask}
-                            trigger={
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-6 shrink-0 px-2 text-[10px]"
-                              >
-                                업무 추가
-                              </Button>
-                            }
-                          />
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-white hover:bg-white/15 hover:text-white"
-                            onClick={() => onMoveProject(project.id, "up")}
-                          >
-                            <ArrowUp className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-white hover:bg-white/15 hover:text-white"
-                            onClick={() => onMoveProject(project.id, "down")}
-                          >
-                            <ArrowDown className="h-3 w-3" />
-                          </Button>
-                        </div>
+                      </div>
+                      <div className="min-w-0 flex-1" />
+                      <div className="ml-auto flex shrink-0 items-center gap-1">
+                        <AddTaskDialog
+                          projectId={project.id}
+                          onAddTask={handleAddProjectLevelTask}
+                          trigger={
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-6 shrink-0 px-2 text-[10px]"
+                            >
+                              업무 추가
+                            </Button>
+                          }
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-white hover:bg-white/15 hover:text-white"
+                          onClick={() => onMoveProject(project.id, "up")}
+                        >
+                          <ArrowUp className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-white hover:bg-white/15 hover:text-white"
+                          onClick={() => onMoveProject(project.id, "down")}
+                        >
+                          <ArrowDown className="h-3 w-3" />
+                        </Button>
                       </div>
                     </div>
 
