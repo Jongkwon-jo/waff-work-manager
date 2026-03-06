@@ -5,6 +5,7 @@ import type { Project, Task, TaskStatus, TaskCategory } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import { ProjectTypeBadge } from "@/components/status-badge"
 import { EditTaskDialog } from "./edit-task-dialog"
+import { EditProjectDialog } from "./edit-project-dialog"
 import { AddTaskDialog } from "./add-task-dialog"
 import { AddProjectDialog } from "./add-project-dialog"
 import { Button } from "./ui/button"
@@ -35,6 +36,7 @@ interface GanttViewProps {
   personFilter: string
   searchQuery: string
   onAddProject: (project: Project) => void
+  onEditProject: (project: Project) => void
   onAddTask: (task: Task) => void
   onEditTask: (task: Task) => void
   onDeleteTask: (taskId: string, projectId: string) => void
@@ -66,6 +68,8 @@ const HEADER_APPROX_HEIGHT = 110
 const PROJECT_ROW_HEIGHT = 36
 const TASK_ROW_HEIGHT = 36
 const VIRTUAL_OVERSCAN_ROWS = 20
+const PROJECT_HEADER_ROW_BG_CLASS = "bg-blue-600/50"
+const PROJECT_NAME_BADGE_BG_CLASS = "bg-transparent text-white"
 let textMeasureCanvas: HTMLCanvasElement | null = null
 const textWidthCache = new Map<string, number>()
 function getDaysInMonth(year: number, month: number) {
@@ -162,6 +166,7 @@ export function GanttView({
   personFilter,
   searchQuery,
   onAddProject,
+  onEditProject,
   onAddTask,
   onEditTask,
   onDeleteTask,
@@ -263,22 +268,17 @@ export function GanttView({
     })
   }
 
-  const toggleHiddenChildren = (taskId: string, projectId: string) => {
-    const projectExpanded = expandedHiddenProjectIds.has(projectId)
+  const toggleHiddenChildren = (taskId: string) => {
     const isCollapsed = collapsedHiddenParentIds.has(taskId)
-    const isExpanded =
-      !isCollapsed && (expandedHiddenParentIds.has(taskId) || projectExpanded)
+    const isExpanded = !isCollapsed && expandedHiddenParentIds.has(taskId)
 
     if (isExpanded) {
-      if (projectExpanded) {
-        setCollapsedHiddenParentIds((prev) => new Set(prev).add(taskId))
-      } else {
-        setExpandedHiddenParentIds((prev) => {
-          const next = new Set(prev)
-          next.delete(taskId)
-          return next
-        })
-      }
+      setExpandedHiddenParentIds((prev) => {
+        const next = new Set(prev)
+        next.delete(taskId)
+        return next
+      })
+      setCollapsedHiddenParentIds((prev) => new Set(prev).add(taskId))
       return
     }
 
@@ -290,13 +290,46 @@ export function GanttView({
     setExpandedHiddenParentIds((prev) => new Set(prev).add(taskId))
   }
 
-  const toggleTaskHidden = (taskId: string) => {
+  const toggleTaskHidden = (task: Task) => {
+    const taskId = task.id
+    const willHide = !hiddenTaskIds.has(taskId)
+
     setHiddenTaskIds((prev) => {
       const next = new Set(prev)
       if (next.has(taskId)) next.delete(taskId)
       else next.add(taskId)
       return next
     })
+
+    if (!willHide) return
+
+    if (!task.parentId) {
+      setExpandedHiddenProjectIds((prev) => {
+        const next = new Set(prev)
+        next.delete(task.projectId)
+        return next
+      })
+    }
+
+    const ancestorIds: string[] = []
+    let cursor = task.parentId
+    while (cursor) {
+      ancestorIds.push(cursor)
+      cursor = taskById.get(cursor)?.parentId
+    }
+
+    if (ancestorIds.length > 0) {
+      setExpandedHiddenParentIds((prev) => {
+        const next = new Set(prev)
+        ancestorIds.forEach((id) => next.delete(id))
+        return next
+      })
+      setCollapsedHiddenParentIds((prev) => {
+        const next = new Set(prev)
+        ancestorIds.forEach((id) => next.add(id))
+        return next
+      })
+    }
   }
 
   const toggleProjectHidden = (projectId: string) => {
@@ -308,24 +341,11 @@ export function GanttView({
     })
   }
 
-  const countHiddenDescendants = (task: Task): number => {
-    let count = 0
-    const children = task.subTasks || []
-    for (const child of children) {
-      if (hiddenTaskIds.has(child.id)) count += 1
-      count += countHiddenDescendants(child)
-    }
-    return count
-  }
+  const countHiddenChildren = (task: Task): number =>
+    (task.subTasks || []).reduce((count, child) => count + (hiddenTaskIds.has(child.id) ? 1 : 0), 0)
 
-  const countHiddenInProject = (project: Project): number => {
-    const walk = (tasks: Task[]): number =>
-      tasks.reduce((sum, task) => {
-        const self = hiddenTaskIds.has(task.id) ? 1 : 0
-        return sum + self + walk(task.subTasks || [])
-      }, 0)
-    return walk(project.tasks)
-  }
+  const countHiddenInProject = (project: Project): number =>
+    project.tasks.reduce((count, task) => count + (hiddenTaskIds.has(task.id) ? 1 : 0), 0)
 
   const countHiddenInProjectById = (projectId: string): number => {
     const source = projectById.get(projectId)
@@ -397,16 +417,16 @@ export function GanttView({
       .map((project) => {
         const projectMatchesSearch = lowerQuery.length > 0 && project.name.toLowerCase().includes(lowerQuery)
 
-        const collectVisibleRows = (tasks: Task[], depth = 0, showHidden = false): FlattenedTask[] => {
+        const collectVisibleRows = (tasks: Task[], depth = 0, showHiddenInLevel = false): FlattenedTask[] => {
           return tasks.reduce((acc, task) => {
             const hasChildren = (task.subTasks?.length || 0) > 0
             const isHidden = hiddenTaskIds.has(task.id)
-            if (isHidden && !showHidden) {
+            if (isHidden && !showHiddenInLevel) {
               return acc
             }
 
             const parentCollapsed = collapsedHiddenParentIds.has(task.id)
-            const nextShowHidden = parentCollapsed ? false : (showHidden || expandedHiddenParentIds.has(task.id))
+            const nextShowHidden = parentCollapsed ? false : expandedHiddenParentIds.has(task.id)
             const childRows = collectVisibleRows(
               task.subTasks || [],
               depth + 1,
@@ -986,39 +1006,55 @@ export function GanttView({
                   {(() => {
                     const hiddenProjectCount = countHiddenInProjectById(project.id)
                     return (
-                  <div className="flex min-h-9 border-b border-border bg-muted/40 sticky top-[70px] z-30">
+                  <div className={cn("sticky top-[70px] z-30 flex min-h-9 border-b border-border", PROJECT_HEADER_ROW_BG_CLASS)}>
                     <div
-                      className="sticky left-0 z-30 flex shrink-0 items-center gap-2 border-r border-border bg-muted/40 px-4 py-1.5 shadow-[2px_0_5px_rgba(0,0,0,0.05)] overflow-hidden"
+                      className={cn(
+                        "sticky left-0 z-30 flex shrink-0 items-center gap-2 border-r border-border px-4 py-1.5 shadow-[2px_0_5px_rgba(0,0,0,0.05)] overflow-hidden",
+                        PROJECT_HEADER_ROW_BG_CLASS,
+                      )}
                       style={{ width: leftPanelWidth }}
                     >
                       <button
                         type="button"
                         onClick={() => toggleProjectCollapse(project.id)}
-                        className="flex h-5 w-5 items-center justify-center rounded hover:bg-accent"
+                        className="flex h-5 w-5 items-center justify-center rounded text-white hover:bg-white/15"
                         aria-label={isProjectCollapsed ? "Expand project" : "Collapse project"}
                       >
                         {isProjectCollapsed ? (
-                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                          <ChevronRight className="h-3.5 w-3.5 text-white" />
                         ) : (
-                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                          <ChevronDown className="h-3.5 w-3.5 text-white" />
                         )}
                       </button>
                       <ProjectTypeBadge type={project.type} />
                       <div className="flex min-w-0 flex-1 items-center gap-2">
-                        <span className="truncate rounded-md bg-blue-600 px-2 py-0.5 text-xs font-bold text-white">
-                          {project.name}
-                        </span>
+                        <EditProjectDialog
+                          project={project}
+                          onEditProject={onEditProject}
+                          trigger={
+                            <button
+                              type="button"
+                              className={cn(
+                                "truncate rounded-md px-2 py-0.5 text-xs font-bold transition-opacity hover:opacity-90",
+                                PROJECT_NAME_BADGE_BG_CLASS,
+                              )}
+                              title="프로젝트 수정"
+                            >
+                              {project.name}
+                            </button>
+                          }
+                        />
                         {hiddenProjectCount > 0 && (
                           <>
                             <button
                               type="button"
                               onClick={() => toggleProjectHidden(project.id)}
-                              className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[11px] leading-none text-muted-foreground hover:bg-accent"
+                              className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[11px] leading-none text-white hover:bg-white/15"
                               title={expandedHiddenProjectIds.has(project.id) ? "숨긴 항목 숨기기" : "숨김 항목 보기"}
                             >
                               {expandedHiddenProjectIds.has(project.id) ? "-" : "+"}
                             </button>
-                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                            <span className="shrink-0 text-[10px] text-white/90">
                               {expandedHiddenProjectIds.has(project.id)
                                 ? "숨긴 항목 숨기기"
                                 : `숨김 항목(${String(hiddenProjectCount).padStart(2, "0")}개)`}
@@ -1044,7 +1080,7 @@ export function GanttView({
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-6 w-6"
+                            className="h-6 w-6 text-white hover:bg-white/15 hover:text-white"
                             onClick={() => onMoveProject(project.id, "up")}
                           >
                             <ArrowUp className="h-3 w-3" />
@@ -1053,7 +1089,7 @@ export function GanttView({
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-6 w-6"
+                            className="h-6 w-6 text-white hover:bg-white/15 hover:text-white"
                             onClick={() => onMoveProject(project.id, "down")}
                           >
                             <ArrowDown className="h-3 w-3" />
@@ -1064,7 +1100,7 @@ export function GanttView({
 
                     {showDetailColumns && (
                       <div
-                        className="sticky z-30 shrink-0 border-r border-border bg-muted/40 px-3 py-1.5"
+                        className={cn("sticky z-30 shrink-0 border-r border-border px-3 py-1.5", PROJECT_HEADER_ROW_BG_CLASS)}
                         style={{ left: leftPanelWidth, width: detailPanelWidth }}
                       />
                     )}
@@ -1087,10 +1123,10 @@ export function GanttView({
                       const depthPrefix = displayDepth >= 2 ? "• " : ""
                       const depthRowBgClass = getDepthRowBgClass(displayDepth)
                       const isParentTask = task.hasChildren
-                      const hiddenChildCount = countHiddenDescendants(task)
+                      const hiddenChildCount = countHiddenChildren(task)
                       const isParentHiddenExpanded =
                         !collapsedHiddenParentIds.has(task.id) &&
-                        (expandedHiddenParentIds.has(task.id) || expandedHiddenProjectIds.has(task.projectId))
+                        expandedHiddenParentIds.has(task.id)
 
                       const currentOwners = parseOwners(task.person || "")
                       const ownerValues = Array.from(new Set([...ownerOptions, ...currentOwners])).filter(Boolean)
@@ -1195,7 +1231,7 @@ export function GanttView({
                                       <>
                                         <button
                                           type="button"
-                                          onClick={() => toggleHiddenChildren(task.id, task.projectId)}
+                                          onClick={() => toggleHiddenChildren(task.id)}
                                           className="order-last ml-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[11px] leading-none text-muted-foreground hover:bg-accent"
                                           title={isParentHiddenExpanded ? "숨긴 항목 숨기기" : "숨김 항목 보기"}
                                         >
@@ -1208,16 +1244,27 @@ export function GanttView({
                                         </span>
                                       </>
                                     )}
-                                    <span
-                                      className={cn(
-                                        "truncate text-xs font-bold",
-                                        task.category === "중요" ? "text-red-600" : "text-foreground",
-                                      )}
-                                      title={task.memo?.trim() ? `${task.task}\n메모: ${task.memo}` : task.task}
-                                    >
-                                      {depthPrefix}
-                                      {task.task}
-                                    </span>
+                                    <EditTaskDialog
+                                      task={task}
+                                      onEditTask={onEditTask}
+                                      trigger={
+                                        <button
+                                          type="button"
+                                          className="min-w-0 flex-1 truncate text-left text-xs font-bold transition-colors hover:text-primary"
+                                        >
+                                          <span
+                                            className={cn(
+                                              "truncate",
+                                              task.category === "중요" ? "text-red-600" : "text-foreground",
+                                            )}
+                                            title={task.memo?.trim() ? `${task.task}\n메모: ${task.memo}` : task.task}
+                                          >
+                                            {depthPrefix}
+                                            {task.task}
+                                          </span>
+                                        </button>
+                                      }
+                                    />
                                   </div>
                                 ) : (
                                   <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -1303,7 +1350,7 @@ export function GanttView({
                                   variant="ghost"
                                   size="icon"
                                   className="h-6 w-6 shrink-0"
-                                  onClick={() => toggleTaskHidden(task.id)}
+                                  onClick={() => toggleTaskHidden(task)}
                                   title={hiddenTaskIds.has(task.id) ? "업무 숨김 해제" : "업무 숨기기"}
                                 >
                                   {hiddenTaskIds.has(task.id) ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}

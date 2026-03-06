@@ -405,6 +405,7 @@ export default function DashboardPage() {
         const orderA = typeof a.displayOrder === "number" ? a.displayOrder : Number.MAX_SAFE_INTEGER
         const orderB = typeof b.displayOrder === "number" ? b.displayOrder : Number.MAX_SAFE_INTEGER
         if (orderA !== orderB) return orderA - orderB
+        return 0
       }
       if (sortBy === "name") return a.name.localeCompare(b.name)
       if (sortBy === "type") return a.type.localeCompare(b.type)
@@ -872,6 +873,7 @@ export default function DashboardPage() {
                 personFilter={personFilter}
                 searchQuery={deferredSearchQuery}
                 onAddProject={handleAddProject}
+                onEditProject={handleEditProject}
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
                 onDeleteTask={handleDeleteTask}

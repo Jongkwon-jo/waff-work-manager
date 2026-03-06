@@ -113,7 +113,10 @@ function buildProjectTree(projectsData: any[], allTasksData: any[]): Project[] {
     const orderA = typeof a.displayOrder === "number" ? a.displayOrder : Number.MAX_SAFE_INTEGER
     const orderB = typeof b.displayOrder === "number" ? b.displayOrder : Number.MAX_SAFE_INTEGER
     if (orderA !== orderB) return orderA - orderB
-    return (a.name || "").localeCompare(b.name || "")
+    const timeA = a.createdAt?.toDate?.()?.getTime?.() || 0
+    const timeB = b.createdAt?.toDate?.()?.getTime?.() || 0
+    if (timeA !== timeB) return timeA - timeB
+    return toStringOrEmpty(a.id).localeCompare(toStringOrEmpty(b.id))
   })
 
   return orderedProjects.map((projectData) => {
