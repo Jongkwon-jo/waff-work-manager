@@ -400,27 +400,46 @@ export default function DashboardPage() {
 
   const sortedProjects = useMemo(() => {
     const list = [...projectList]
+    const getTime = (project: Project) => (project.createdAt ? new Date(project.createdAt).getTime() : 0)
+    const baseCompare = (a: Project, b: Project) => {
+      const orderA = typeof a.displayOrder === "number" ? a.displayOrder : Number.MAX_SAFE_INTEGER
+      const orderB = typeof b.displayOrder === "number" ? b.displayOrder : Number.MAX_SAFE_INTEGER
+      if (orderA !== orderB) return orderA - orderB
+
+      const timeA = getTime(a)
+      const timeB = getTime(b)
+      if (timeA !== timeB) return timeA - timeB
+
+      return a.id.localeCompare(b.id)
+    }
 
     return list.sort((a, b) => {
       if (sortBy === "latest") {
-        const orderA = typeof a.displayOrder === "number" ? a.displayOrder : Number.MAX_SAFE_INTEGER
-        const orderB = typeof b.displayOrder === "number" ? b.displayOrder : Number.MAX_SAFE_INTEGER
-        if (orderA !== orderB) return orderA - orderB
-        return 0
+        return baseCompare(a, b)
       }
-      if (sortBy === "name") return a.name.localeCompare(b.name)
-      if (sortBy === "type") return a.type.localeCompare(b.type)
+      if (sortBy === "name") {
+        const byName = a.name.localeCompare(b.name, "ko")
+        if (byName !== 0) return byName
+        return baseCompare(a, b)
+      }
+      if (sortBy === "type") {
+        const byType = a.type.localeCompare(b.type, "ko")
+        if (byType !== 0) return byType
+        const byName = a.name.localeCompare(b.name, "ko")
+        if (byName !== 0) return byName
+        return baseCompare(a, b)
+      }
       if (sortBy === "progress") {
         const getProgress = (p: Project) => {
           const tasks = flattenTasks(p.tasks)
           if (tasks.length === 0) return 0
           return tasks.filter((t) => t.status === "완료").length / tasks.length
         }
-        return getProgress(b) - getProgress(a)
+        const progressDiff = getProgress(b) - getProgress(a)
+        if (progressDiff !== 0) return progressDiff
+        return baseCompare(a, b)
       }
-      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0
-      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0
-      return timeB - timeA
+      return baseCompare(a, b)
     })
   }, [projectList, sortBy])
 

@@ -146,7 +146,9 @@ function buildProjectTree(projectsData: any[], allTasksData: any[]): Project[] {
       const orderA = typeof a.displayOrder === "number" ? a.displayOrder : Number.MAX_SAFE_INTEGER
       const orderB = typeof b.displayOrder === "number" ? b.displayOrder : Number.MAX_SAFE_INTEGER
       if (orderA !== orderB) return orderA - orderB
-      return (a.task || "").localeCompare(b.task || "")
+      const byName = (a.task || "").localeCompare(b.task || "", "ko")
+      if (byName !== 0) return byName
+      return a.id.localeCompare(b.id)
     })
 
     orderedTasks.forEach((task) => {
