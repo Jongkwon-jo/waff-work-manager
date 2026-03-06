@@ -83,6 +83,7 @@ export default function DashboardPage() {
       status: task.status,
       manDays: task.manDays,
       isSubTask: task.isSubTask,
+      isHidden: task.isHidden,
       depth: task.depth,
       displayOrder: task.displayOrder,
     })

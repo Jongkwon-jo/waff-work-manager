@@ -301,6 +301,8 @@ export function GanttView({
       return next
     })
 
+    updateTaskInline(task, { isHidden: willHide })
+
     if (!willHide) return
 
     if (!task.parentId) {
@@ -331,6 +333,28 @@ export function GanttView({
       })
     }
   }
+
+  useEffect(() => {
+    const nextHidden = new Set<string>()
+    const walk = (tasks: Task[]) => {
+      tasks.forEach((task) => {
+        if (task.isHidden) nextHidden.add(task.id)
+        walk(task.subTasks || [])
+      })
+    }
+    projects.forEach((project) => walk(project.tasks))
+
+    setHiddenTaskIds((prev) => {
+      if (prev.size === nextHidden.size) {
+        let unchanged = true
+        prev.forEach((id) => {
+          if (!nextHidden.has(id)) unchanged = false
+        })
+        if (unchanged) return prev
+      }
+      return nextHidden
+    })
+  }, [projects])
 
   const toggleProjectHidden = (projectId: string) => {
     setExpandedHiddenProjectIds((prev) => {

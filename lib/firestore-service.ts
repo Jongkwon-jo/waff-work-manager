@@ -65,6 +65,17 @@ function toNumberOr(value: unknown, fallback: number): number {
   return fallback
 }
 
+function toBooleanOr(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value
+  if (typeof value === "number") return value !== 0
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase()
+    if (["true", "1", "yes", "y"].includes(normalized)) return true
+    if (["false", "0", "no", "n"].includes(normalized)) return false
+  }
+  return fallback
+}
+
 function compactObject<T extends Record<string, unknown>>(obj: T): T {
   return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T
 }
@@ -101,6 +112,7 @@ function normalizeTask(raw: any): Task {
     endDate: toStringOrEmpty(raw?.endDate) || toStringOrEmpty(raw?.end_date) || todayLabel(),
     manDays: toNumberOr(raw?.manDays ?? raw?.man_days, 0),
     isSubTask: Boolean(raw?.isSubTask ?? raw?.is_sub_task ?? parentId),
+    isHidden: toBooleanOr(raw?.isHidden ?? raw?.is_hidden, false),
     displayOrder: toNumberOr(raw?.displayOrder, Number.MAX_SAFE_INTEGER),
     subTasks: [],
   }

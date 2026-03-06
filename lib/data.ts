@@ -5,6 +5,7 @@ export interface Task {
   id: string
   displayOrder?: number
   depth?: number
+  isHidden?: boolean
   projectId: string
   parentId?: string
   task: string
