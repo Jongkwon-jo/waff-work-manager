@@ -19,6 +19,7 @@ import {
   GripVertical,
   Eye,
   EyeOff,
+  StickyNote,
   PanelRight,
   CalendarIcon,
   Plus,
@@ -159,6 +160,19 @@ function getDepthRowBgClass(depth: number): string {
   return depthClasses[clampedDepth]
 }
 
+function formatTaskHoverDetails(task: Task): string {
+  const lines = [
+    task.task,
+    `상태: ${task.status || "-"}`,
+    `구분: ${task.category || "-"}`,
+    `부서: ${task.department || "-"}`,
+    `담당: ${task.person || "-"}`,
+    `기간: ${task.startDate || "-"} ~ ${task.endDate || "-"}`,
+    `공수: ${Number.isFinite(task.manDays) ? task.manDays : 0}`,
+  ]
+  return lines.join("\n")
+}
+
 export function GanttView({
   projects,
   statusFilter,
@@ -190,6 +204,8 @@ export function GanttView({
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(new Set())
   const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<string>>(new Set())
   const [hiddenTaskIds, setHiddenTaskIds] = useState<Set<string>>(new Set())
+  const [hiddenProjectIds, setHiddenProjectIds] = useState<Set<string>>(new Set())
+  const [showHiddenProjects, setShowHiddenProjects] = useState(false)
   const [expandedHiddenProjectIds, setExpandedHiddenProjectIds] = useState<Set<string>>(new Set())
   const [expandedHiddenParentIds, setExpandedHiddenParentIds] = useState<Set<string>>(new Set())
   const [collapsedHiddenParentIds, setCollapsedHiddenParentIds] = useState<Set<string>>(new Set())
@@ -205,6 +221,10 @@ export function GanttView({
 
   const allProjectIds = useMemo(() => projects.map((project) => project.id), [projects])
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
+  const hiddenProjectCount = useMemo(
+    () => Array.from(hiddenProjectIds).filter((id) => projectById.has(id)).length,
+    [hiddenProjectIds, projectById],
+  )
   const allCollapsibleTaskIds = useMemo(() => {
     const ids: string[] = []
     const walk = (tasks: Task[]) => {
@@ -365,6 +385,24 @@ export function GanttView({
     })
   }
 
+  const toggleProjectVisibility = (projectId: string) => {
+    setHiddenProjectIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(projectId)) next.delete(projectId)
+      else next.add(projectId)
+      return next
+    })
+  }
+
+  useEffect(() => {
+    const validIds = new Set(projects.map((project) => project.id))
+    setHiddenProjectIds((prev) => {
+      const next = new Set(Array.from(prev).filter((id) => validIds.has(id)))
+      if (next.size === prev.size) return prev
+      return next
+    })
+  }, [projects])
+
   const countHiddenChildren = (task: Task): number =>
     (task.subTasks || []).reduce((count, child) => count + (hiddenTaskIds.has(child.id) ? 1 : 0), 0)
 
@@ -437,7 +475,11 @@ export function GanttView({
   const filteredProjects = useMemo<FilteredProject[]>(() => {
     const lowerQuery = searchQuery.trim().toLowerCase()
 
-    return projects
+    const sourceProjects = showHiddenProjects
+      ? projects
+      : projects.filter((project) => !hiddenProjectIds.has(project.id))
+
+    return sourceProjects
       .map((project) => {
         const projectMatchesSearch = lowerQuery.length > 0 && project.name.toLowerCase().includes(lowerQuery)
 
@@ -494,7 +536,7 @@ export function GanttView({
         }
         return true
       })
-  }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds, hiddenTaskIds, expandedHiddenParentIds, expandedHiddenProjectIds, collapsedHiddenParentIds])
+  }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds, hiddenTaskIds, hiddenProjectIds, showHiddenProjects, expandedHiddenParentIds, expandedHiddenProjectIds, collapsedHiddenParentIds])
 
   const visibleTaskMap = useMemo(() => {
     const map = new Map<string, FlattenedTask>()
@@ -920,6 +962,18 @@ export function GanttView({
                   Project & Task Details
                 </span>
                 <div className="flex items-center gap-1">
+                  {hiddenProjectCount > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 gap-1 px-2 text-[11px]"
+                      onClick={() => setShowHiddenProjects((prev) => !prev)}
+                    >
+                      {showHiddenProjects
+                        ? "- 숨긴 프로젝트 숨기기"
+                        : `+ 숨긴 프로젝트(${String(hiddenProjectCount).padStart(2, "0")}개)`}
+                    </Button>
+                  )}
                   <AddProjectDialog
                     onAddProject={onAddProject}
                     trigger={
@@ -1029,8 +1083,9 @@ export function GanttView({
                 <div key={project.id}>
                   {(() => {
                     const hiddenProjectCount = countHiddenInProjectById(project.id)
+                    const isProjectHidden = hiddenProjectIds.has(project.id)
                     return (
-                  <div className={cn("sticky top-[70px] z-30 flex min-h-9 border-b border-border", PROJECT_HEADER_ROW_BG_CLASS)}>
+                  <div className={cn("sticky top-[70px] z-30 flex min-h-9 border-b border-border", PROJECT_HEADER_ROW_BG_CLASS, isProjectHidden && "opacity-70")}>
                     <div
                       className={cn(
                         "sticky left-0 z-30 flex shrink-0 items-center gap-2 border-r border-border px-4 py-1.5 shadow-[2px_0_5px_rgba(0,0,0,0.05)] overflow-hidden",
@@ -1068,6 +1123,16 @@ export function GanttView({
                             </button>
                           }
                         />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-white hover:bg-white/15 hover:text-white"
+                          onClick={() => toggleProjectVisibility(project.id)}
+                          title={isProjectHidden ? "프로젝트 숨김 해제" : "프로젝트 숨기기"}
+                        >
+                          {isProjectHidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                        </Button>
                         {hiddenProjectCount > 0 && (
                           <>
                             <button
@@ -1148,6 +1213,7 @@ export function GanttView({
                       const depthPrefix = displayDepth >= 2 ? "• " : ""
                       const depthRowBgClass = getDepthRowBgClass(displayDepth)
                       const isParentTask = task.hasChildren
+                      const hasMemo = Boolean(task.memo?.trim())
                       const hiddenChildCount = countHiddenChildren(task)
                       const isParentHiddenExpanded =
                         !collapsedHiddenParentIds.has(task.id) &&
@@ -1275,17 +1341,28 @@ export function GanttView({
                                       trigger={
                                         <button
                                           type="button"
-                                          className="min-w-0 flex-1 truncate text-left text-xs font-bold transition-colors hover:text-primary"
+                                          className="min-w-0 flex-1 text-left text-xs font-bold transition-colors hover:text-primary"
                                         >
-                                          <span
-                                            className={cn(
-                                              "truncate",
-                                              task.category === "중요" ? "text-red-600" : "text-foreground",
+                                          <span className="flex min-w-0 items-center gap-1.5">
+                                            <span
+                                              className={cn(
+                                                "truncate",
+                                                task.category === "중요" ? "text-red-600" : "text-foreground",
+                                              )}
+                                              title={formatTaskHoverDetails(task)}
+                                            >
+                                              {depthPrefix}
+                                              {task.task}
+                                            </span>
+                                            {hasMemo && (
+                                              <span
+                                                className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-yellow-300 bg-yellow-100 text-yellow-700 shadow-[inset_0_-1px_0_rgba(245,158,11,0.35)]"
+                                                title={`메모: ${task.memo}`}
+                                              >
+                                                <span className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[5px] border-t-[5px] border-l-transparent border-t-yellow-300" />
+                                                <StickyNote className="h-2.5 w-2.5" />
+                                              </span>
                                             )}
-                                            title={task.memo?.trim() ? `${task.task}\n메모: ${task.memo}` : task.task}
-                                          >
-                                            {depthPrefix}
-                                            {task.task}
                                           </span>
                                         </button>
                                       }
@@ -1297,20 +1374,31 @@ export function GanttView({
                                       task={task}
                                       onEditTask={onEditTask}
                                       trigger={
-                                        <button className="min-w-0 flex-1 truncate text-left text-xs font-normal transition-colors hover:text-primary">
-                                          <span
-                                            className={cn(
-                                              "truncate",
-                                              task.category === "중요"
-                                                ? "text-red-600"
-                                                : task.status === "완료"
-                                                  ? "text-muted-foreground/50"
-                                                  : "text-foreground",
+                                        <button className="min-w-0 flex-1 text-left text-xs font-normal transition-colors hover:text-primary">
+                                          <span className="flex min-w-0 items-center gap-1.5">
+                                            <span
+                                              className={cn(
+                                                "truncate",
+                                                task.category === "중요"
+                                                  ? "text-red-600"
+                                                  : task.status === "완료"
+                                                    ? "text-muted-foreground/50"
+                                                    : "text-foreground",
+                                              )}
+                                              title={formatTaskHoverDetails(task)}
+                                            >
+                                              {depthPrefix}
+                                              {task.task}
+                                            </span>
+                                            {hasMemo && (
+                                              <span
+                                                className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-amber-300 bg-amber-100 text-amber-700 shadow-[inset_0_-1px_0_rgba(245,158,11,0.35)]"
+                                                title={`메모: ${task.memo}`}
+                                              >
+                                                <span className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[5px] border-t-[5px] border-l-transparent border-t-amber-300" />
+                                                <StickyNote className="h-2.5 w-2.5" />
+                                              </span>
                                             )}
-                                            title={task.memo?.trim() ? `${task.task}\n메모: ${task.memo}` : task.task}
-                                          >
-                                            {depthPrefix}
-                                            {task.task}
                                           </span>
                                         </button>
                                       }

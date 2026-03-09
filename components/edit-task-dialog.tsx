@@ -22,6 +22,7 @@ import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import { cn } from "@/lib/utils"
 import { getPersonList } from "@/lib/data"
+import { calculateManDaysBetweenDates } from "@/lib/man-days"
 import type { Task, TaskStatus, TaskCategory } from "@/lib/data"
 
 interface EditTaskDialogProps {
@@ -64,6 +65,7 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
   const [person, setPerson] = useState(task.person)
   const [status, setStatus] = useState<TaskStatus>(task.status)
   const [manDays, setManDays] = useState(task.manDays.toString())
+  const [includeWeekends, setIncludeWeekends] = useState(false)
   const [startDate, setStartDate] = useState<Date | undefined>()
   const [endDate, setEndDate] = useState<Date | undefined>()
 
@@ -79,6 +81,7 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
     setPerson(task.person)
     setStatus(task.status)
     setManDays(task.manDays.toString())
+    setIncludeWeekends(false)
     setStartDate(parseKoreanDate(task.startDate))
     setEndDate(parseKoreanDate(task.endDate))
   }, [open, task])
@@ -107,6 +110,12 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
 
     onEditTask(updatedTask)
     setOpen(false)
+  }
+
+  const handleAutoCalculateManDays = () => {
+    if (!startDate || !endDate) return
+    const calculated = calculateManDaysBetweenDates(startDate, endDate, includeWeekends)
+    setManDays(String(calculated))
   }
 
   return (
@@ -181,8 +190,29 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="edit-manDays">공수 (일)</Label>
-                <Input id="edit-manDays" type="number" step="0.5" value={manDays} onChange={(e) => setManDays(e.target.value)} />
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="edit-manDays">공수 (일)</Label>
+                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={includeWeekends}
+                      onChange={(e) => setIncludeWeekends(e.target.checked)}
+                    />
+                    주말 포함
+                  </label>
+                </div>
+                <div className="flex gap-2">
+                  <Input id="edit-manDays" type="number" step="0.5" value={manDays} onChange={(e) => setManDays(e.target.value)} />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="shrink-0"
+                    disabled={!startDate || !endDate}
+                    onClick={handleAutoCalculateManDays}
+                  >
+                    자동 계산
+                  </Button>
+                </div>
               </div>
             </div>
 

@@ -21,6 +21,7 @@ import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import { cn } from "@/lib/utils"
 import { getPersonList } from "@/lib/data"
+import { calculateManDaysBetweenDates } from "@/lib/man-days"
 import type { Task, TaskStatus, TaskCategory } from "@/lib/data"
 
 interface AddTaskDialogProps {
@@ -38,6 +39,7 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
   const [person, setPerson] = useState("")
   const [status, setStatus] = useState<TaskStatus>("대기")
   const [manDays, setManDays] = useState("0")
+  const [includeWeekends, setIncludeWeekends] = useState(false)
   const [startDate, setStartDate] = useState<Date | undefined>(new Date())
   const [endDate, setEndDate] = useState<Date | undefined>(new Date())
 
@@ -72,6 +74,12 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
     resetForm()
   }
 
+  const handleAutoCalculateManDays = () => {
+    if (!startDate || !endDate) return
+    const calculated = calculateManDaysBetweenDates(startDate, endDate, includeWeekends)
+    setManDays(String(calculated))
+  }
+
   const resetForm = () => {
     setTaskName("")
     setCategory("일반")
@@ -79,6 +87,7 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
     setPerson("")
     setStatus("대기")
     setManDays("0")
+    setIncludeWeekends(false)
     setStartDate(new Date())
     setEndDate(new Date())
   }
@@ -157,8 +166,29 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="manDays">공수 (일)</Label>
-                <Input id="manDays" type="number" step="0.5" value={manDays} onChange={(e) => setManDays(e.target.value)} />
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="manDays">공수 (일)</Label>
+                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={includeWeekends}
+                      onChange={(e) => setIncludeWeekends(e.target.checked)}
+                    />
+                    주말 포함
+                  </label>
+                </div>
+                <div className="flex gap-2">
+                  <Input id="manDays" type="number" step="0.5" value={manDays} onChange={(e) => setManDays(e.target.value)} />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="shrink-0"
+                    disabled={!startDate || !endDate}
+                    onClick={handleAutoCalculateManDays}
+                  >
+                    자동 계산
+                  </Button>
+                </div>
               </div>
             </div>
 
