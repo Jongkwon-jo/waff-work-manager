@@ -1,14 +1,17 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
+import { AuthGate } from '@/components/auth/auth-gate'
+import { AuthProvider } from '@/components/auth/auth-provider'
+import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
 
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: '전략기획부 사업일정표',
-  description: '전략기획부 업무관리 대시보드 - 프로젝트 및 업무 일정 관리',
+  title: 'WorkHub',
+  description: 'WorkHub',
   generator: 'v0.app',
   icons: {
     icon: [
@@ -37,7 +40,10 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body className="font-sans antialiased">
-        {children}
+        <AuthProvider>
+          <AuthGate>{children}</AuthGate>
+          <Toaster />
+        </AuthProvider>
         <Analytics />
       </body>
     </html>

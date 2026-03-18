@@ -25,32 +25,19 @@ import {
   type UserPagePermissions,
 } from "./page-access"
 
-const PROJECTS_COLLECTION = "projects"
-const TASKS_COLLECTION = "tasks"
-const HISTORY_COLLECTION = "history"
-const SETTINGS_COLLECTION = "settings"
-const DASHBOARD_PREFERENCES_DOC = "dashboard_preferences"
-const DEPARTMENT_PERSON_SETTINGS_DOC = "department_person_settings"
+const PROJECTS_COLLECTION = "fa_projects"
+const TASKS_COLLECTION = "fa_tasks"
+const HISTORY_COLLECTION = "fa_history"
+const SETTINGS_COLLECTION = "fa_settings"
+const DASHBOARD_PREFERENCES_DOC = "fa_dashboard_preferences"
 const USER_PROFILES_COLLECTION = "user_profiles"
 const USER_PAGE_PERMISSIONS_COLLECTION = "user_page_permissions"
 
 export type DashboardSortBy = "name" | "type" | "progress" | "latest"
-export const DEPARTMENT_PERSON_GROUPS = ["ICT", "FA", "전략기획", "기타"] as const
-export type DepartmentPersonGroup = (typeof DEPARTMENT_PERSON_GROUPS)[number]
-export type MyPageTaskPriority = "high" | "medium" | "low"
-export type MyPageTaskPreference = {
-  checked: boolean
-  priority: MyPageTaskPriority
-  important: boolean
-}
 export type UserProfile = {
   email: string
   lastLoginAt?: Date
-  taskAliases?: string[]
-  myPageTaskPreferences?: Record<string, MyPageTaskPreference>
 }
-
-export type DepartmentPersonSettings = Record<DepartmentPersonGroup, string[]>
 
 export type UserPagePermissionEntry = {
   email: string
@@ -72,7 +59,6 @@ export interface ChangeHistoryEntry {
   id: string
   entityType: HistoryEntityType
   action: HistoryActionType
-  actorEmail?: string
   entityId?: string
   projectId?: string
   before?: Record<string, unknown>
@@ -82,13 +68,6 @@ export interface ChangeHistoryEntry {
 }
 
 export type HistoryEntryInput = Omit<ChangeHistoryEntry, "id" | "createdAt">
-
-export const DEFAULT_DEPARTMENT_PERSON_SETTINGS: DepartmentPersonSettings = {
-  ICT: [],
-  FA: [],
-  전략기획: [],
-  기타: [],
-}
 
 function toStringOrEmpty(value: unknown): string {
   if (typeof value === "string") return value.trim()
@@ -125,62 +104,11 @@ function compactObject<T extends Record<string, unknown>>(obj: T): T {
   return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T
 }
 
-function normalizeMyPageTaskPreferences(raw: unknown): Record<string, MyPageTaskPreference> {
-  if (!raw || typeof raw !== "object") return {}
-
-  return Object.fromEntries(
-    Object.entries(raw as Record<string, unknown>)
-      .map(([key, value]) => {
-        if (!value || typeof value !== "object") return null
-        const candidate = value as Record<string, unknown>
-        const priority =
-          candidate.priority === "high" || candidate.priority === "medium" || candidate.priority === "low"
-            ? candidate.priority
-            : "medium"
-
-        return [
-          key,
-          {
-            checked: Boolean(candidate.checked),
-            priority,
-            important: Boolean(candidate.important),
-          } satisfies MyPageTaskPreference,
-        ] as const
-      })
-      .filter((entry): entry is readonly [string, MyPageTaskPreference] => Boolean(entry)),
-  )
-}
-
-function uniqueTrimmedStrings(values: string[]) {
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
-}
-
 function todayLabel(): string {
   const now = new Date()
   const mm = String(now.getMonth() + 1).padStart(2, "0")
   const dd = String(now.getDate()).padStart(2, "0")
   return `${mm}월 ${dd}일`
-}
-
-function normalizeDepartmentPersonSettings(
-  raw?: Partial<Record<DepartmentPersonGroup, unknown>>,
-): DepartmentPersonSettings {
-  return {
-    ICT: Array.isArray(raw?.ICT) ? uniqueTrimmedStrings(raw.ICT.filter((value): value is string => typeof value === "string")) : [],
-    FA: Array.isArray(raw?.FA) ? uniqueTrimmedStrings(raw.FA.filter((value): value is string => typeof value === "string")) : [],
-    전략기획: Array.isArray(raw?.전략기획)
-      ? uniqueTrimmedStrings(raw.전략기획.filter((value): value is string => typeof value === "string"))
-      : [],
-    기타: Array.isArray(raw?.기타) ? uniqueTrimmedStrings(raw.기타.filter((value): value is string => typeof value === "string")) : [],
-  }
-}
-
-export function resolveDepartmentPersonGroup(department: string): DepartmentPersonGroup {
-  const normalized = department.trim()
-  if (normalized === "ICT") return "ICT"
-  if (normalized === "FA") return "FA"
-  if (normalized === "전략기획" || normalized === "전략") return "전략기획"
-  return "기타"
 }
 
 function normalizeTask(raw: any): Task {
@@ -376,27 +304,24 @@ export async function updateTaskOrdersInDB(taskIds: string[]): Promise<void> {
 }
 
 export async function addHistoryEntry(entry: HistoryEntryInput): Promise<string> {
-  const actorEmail = toOptionalString(entry.actorEmail)
   const payload = compactObject({
     ...entry,
-    actorEmail: actorEmail ? normalizeEmail(actorEmail) : undefined,
     createdAt: serverTimestamp(),
   })
   const docRef = await addDoc(collection(db, HISTORY_COLLECTION), payload)
   return docRef.id
 }
 
-export async function fetchHistoryEntries(limitCount = 30, actorEmail?: string): Promise<ChangeHistoryEntry[]> {
-  const historyQ = query(collection(db, HISTORY_COLLECTION), orderBy("createdAt", "desc"), limit(Math.max(limitCount * 5, limitCount)))
+export async function fetchHistoryEntries(limitCount = 30): Promise<ChangeHistoryEntry[]> {
+  const historyQ = query(collection(db, HISTORY_COLLECTION), orderBy("createdAt", "desc"), limit(limitCount))
   const snapshot = await getDocs(historyQ)
 
-  const entries = snapshot.docs.map((docSnap) => {
+  return snapshot.docs.map((docSnap) => {
     const raw = docSnap.data() as any
     return {
       id: docSnap.id,
       entityType: (toStringOrEmpty(raw?.entityType) as HistoryEntityType) || "batch",
       action: (toStringOrEmpty(raw?.action) as HistoryActionType) || "batch_update",
-      actorEmail: toOptionalString(raw?.actorEmail),
       entityId: toOptionalString(raw?.entityId),
       projectId: toOptionalString(raw?.projectId),
       before: (raw?.before as Record<string, unknown> | undefined) || undefined,
@@ -405,13 +330,6 @@ export async function fetchHistoryEntries(limitCount = 30, actorEmail?: string):
       createdAt: raw?.createdAt?.toDate?.() || undefined,
     }
   })
-
-  if (!actorEmail) return entries.slice(0, limitCount)
-
-  const normalizedActorEmail = normalizeEmail(actorEmail)
-  return entries
-    .filter((entry) => normalizeEmail(entry.actorEmail || "") === normalizedActorEmail)
-    .slice(0, limitCount)
 }
 
 function getCollectionForEntity(entityType: "project" | "task") {
@@ -500,33 +418,6 @@ export async function saveDashboardSortBy(sortBy: DashboardSortBy): Promise<void
   )
 }
 
-export function subscribeDepartmentPersonSettings(callback: (settings: DepartmentPersonSettings) => void) {
-  const settingsRef = doc(db, SETTINGS_COLLECTION, DEPARTMENT_PERSON_SETTINGS_DOC)
-  return onSnapshot(
-    settingsRef,
-    (snapshot) => {
-      const raw = snapshot.data() as Partial<Record<DepartmentPersonGroup, unknown>> | undefined
-      callback(normalizeDepartmentPersonSettings(raw))
-    },
-    (error) => {
-      console.error("Department person settings snapshot error:", error)
-      callback({ ...DEFAULT_DEPARTMENT_PERSON_SETTINGS })
-    },
-  )
-}
-
-export async function saveDepartmentPersonSettings(settings: DepartmentPersonSettings): Promise<void> {
-  const settingsRef = doc(db, SETTINGS_COLLECTION, DEPARTMENT_PERSON_SETTINGS_DOC)
-  await setDoc(
-    settingsRef,
-    {
-      ...normalizeDepartmentPersonSettings(settings),
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  )
-}
-
 export async function upsertUserProfile(email: string): Promise<void> {
   const normalizedEmail = normalizeEmail(email)
   if (!normalizedEmail) return
@@ -547,19 +438,10 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
     (snapshot) => {
       const profiles = snapshot.docs
         .map((docSnap) => {
-          const raw = docSnap.data() as {
-            email?: unknown
-            lastLoginAt?: { toDate?: () => Date }
-            taskAliases?: unknown
-            myPageTaskPreferences?: unknown
-          }
+          const raw = docSnap.data() as { email?: unknown; lastLoginAt?: { toDate?: () => Date } }
           return {
             email: normalizeEmail(toStringOrEmpty(raw?.email)),
             lastLoginAt: raw?.lastLoginAt?.toDate?.() || undefined,
-            taskAliases: Array.isArray(raw?.taskAliases)
-              ? raw.taskAliases.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
-              : [],
-            myPageTaskPreferences: normalizeMyPageTaskPreferences(raw?.myPageTaskPreferences),
           } satisfies UserProfile
         })
         .filter((profile) => Boolean(profile.email))
@@ -570,75 +452,6 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
     (error) => {
       console.error("User profiles snapshot error:", error)
     },
-  )
-}
-
-export function subscribeCurrentUserProfile(email: string, callback: (profile: UserProfile | null) => void) {
-  const normalizedEmail = normalizeEmail(email)
-  if (!normalizedEmail) {
-    callback(null)
-    return () => {}
-  }
-
-  return onSnapshot(
-    doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
-    (snapshot) => {
-      if (!snapshot.exists()) {
-        callback(null)
-        return
-      }
-
-      const raw = snapshot.data() as {
-        email?: unknown
-        lastLoginAt?: { toDate?: () => Date }
-        taskAliases?: unknown
-        myPageTaskPreferences?: unknown
-      }
-      callback({
-        email: normalizeEmail(toStringOrEmpty(raw?.email)),
-        lastLoginAt: raw?.lastLoginAt?.toDate?.() || undefined,
-        taskAliases: Array.isArray(raw?.taskAliases)
-          ? raw.taskAliases.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
-          : [],
-        myPageTaskPreferences: normalizeMyPageTaskPreferences(raw?.myPageTaskPreferences),
-      })
-    },
-    (error) => {
-      console.error("Current user profile snapshot error:", error)
-    },
-  )
-}
-
-export async function saveUserTaskAliases(email: string, taskAliases: string[]): Promise<void> {
-  const normalizedEmail = normalizeEmail(email)
-  if (!normalizedEmail) return
-
-  await setDoc(
-    doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
-    {
-      email: normalizedEmail,
-      taskAliases: Array.from(new Set(taskAliases.map((alias) => alias.trim()).filter(Boolean))),
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  )
-}
-
-export async function saveMyPageTaskPreferences(
-  email: string,
-  myPageTaskPreferences: Record<string, MyPageTaskPreference>,
-): Promise<void> {
-  const normalizedEmail = normalizeEmail(email)
-  if (!normalizedEmail) return
-
-  await setDoc(
-    doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
-    {
-      email: normalizedEmail,
-      myPageTaskPreferences,
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
   )
 }
 
@@ -672,9 +485,7 @@ export function subscribeAllUserPagePermissions(callback: (entries: UserPagePerm
         .map((docSnap) => {
           const raw = docSnap.data() as {
             email?: unknown
-            strategyWorkManagement?: unknown
             workManagement?: unknown
-            faWorkManagement?: unknown
             gptTest?: unknown
             updatedAt?: { toDate?: () => Date }
           }

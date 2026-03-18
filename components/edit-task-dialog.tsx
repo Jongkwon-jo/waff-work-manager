@@ -21,8 +21,12 @@ import { Calendar } from "@/components/ui/calendar"
 import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import { cn } from "@/lib/utils"
-import { getPersonList } from "@/lib/data"
 import { calculateManDaysBetweenDates } from "@/lib/man-days"
+import {
+  DEFAULT_DEPARTMENT_PERSON_SETTINGS,
+  resolveDepartmentPersonGroup,
+  subscribeDepartmentPersonSettings,
+} from "@/lib/firestore-service"
 import type { Task, TaskStatus, TaskCategory } from "@/lib/data"
 
 interface EditTaskDialogProps {
@@ -68,8 +72,17 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
   const [includeWeekends, setIncludeWeekends] = useState(false)
   const [startDate, setStartDate] = useState<Date | undefined>()
   const [endDate, setEndDate] = useState<Date | undefined>()
+  const [departmentPersonSettings, setDepartmentPersonSettings] = useState(DEFAULT_DEPARTMENT_PERSON_SETTINGS)
 
-  const personOptions = useMemo(() => getPersonList(), [])
+  useEffect(() => {
+    const unsubscribe = subscribeDepartmentPersonSettings(setDepartmentPersonSettings)
+    return () => unsubscribe()
+  }, [])
+
+  const personOptions = useMemo(() => {
+    const group = resolveDepartmentPersonGroup(department)
+    return departmentPersonSettings[group] || []
+  }, [department, departmentPersonSettings])
 
   useEffect(() => {
     if (!open) return
@@ -163,10 +176,10 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="전략">전략</SelectItem>
+                    <SelectItem value="전략기획">전략기획</SelectItem>
                     <SelectItem value="ICT">ICT</SelectItem>
                     <SelectItem value="FA">FA</SelectItem>
-                    <SelectItem value="기술고문">기술고문</SelectItem>
+                    <SelectItem value="기타">기타</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Plus, CalendarIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -20,30 +20,53 @@ import { Calendar } from "@/components/ui/calendar"
 import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 import { cn } from "@/lib/utils"
-import { getPersonList } from "@/lib/data"
 import { calculateManDaysBetweenDates } from "@/lib/man-days"
+import {
+  DEFAULT_DEPARTMENT_PERSON_SETTINGS,
+  resolveDepartmentPersonGroup,
+  subscribeDepartmentPersonSettings,
+} from "@/lib/firestore-service"
 import type { Task, TaskStatus, TaskCategory } from "@/lib/data"
 
 interface AddTaskDialogProps {
   projectId: string
   parentId?: string
+  defaultPerson?: string
   onAddTask: (task: Task) => void
   trigger?: React.ReactNode
 }
 
-export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTaskDialogProps) {
+export function AddTaskDialog({ projectId, parentId, defaultPerson = "", onAddTask, trigger }: AddTaskDialogProps) {
   const [open, setOpen] = useState(false)
   const [taskName, setTaskName] = useState("")
   const [category, setCategory] = useState<TaskCategory>("일반")
-  const [department, setDepartment] = useState("전략")
-  const [person, setPerson] = useState("")
+  const [department, setDepartment] = useState("전략기획")
+  const [person, setPerson] = useState(defaultPerson)
   const [status, setStatus] = useState<TaskStatus>("대기")
   const [manDays, setManDays] = useState("0")
   const [includeWeekends, setIncludeWeekends] = useState(false)
   const [startDate, setStartDate] = useState<Date | undefined>(new Date())
   const [endDate, setEndDate] = useState<Date | undefined>(new Date())
+  const [departmentPersonSettings, setDepartmentPersonSettings] = useState(DEFAULT_DEPARTMENT_PERSON_SETTINGS)
 
-  const personOptions = useMemo(() => getPersonList(), [])
+  useEffect(() => {
+    const unsubscribe = subscribeDepartmentPersonSettings(setDepartmentPersonSettings)
+    return () => unsubscribe()
+  }, [])
+
+  const personOptions = useMemo(() => {
+    const group = resolveDepartmentPersonGroup(department)
+    return departmentPersonSettings[group] || []
+  }, [department, departmentPersonSettings])
+
+  useEffect(() => {
+    if (!open) return
+    if (defaultPerson && personOptions.includes(defaultPerson)) {
+      setPerson(defaultPerson)
+      return
+    }
+    setPerson((prev) => (personOptions.includes(prev) ? prev : personOptions[0] || ""))
+  }, [defaultPerson, open, personOptions])
 
   const formatDate = (date: Date | undefined) => {
     if (!date) return ""
@@ -83,8 +106,8 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
   const resetForm = () => {
     setTaskName("")
     setCategory("일반")
-    setDepartment("전략")
-    setPerson("")
+    setDepartment("전략기획")
+    setPerson(defaultPerson || departmentPersonSettings["전략기획"]?.[0] || "")
     setStatus("대기")
     setManDays("0")
     setIncludeWeekends(false)
@@ -134,18 +157,18 @@ export function AddTaskDialog({ projectId, parentId, onAddTask, trigger }: AddTa
               </div>
               <div className="grid gap-2">
                 <Label>부서</Label>
-                <Select value={department} onValueChange={setDepartment}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="전략">전략</SelectItem>
-                    <SelectItem value="ICT">ICT</SelectItem>
-                    <SelectItem value="FA">FA</SelectItem>
-                    <SelectItem value="기술고문">기술고문</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                  <Select value={department} onValueChange={setDepartment}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="전략기획">전략기획</SelectItem>
+                      <SelectItem value="ICT">ICT</SelectItem>
+                      <SelectItem value="FA">FA</SelectItem>
+                      <SelectItem value="기타">기타</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">

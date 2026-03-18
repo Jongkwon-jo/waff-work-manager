@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronRight,
   GripVertical,
+  FileSpreadsheet,
   Eye,
   EyeOff,
   StickyNote,
@@ -58,6 +59,20 @@ type FlattenedTask = Task & {
 
 type FilteredProject = Omit<Project, "tasks"> & {
   tasks: FlattenedTask[]
+}
+
+type ExportRow = {
+  kind: "project" | "task"
+  name: string
+  type?: string
+  category?: string
+  department?: string
+  person?: string
+  status?: string
+  startDate?: string
+  endDate?: string
+  manDays?: number
+  days: boolean[]
 }
 
 const CELL_WIDTH = 28
@@ -110,6 +125,15 @@ function parseListValue(value: string): string[] {
 
 function joinListValue(values: string[]): string {
   return Array.from(new Set(values.map((v) => v.trim()).filter(Boolean))).join(", ")
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;")
 }
 
 function getMeasuredTextWidth(text: string, font: string) {
@@ -576,6 +600,7 @@ export function GanttView({
     })
   }, [])
 
+
   const { leftPanelWidth, detailPanelWidth, detailGridTemplate } = useMemo(() => {
     const font = typeof document !== "undefined" ? getComputedStyle(document.body).font : "12px sans-serif"
     const leftTexts = [
@@ -690,6 +715,135 @@ export function GanttView({
     })
     return map
   }, [allDays])
+
+  const exportRows = useMemo<ExportRow[]>(() => {
+    return filteredProjects.flatMap((project) => {
+      const projectRow: ExportRow = {
+        kind: "project",
+        name: project.name,
+        type: project.type,
+        days: new Array(allDays.length).fill(false),
+      }
+
+      const taskRows = project.tasks.map((task) => {
+        const start = parseDate(task.startDate)
+        const end = parseDate(task.endDate)
+        const startIndex =
+          start ? allDays.findIndex((d) => d.month === start.month && d.day === start.day) : -1
+        const endIndex = end ? allDays.findIndex((d) => d.month === end.month && d.day === end.day) : -1
+        const days = allDays.map(
+          (_, index) => startIndex !== -1 && endIndex !== -1 && index >= startIndex && index <= endIndex,
+        )
+
+        return {
+          kind: "task" as const,
+          name: `${" ".repeat(task.depth * 2)}${task.task}`,
+          category: task.category,
+          department: task.department,
+          person: task.person,
+          status: task.status,
+          startDate: task.startDate,
+          endDate: task.endDate,
+          manDays: task.manDays,
+          days,
+        }
+      })
+
+      return [projectRow, ...taskRows]
+    })
+  }, [allDays, filteredProjects])
+
+  const exportTitle = useMemo(() => {
+    if (months.length === 0) return "사업일정표"
+    return `사업일정표_${months[0].label}_${months[months.length - 1].label}`
+  }, [months])
+
+  const buildExportHtml = (title: string) => {
+    const monthHeader = months
+      .map(
+        (month) =>
+          `<th colspan="${getDaysInMonth(month.year, month.month)}" style="background:#e2e8f0;border:1px solid #cbd5e1;padding:6px 4px;font-size:12px;">${escapeHtml(month.label)}</th>`,
+      )
+      .join("")
+
+    const dayHeader = allDays
+      .map((day) => {
+        const bg = day.isToday ? "#fef08a" : day.isWeekend ? "#f8fafc" : "#ffffff"
+        return `<th style="background:${bg};border:1px solid #cbd5e1;padding:4px 2px;font-size:10px;min-width:24px;">${day.label}<br/>${day.dow}</th>`
+      })
+      .join("")
+
+    const bodyRows = exportRows
+      .map((row) => {
+        const labelBg = row.kind === "project" ? "#dbeafe" : "#ffffff"
+        const weight = row.kind === "project" ? "700" : "400"
+        const cells = row.days
+          .map((active) => {
+            const bg = active ? "#2563eb" : "#ffffff"
+            return `<td style="border:1px solid #cbd5e1;background:${bg};color:#ffffff;text-align:center;font-size:10px;padding:0;">${active ? "■" : ""}</td>`
+          })
+          .join("")
+
+        return `
+          <tr>
+            <td style="border:1px solid #cbd5e1;background:${labelBg};padding:6px 8px;font-weight:${weight};white-space:pre-wrap;">${escapeHtml(row.name)}</td>
+            <td style="border:1px solid #cbd5e1;padding:6px 8px;">${escapeHtml(row.type || "")}</td>
+            <td style="border:1px solid #cbd5e1;padding:6px 8px;">${escapeHtml(row.category || "")}</td>
+            <td style="border:1px solid #cbd5e1;padding:6px 8px;">${escapeHtml(row.department || "")}</td>
+            <td style="border:1px solid #cbd5e1;padding:6px 8px;">${escapeHtml(row.person || "")}</td>
+            <td style="border:1px solid #cbd5e1;padding:6px 8px;">${escapeHtml(row.status || "")}</td>
+            <td style="border:1px solid #cbd5e1;padding:6px 8px;">${escapeHtml(row.startDate || "")}</td>
+            <td style="border:1px solid #cbd5e1;padding:6px 8px;">${escapeHtml(row.endDate || "")}</td>
+            <td style="border:1px solid #cbd5e1;padding:6px 8px;text-align:right;">${row.manDays ?? ""}</td>
+            ${cells}
+          </tr>
+        `
+      })
+      .join("")
+
+    return `
+      <!DOCTYPE html>
+      <html lang="ko">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(title)}</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; margin: 24px;">
+          <h1 style="margin:0 0 8px; font-size: 22px;">${escapeHtml(title)}</h1>
+          <p style="margin:0 0 16px; color:#475569; font-size:12px;">생성일시: ${escapeHtml(new Date().toLocaleString("ko-KR"))}</p>
+          <table style="border-collapse:collapse; width:max-content; min-width:100%;">
+            <thead>
+              <tr>
+                <th rowspan="2" style="border:1px solid #cbd5e1;background:#e2e8f0;padding:6px 8px;">프로젝트/업무</th>
+                <th rowspan="2" style="border:1px solid #cbd5e1;background:#e2e8f0;padding:6px 8px;">유형</th>
+                <th rowspan="2" style="border:1px solid #cbd5e1;background:#e2e8f0;padding:6px 8px;">구분</th>
+                <th rowspan="2" style="border:1px solid #cbd5e1;background:#e2e8f0;padding:6px 8px;">부서</th>
+                <th rowspan="2" style="border:1px solid #cbd5e1;background:#e2e8f0;padding:6px 8px;">담당자</th>
+                <th rowspan="2" style="border:1px solid #cbd5e1;background:#e2e8f0;padding:6px 8px;">상태</th>
+                <th rowspan="2" style="border:1px solid #cbd5e1;background:#e2e8f0;padding:6px 8px;">시작일</th>
+                <th rowspan="2" style="border:1px solid #cbd5e1;background:#e2e8f0;padding:6px 8px;">종료일</th>
+                <th rowspan="2" style="border:1px solid #cbd5e1;background:#e2e8f0;padding:6px 8px;">공수</th>
+                ${monthHeader}
+              </tr>
+              <tr>${dayHeader}</tr>
+            </thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </body>
+      </html>
+    `
+  }
+
+  const handleExportExcel = () => {
+    const html = buildExportHtml(exportTitle)
+    const blob = new Blob(["\ufeff", html], { type: "application/vnd.ms-excel;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${exportTitle}.xls`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
 
   const taskById = useMemo(() => {
     const map = new Map<string, Task>()
@@ -962,6 +1116,15 @@ export function GanttView({
                   Project & Task Details
                 </span>
                 <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1.5 px-2 text-[11px]"
+                    onClick={handleExportExcel}
+                  >
+                    <FileSpreadsheet className="h-3.5 w-3.5" />
+                    엑셀 내보내기
+                  </Button>
                   {hiddenProjectCount > 0 && (
                     <Button
                       variant="ghost"
@@ -1415,6 +1578,7 @@ export function GanttView({
                                 <AddTaskDialog
                                   projectId={task.projectId}
                                   parentId={task.id}
+                                  defaultPerson={task.person}
                                   onAddTask={handleAddNestedSubTask}
                                   trigger={
                                     <Button
