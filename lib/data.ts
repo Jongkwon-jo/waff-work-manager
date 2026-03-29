@@ -26,6 +26,7 @@ export type ProjectType = "SI" | "R&D" | "S/F" | "Etc"
 export interface Project {
   id: string
   displayOrder?: number
+  isHidden?: boolean
   name: string
   type: ProjectType
   period?: string

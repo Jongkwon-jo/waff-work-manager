@@ -187,6 +187,7 @@ function buildProjectTree(projectsData: any[], allTasksData: any[]): Project[] {
     return {
       ...projectData,
       id: projectId,
+      isHidden: toBooleanOr(projectData.isHidden ?? projectData.is_hidden, false),
       tasks: roots,
       createdAt: projectData.createdAt?.toDate?.() || new Date(0),
     } as Project

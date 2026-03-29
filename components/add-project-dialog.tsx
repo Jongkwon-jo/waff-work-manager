@@ -37,6 +37,7 @@ export function AddProjectDialog({ onAddProject, trigger }: AddProjectDialogProp
       name,
       type,
       period,
+      isHidden: false,
       tasks: [],
     }
 

@@ -9,11 +9,13 @@ import { EditProjectDialog } from "./edit-project-dialog"
 import { AddTaskDialog } from "./add-task-dialog"
 import { AddProjectDialog } from "./add-project-dialog"
 import { Button } from "./ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover"
 import { Calendar } from "./ui/calendar"
 import {
   Trash2,
+  ChevronLeft,
   ChevronDown,
   ChevronRight,
   GripVertical,
@@ -73,6 +75,10 @@ type ExportRow = {
   endDate?: string
   manDays?: number
   days: boolean[]
+}
+
+type ExportProject = Pick<Project, "id" | "name" | "type"> & {
+  tasks: FlattenedTask[]
 }
 
 const CELL_WIDTH = 28
@@ -197,6 +203,24 @@ function formatTaskHoverDetails(task: Task): string {
   return lines.join("\n")
 }
 
+function formatTaskDateRange(task: Pick<Task, "startDate" | "endDate">): string {
+  const start = task.startDate?.trim()
+  const end = task.endDate?.trim()
+  if (start && end) return start === end ? start : `${start} ~ ${end}`
+  return start || end || ""
+}
+
+function flattenTasksForExport(tasks: Task[], depth = 0): FlattenedTask[] {
+  return tasks.flatMap((task) => {
+    const flattenedTask: FlattenedTask = {
+      ...task,
+      depth,
+      hasChildren: (task.subTasks?.length || 0) > 0,
+    }
+    return [flattenedTask, ...flattenTasksForExport(task.subTasks || [], depth + 1)]
+  })
+}
+
 export function GanttView({
   projects,
   statusFilter,
@@ -216,6 +240,14 @@ export function GanttView({
   const timelineScrollRef = useRef<HTMLDivElement>(null)
   const scrollRafRef = useRef<number | null>(null)
   const pendingScrollTopRef = useRef(0)
+  const [displayMonthDate, setDisplayMonthDate] = useState(() => {
+    const now = new Date()
+    return new Date(now.getFullYear(), now.getMonth(), 1)
+  })
+  const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false)
+  const [isExportPickerOpen, setIsExportPickerOpen] = useState(false)
+  const [exportScope, setExportScope] = useState<"all" | "single">("all")
+  const [exportProjectId, setExportProjectId] = useState("")
 
   const [dragInfo, setDragInfo] = useState<{
     taskId: string
@@ -410,20 +442,25 @@ export function GanttView({
   }
 
   const toggleProjectVisibility = (projectId: string) => {
-    setHiddenProjectIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(projectId)) next.delete(projectId)
-      else next.add(projectId)
-      return next
+    const project = projectById.get(projectId)
+    if (!project) return
+    onEditProject({
+      ...project,
+      isHidden: !hiddenProjectIds.has(projectId),
     })
   }
 
   useEffect(() => {
-    const validIds = new Set(projects.map((project) => project.id))
+    const nextHidden = new Set(projects.filter((project) => project.isHidden).map((project) => project.id))
     setHiddenProjectIds((prev) => {
-      const next = new Set(Array.from(prev).filter((id) => validIds.has(id)))
-      if (next.size === prev.size) return prev
-      return next
+      if (prev.size === nextHidden.size) {
+        let unchanged = true
+        prev.forEach((id) => {
+          if (!nextHidden.has(id)) unchanged = false
+        })
+        if (unchanged) return prev
+      }
+      return nextHidden
     })
   }, [projects])
 
@@ -585,9 +622,8 @@ export function GanttView({
   }
 
   const months = useMemo(() => {
-    const now = new Date()
-    const baseYear = now.getFullYear()
-    const baseMonth = now.getMonth()
+    const baseYear = displayMonthDate.getFullYear()
+    const baseMonth = displayMonthDate.getMonth()
 
     return Array.from({ length: 7 }, (_, i) => {
       const offset = i - 3
@@ -598,7 +634,31 @@ export function GanttView({
         label: `${d.getFullYear()}년 ${d.getMonth() + 1}월`,
       }
     })
-  }, [])
+  }, [displayMonthDate])
+
+  const displayMonthLabel = `${displayMonthDate.getFullYear()}년 ${displayMonthDate.getMonth() + 1}월`
+
+  const monthPickerYearOptions = useMemo(() => {
+    const baseYear = displayMonthDate.getFullYear()
+    return Array.from({ length: 9 }, (_, index) => String(baseYear - 4 + index))
+  }, [displayMonthDate])
+
+  const handleDisplayMonthMove = (offset: number) => {
+    setDisplayMonthDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + offset, 1))
+  }
+
+  const handleDisplayMonthYearChange = (value: string) => {
+    const nextYear = Number.parseInt(value, 10)
+    if (!Number.isFinite(nextYear)) return
+    setDisplayMonthDate((prev) => new Date(nextYear, prev.getMonth(), 1))
+  }
+
+  const handleDisplayMonthMonthChange = (value: string) => {
+    const nextMonth = Number.parseInt(value, 10)
+    if (!Number.isFinite(nextMonth)) return
+    setDisplayMonthDate((prev) => new Date(prev.getFullYear(), nextMonth, 1))
+    setIsMonthPickerOpen(false)
+  }
 
 
   const { leftPanelWidth, detailPanelWidth, detailGridTemplate } = useMemo(() => {
@@ -716,8 +776,36 @@ export function GanttView({
     return map
   }, [allDays])
 
-  const exportRows = useMemo<ExportRow[]>(() => {
-    return filteredProjects.flatMap((project) => {
+  const exportTitle = useMemo(() => {
+    if (months.length === 0) return "사업일정표"
+    return `사업일정표_${months[0].label}_${months[months.length - 1].label}`
+  }, [months])
+
+  const exportProjects = useMemo<ExportProject[]>(
+    () =>
+      projects.map((project) => ({
+        id: project.id,
+        name: project.name,
+        type: project.type,
+        tasks: flattenTasksForExport(project.tasks),
+      })),
+    [projects],
+  )
+
+  const exportProjectOptions = useMemo(
+    () => exportProjects.map((project) => ({ id: project.id, name: project.name })),
+    [exportProjects],
+  )
+
+  const selectedExportProjects = useMemo(() => {
+    if (exportScope === "single") {
+      return exportProjects.filter((project) => project.id === exportProjectId)
+    }
+    return exportProjects
+  }, [exportProjectId, exportProjects, exportScope])
+
+  const selectedExportRows = useMemo<ExportRow[]>(() => {
+    return selectedExportProjects.flatMap((project) => {
       const projectRow: ExportRow = {
         kind: "project",
         name: project.name,
@@ -751,14 +839,19 @@ export function GanttView({
 
       return [projectRow, ...taskRows]
     })
-  }, [allDays, filteredProjects])
+  }, [allDays, selectedExportProjects])
 
-  const exportTitle = useMemo(() => {
-    if (months.length === 0) return "사업일정표"
-    return `사업일정표_${months[0].label}_${months[months.length - 1].label}`
-  }, [months])
+  const selectedExportTitle = useMemo(() => {
+    if (exportScope === "single") {
+      const selectedProject = exportProjectOptions.find((project) => project.id === exportProjectId)
+      if (selectedProject) return `${exportTitle}_${selectedProject.name}`
+    }
+    return exportTitle
+  }, [exportProjectId, exportProjectOptions, exportScope, exportTitle])
 
-  const buildExportHtml = (title: string) => {
+  const canExportExcel = exportScope === "all" || (exportScope === "single" && !!exportProjectId)
+
+  const buildExportHtml = (title: string, rows: ExportRow[]) => {
     const monthHeader = months
       .map(
         (month) =>
@@ -773,7 +866,7 @@ export function GanttView({
       })
       .join("")
 
-    const bodyRows = exportRows
+    const bodyRows = rows
       .map((row) => {
         const labelBg = row.kind === "project" ? "#dbeafe" : "#ffffff"
         const weight = row.kind === "project" ? "700" : "400"
@@ -835,14 +928,17 @@ export function GanttView({
   }
 
   const handleExportExcel = () => {
-    const html = buildExportHtml(exportTitle)
+    if (!canExportExcel) return
+
+    const html = buildExportHtml(selectedExportTitle, selectedExportRows)
     const blob = new Blob(["\ufeff", html], { type: "application/vnd.ms-excel;charset=utf-8;" })
     const url = URL.createObjectURL(blob)
     const link = document.createElement("a")
     link.href = url
-    link.download = `${exportTitle}.xls`
+    link.download = `${selectedExportTitle}.xls`
     link.click()
     URL.revokeObjectURL(url)
+    setIsExportPickerOpen(false)
   }
 
   const taskById = useMemo(() => {
@@ -1108,23 +1204,166 @@ export function GanttView({
         <div className="relative min-w-fit flex flex-col isolate">
           <div className="sticky top-0 z-40 flex bg-card border-b border-border shadow-sm">
             <div
-              className="sticky left-0 z-[80] shrink-0 border-r border-border bg-card px-4 py-3 flex items-end overflow-hidden"
+              className="sticky left-0 z-[80] shrink-0 border-r border-border bg-card px-4 py-2.5 flex items-end overflow-visible"
               style={{ width: leftPanelWidth }}
             >
               <div className="flex w-full items-center justify-between gap-2">
-                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-                  Project & Task Details
-                </span>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 gap-1.5 px-2 text-[11px]"
-                    onClick={handleExportExcel}
-                  >
-                    <FileSpreadsheet className="h-3.5 w-3.5" />
-                    엑셀 내보내기
-                  </Button>
+                <div className="flex min-w-0 flex-col items-start gap-1">
+                  <div className="flex items-center gap-0.5 rounded-md border border-border bg-background/90 px-1 py-0.5">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5"
+                      onClick={() => handleDisplayMonthMove(-1)}
+                      aria-label="이전 월 보기"
+                    >
+                      <ChevronLeft className="h-3 w-3" />
+                    </Button>
+                    <Popover open={isMonthPickerOpen} onOpenChange={setIsMonthPickerOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-5 min-w-[110px] justify-center px-2 text-[10px] font-semibold"
+                        >
+                          {displayMonthLabel}
+                          <ChevronDown className="ml-0.5 h-3 w-3" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[220px] p-3" align="end">
+                        <div className="grid gap-3">
+                          <div className="text-[11px] font-semibold text-muted-foreground">표시 월 선택</div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Select
+                              value={String(displayMonthDate.getFullYear())}
+                              onValueChange={handleDisplayMonthYearChange}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="연도" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {monthPickerYearOptions.map((year) => (
+                                  <SelectItem key={year} value={year}>
+                                    {year}년
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Select
+                              value={String(displayMonthDate.getMonth())}
+                              onValueChange={handleDisplayMonthMonthChange}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="월" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Array.from({ length: 12 }, (_, monthIndex) => (
+                                  <SelectItem key={monthIndex} value={String(monthIndex)}>
+                                    {monthIndex + 1}월
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5"
+                      onClick={() => handleDisplayMonthMove(1)}
+                      aria-label="다음 월 보기"
+                    >
+                      <ChevronRight className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Project & Task Details
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-1">
+                  <Dialog open={isExportPickerOpen} onOpenChange={setIsExportPickerOpen}>
+                    <DialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 gap-1.5 px-2 text-[11px]"
+                      >
+                        <FileSpreadsheet className="h-3.5 w-3.5" />
+                        엑셀 내보내기
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[360px]">
+                      <DialogHeader>
+                        <DialogTitle>내보내기 대상</DialogTitle>
+                        <DialogDescription>전체 프로젝트를 출력하거나, 특정 프로젝트를 선택해서 추출할 수 있습니다.</DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-3">
+                        <div className="grid gap-2">
+                          <button
+                            type="button"
+                            className={cn(
+                              "flex items-center justify-between rounded-md border px-3 py-2 text-left text-xs transition-colors",
+                              exportScope === "all"
+                                ? "border-blue-500 bg-blue-50 text-blue-700"
+                                : "border-border bg-background hover:bg-muted/40",
+                            )}
+                            onClick={() => setExportScope("all")}
+                          >
+                            <span>전체 프로젝트 출력</span>
+                          </button>
+                          <div className="grid gap-2">
+                            <button
+                              type="button"
+                              className={cn(
+                                "flex items-center justify-between rounded-md border px-3 py-2 text-left text-xs transition-colors",
+                                exportScope === "single"
+                                  ? "border-blue-500 bg-blue-50 text-blue-700"
+                                  : "border-border bg-background hover:bg-muted/40",
+                              )}
+                              onClick={() => setExportScope("single")}
+                            >
+                              <span>프로젝트 선택</span>
+                            </button>
+                            <Select
+                              value={exportProjectId}
+                              onValueChange={(value) => {
+                                setExportScope("single")
+                                setExportProjectId(value)
+                              }}
+                              disabled={exportProjectOptions.length === 0}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue
+                                  placeholder={
+                                    exportProjectOptions.length === 0 ? "선택 가능한 프로젝트 없음" : "프로젝트를 선택하세요"
+                                  }
+                                />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {exportProjectOptions.map((project) => (
+                                  <SelectItem key={project.id} value={project.id}>
+                                    {project.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          className="h-8 text-xs"
+                          onClick={handleExportExcel}
+                          disabled={!canExportExcel || selectedExportRows.length === 0}
+                        >
+                          내보내기
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                   {hiddenProjectCount > 0 && (
                     <Button
                       variant="ghost"
@@ -1251,7 +1490,7 @@ export function GanttView({
                   <div className={cn("sticky top-[70px] z-30 flex min-h-9 border-b border-border", PROJECT_HEADER_ROW_BG_CLASS, isProjectHidden && "opacity-70")}>
                     <div
                       className={cn(
-                        "sticky left-0 z-30 flex shrink-0 items-center gap-2 border-r border-border px-4 py-1.5 shadow-[2px_0_5px_rgba(0,0,0,0.05)] overflow-hidden",
+                        "sticky left-0 z-30 flex shrink-0 items-center gap-2 border-r border-border px-4 py-1.5 shadow-[2px_0_5px_rgba(0,0,0,0.05)] overflow-visible",
                         PROJECT_HEADER_ROW_BG_CLASS,
                       )}
                       style={{ width: leftPanelWidth }}
@@ -1501,7 +1740,7 @@ export function GanttView({
                                     <EditTaskDialog
                                       task={task}
                                       onEditTask={onEditTask}
-                                      trigger={
+                              trigger={
                                         <button
                                           type="button"
                                           className="min-w-0 flex-1 text-left text-xs font-bold transition-colors hover:text-primary"
@@ -1517,6 +1756,11 @@ export function GanttView({
                                               {depthPrefix}
                                               {task.task}
                                             </span>
+                                            {formatTaskDateRange(task) && (
+                                              <span className="shrink-0 text-[10px] font-normal text-muted-foreground/80">
+                                                {formatTaskDateRange(task)}
+                                              </span>
+                                            )}
                                             {hasMemo && (
                                               <span
                                                 className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-yellow-300 bg-yellow-100 text-yellow-700 shadow-[inset_0_-1px_0_rgba(245,158,11,0.35)]"
@@ -1553,6 +1797,11 @@ export function GanttView({
                                               {depthPrefix}
                                               {task.task}
                                             </span>
+                                            {formatTaskDateRange(task) && (
+                                              <span className="shrink-0 text-[10px] text-muted-foreground/80">
+                                                {formatTaskDateRange(task)}
+                                              </span>
+                                            )}
                                             {hasMemo && (
                                               <span
                                                 className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-amber-300 bg-amber-100 text-amber-700 shadow-[inset_0_-1px_0_rgba(245,158,11,0.35)]"

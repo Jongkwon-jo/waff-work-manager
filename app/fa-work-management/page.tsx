@@ -122,6 +122,7 @@ export default function FaWorkManagementPage() {
       name: project.name,
       type: project.type,
       period: project.period,
+      isHidden: project.isHidden,
       displayOrder: project.displayOrder,
       createdAt: project.createdAt,
     })

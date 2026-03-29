@@ -3,7 +3,16 @@
 import Image from "next/image"
 import Link from "next/link"
 import { signOut } from "firebase/auth"
-import { ArrowRight, BriefcaseBusiness, Cpu, LogOut, ShieldCheck, Sparkles, UserRoundSearch } from "lucide-react"
+import {
+  ArrowRight,
+  BriefcaseBusiness,
+  CalendarDays,
+  Cpu,
+  LogOut,
+  ShieldCheck,
+  Sparkles,
+  UserRoundSearch,
+} from "lucide-react"
 import { auth } from "@/lib/firebase"
 import { useAuth } from "@/components/auth/auth-provider"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -17,7 +26,7 @@ export default function HomePage() {
     try {
       await signOut(auth)
       toast.success("로그아웃되었습니다.")
-    } catch (error) {
+    } catch {
       toast.error("로그아웃에 실패했습니다.")
     }
   }
@@ -26,7 +35,7 @@ export default function HomePage() {
     {
       href: "/my-page",
       title: "마이 페이지",
-      description: "내 담당 업무만 모아서 빠르게 확인합니다.",
+      description: "내 업무를 모아서 빠르게 확인합니다.",
       icon: UserRoundSearch,
       visible: isAdmin || pagePermissions.myPage,
       tone: "from-rose-50 via-pink-50/60 to-white",
@@ -35,8 +44,8 @@ export default function HomePage() {
     },
     {
       href: "/work-management",
-      title: "전략사업부 업무관리",
-      description: "전략사업부 프로젝트와 업무를 관리합니다.",
+      title: "전략기획사업부 업무관리",
+      description: "전략기획사업부 프로젝트와 업무를 관리합니다.",
       icon: BriefcaseBusiness,
       visible: isAdmin || pagePermissions.strategyWorkManagement,
       tone: "from-amber-50 via-orange-50/60 to-white",
@@ -44,10 +53,30 @@ export default function HomePage() {
       iconBg: "bg-white/60",
     },
     {
+      href: "/work-management/weekly",
+      title: "전략기획사업부 주간업무",
+      description: "전략기획사업부의 이번 주 업무를 팀과 담당자 기준으로 확인합니다.",
+      icon: CalendarDays,
+      visible: isAdmin || pagePermissions.strategyWorkManagement,
+      tone: "from-amber-50 via-orange-50/60 to-white",
+      iconColor: "text-amber-500",
+      iconBg: "bg-white/60",
+    },
+    {
       href: "/fa-work-management",
-      title: "FA 사업부 업무관리",
-      description: "FA 사업부 프로젝트와 업무를 관리합니다.",
+      title: "FA사업부 업무관리",
+      description: "FA사업부 프로젝트와 업무를 관리합니다.",
       icon: Cpu,
+      visible: isAdmin || pagePermissions.faWorkManagement,
+      tone: "from-violet-50 via-indigo-50/60 to-white",
+      iconColor: "text-violet-500",
+      iconBg: "bg-white/60",
+    },
+    {
+      href: "/fa-work-management/weekly",
+      title: "FA사업부 주간업무",
+      description: "FA사업부의 이번 주 업무를 팀과 담당자 기준으로 확인합니다.",
+      icon: CalendarDays,
       visible: isAdmin || pagePermissions.faWorkManagement,
       tone: "from-violet-50 via-indigo-50/60 to-white",
       iconColor: "text-violet-500",
@@ -66,7 +95,7 @@ export default function HomePage() {
     {
       href: "/admin",
       title: "관리자",
-      description: "사용자별 권한과 부서별 담당자 설정을 관리합니다.",
+      description: "사용자 권한과 부서/담당자 설정을 관리합니다.",
       icon: ShieldCheck,
       visible: isAdmin,
       tone: "from-emerald-50 via-green-50/60 to-white",
@@ -77,7 +106,6 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(14,165,233,0.10),transparent),linear-gradient(180deg,#f0f6ff_0%,#f5f7fb_40%,#ffffff_100%)] px-4 py-10 lg:px-10">
-      {/* 미묘한 도트 패턴 오버레이 */}
       <div
         className="pointer-events-none fixed inset-0 opacity-[0.025]"
         style={{
@@ -87,7 +115,6 @@ export default function HomePage() {
       />
 
       <div className="relative mx-auto max-w-6xl space-y-8">
-        {/* 헤더 */}
         <header className="flex flex-col gap-5 rounded-3xl border border-slate-200/70 bg-white/90 p-7 shadow-[0_8px_40px_rgba(15,23,42,0.07)] backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-5">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -102,9 +129,7 @@ export default function HomePage() {
             </div>
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-slate-900">WorkHub</h1>
-              <p className="mt-0.5 text-sm text-slate-500">
-                사용할 기능을 카드에서 선택해 바로 이동할 수 있습니다.
-              </p>
+              <p className="mt-0.5 text-sm text-slate-500">사용 가능한 기능을 선택해서 바로 이동할 수 있습니다.</p>
             </div>
           </div>
           <div className="flex items-center gap-3 lg:justify-end">
@@ -124,7 +149,6 @@ export default function HomePage() {
           </div>
         </header>
 
-        {/* 카드 그리드 */}
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {cards.map((card) => {
             const Icon = card.icon
@@ -141,7 +165,6 @@ export default function HomePage() {
                 >
                   <CardHeader className="space-y-4 pb-3">
                     <div className="flex items-start justify-between gap-3">
-                      {/* 아이콘 */}
                       <div
                         className={`
                           flex h-11 w-11 items-center justify-center rounded-xl
@@ -153,23 +176,14 @@ export default function HomePage() {
                         <Icon className="h-5 w-5" />
                       </div>
 
-                      {/* 뱃지 */}
-                      <div
-                        className="
-                          inline-flex items-center gap-1 rounded-full border border-slate-200/80
-                          bg-white/80 px-2.5 py-1 text-xs font-medium text-slate-500
-                          transition-colors duration-150 group-hover:border-slate-300 group-hover:text-slate-700
-                        "
-                      >
+                      <div className="inline-flex items-center gap-1 rounded-full border border-slate-200/80 bg-white/80 px-2.5 py-1 text-xs font-medium text-slate-500 transition-colors duration-150 group-hover:border-slate-300 group-hover:text-slate-700">
                         페이지 열기
                         <ArrowRight className="h-3 w-3 transition-transform duration-150 group-hover:translate-x-0.5" />
                       </div>
                     </div>
 
                     <div>
-                      <CardTitle className="text-xl font-semibold tracking-tight text-slate-900">
-                        {card.title}
-                      </CardTitle>
+                      <CardTitle className="text-xl font-semibold tracking-tight text-slate-900">{card.title}</CardTitle>
                       <CardDescription className="mt-1.5 text-sm leading-relaxed text-slate-500">
                         {card.description}
                       </CardDescription>

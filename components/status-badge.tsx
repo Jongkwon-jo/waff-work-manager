@@ -28,8 +28,10 @@ const categoryConfig: Record<TaskCategory, { bg: string; text: string }> = {
   "상시": { bg: "bg-cyan-50", text: "text-cyan-700" },
 }
 
-export function CategoryBadge({ category }: { category: TaskCategory }) {
-  const config = categoryConfig[category]
+const fallbackCategoryConfig = { bg: "bg-secondary", text: "text-secondary-foreground" }
+
+export function CategoryBadge({ category }: { category: TaskCategory | string }) {
+  const config = categoryConfig[category as TaskCategory] || fallbackCategoryConfig
   return (
     <span className={cn("inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium", config.bg, config.text)}>
       {category}
