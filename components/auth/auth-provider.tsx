@@ -3,7 +3,10 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import { onAuthStateChanged, type User } from "firebase/auth"
 import {
+  DEFAULT_DEPARTMENT_PAGE_PERMISSIONS,
+  subscribeCurrentUserProfile,
   subscribeCurrentUserPagePermissions,
+  subscribeDepartmentPagePermissions,
   upsertUserProfile,
 } from "@/lib/firestore-service"
 import { auth } from "@/lib/firebase"
@@ -50,12 +53,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPermissionLoading(true)
     void upsertUserProfile(email)
 
-    const unsubscribe = subscribeCurrentUserPagePermissions(email, (permissions) => {
-      setPagePermissions(permissions)
+    let userPermissions = DEFAULT_PAGE_PERMISSIONS
+    let userDepartmentPermissions = DEFAULT_PAGE_PERMISSIONS
+    let resolvedDepartment: keyof typeof DEFAULT_DEPARTMENT_PAGE_PERMISSIONS | null = null
+    let hasUserPermissions = false
+    let hasDepartmentPermissions = false
+    let hasProfile = false
+
+    const syncPermissions = () => {
+      if (!hasUserPermissions || !hasDepartmentPermissions || !hasProfile) return
+
+      setPagePermissions({
+        myPage: userPermissions.myPage && userDepartmentPermissions.myPage,
+        strategyWorkManagement: userPermissions.strategyWorkManagement && userDepartmentPermissions.strategyWorkManagement,
+        strategyWeeklyWork: userPermissions.strategyWeeklyWork && userDepartmentPermissions.strategyWeeklyWork,
+        faWorkManagement: userPermissions.faWorkManagement && userDepartmentPermissions.faWorkManagement,
+        faWeeklyWork: userPermissions.faWeeklyWork && userDepartmentPermissions.faWeeklyWork,
+        gptTest: userPermissions.gptTest && userDepartmentPermissions.gptTest,
+      })
       setPermissionLoading(false)
+    }
+
+    const unsubscribeProfile = subscribeCurrentUserProfile(email, (profile) => {
+      resolvedDepartment = profile?.department || null
+      userDepartmentPermissions = resolvedDepartment
+        ? DEFAULT_DEPARTMENT_PAGE_PERMISSIONS[resolvedDepartment]
+        : DEFAULT_PAGE_PERMISSIONS
+      hasProfile = true
+      syncPermissions()
     })
 
-    return () => unsubscribe()
+    const unsubscribeDepartmentPermissions = subscribeDepartmentPagePermissions((permissions) => {
+      userDepartmentPermissions = resolvedDepartment ? permissions[resolvedDepartment] : DEFAULT_PAGE_PERMISSIONS
+      hasDepartmentPermissions = true
+      syncPermissions()
+    })
+
+    const unsubscribePermissions = subscribeCurrentUserPagePermissions(email, (permissions) => {
+      userPermissions = permissions
+      hasUserPermissions = true
+      syncPermissions()
+    })
+
+    return () => {
+      unsubscribeProfile()
+      unsubscribeDepartmentPermissions()
+      unsubscribePermissions()
+    }
   }, [user])
 
   const value: AuthContextValue = {

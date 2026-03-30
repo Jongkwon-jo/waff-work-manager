@@ -31,6 +31,7 @@ const HISTORY_COLLECTION = "history"
 const SETTINGS_COLLECTION = "settings"
 const DASHBOARD_PREFERENCES_DOC = "dashboard_preferences"
 const DEPARTMENT_PERSON_SETTINGS_DOC = "department_person_settings"
+const DEPARTMENT_PAGE_PERMISSIONS_DOC = "department_page_permissions"
 const USER_PROFILES_COLLECTION = "user_profiles"
 const USER_PAGE_PERMISSIONS_COLLECTION = "user_page_permissions"
 
@@ -48,6 +49,7 @@ export type UserProfile = {
   lastLoginAt?: Date
   taskAliases?: string[]
   myPageTaskPreferences?: Record<string, MyPageTaskPreference>
+  department?: DepartmentPersonGroup
 }
 
 export type DepartmentPersonSettings = Record<DepartmentPersonGroup, string[]>
@@ -57,6 +59,8 @@ export type UserPagePermissionEntry = {
   permissions: UserPagePermissions
   updatedAt?: Date
 }
+
+export type DepartmentPagePermissions = Record<DepartmentPersonGroup, UserPagePermissions>
 
 type HistoryEntityType = "project" | "task" | "batch" | "project_bundle"
 type HistoryActionType = "create" | "update" | "delete" | "batch_update" | "project_delete"
@@ -88,6 +92,13 @@ export const DEFAULT_DEPARTMENT_PERSON_SETTINGS: DepartmentPersonSettings = {
   FA: [],
   전략기획: [],
   기타: [],
+}
+
+export const DEFAULT_DEPARTMENT_PAGE_PERMISSIONS: DepartmentPagePermissions = {
+  ICT: { ...DEFAULT_PAGE_PERMISSIONS },
+  FA: { ...DEFAULT_PAGE_PERMISSIONS },
+  전략기획: { ...DEFAULT_PAGE_PERMISSIONS },
+  기타: { ...DEFAULT_PAGE_PERMISSIONS },
 }
 
 function toStringOrEmpty(value: unknown): string {
@@ -155,6 +166,15 @@ function uniqueTrimmedStrings(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
 }
 
+function normalizeDepartmentGroup(value: unknown): DepartmentPersonGroup | undefined {
+  const normalized = toStringOrEmpty(value)
+  if (normalized === "ICT") return "ICT"
+  if (normalized === "FA") return "FA"
+  if (normalized === "전략기획") return "전략기획"
+  if (normalized === "기타") return "기타"
+  return undefined
+}
+
 function todayLabel(): string {
   const now = new Date()
   const mm = String(now.getMonth() + 1).padStart(2, "0")
@@ -172,6 +192,19 @@ function normalizeDepartmentPersonSettings(
       ? uniqueTrimmedStrings(raw.전략기획.filter((value): value is string => typeof value === "string"))
       : [],
     기타: Array.isArray(raw?.기타) ? uniqueTrimmedStrings(raw.기타.filter((value): value is string => typeof value === "string")) : [],
+  }
+}
+
+function normalizeDepartmentPagePermissions(
+  raw?: Partial<Record<DepartmentPersonGroup, unknown>>,
+): DepartmentPagePermissions {
+  return {
+    ICT: normalizePermissions((raw?.ICT as Partial<Record<string, unknown>> | undefined) || DEFAULT_PAGE_PERMISSIONS),
+    FA: normalizePermissions((raw?.FA as Partial<Record<string, unknown>> | undefined) || DEFAULT_PAGE_PERMISSIONS),
+    전략기획: normalizePermissions(
+      (raw?.전략기획 as Partial<Record<string, unknown>> | undefined) || DEFAULT_PAGE_PERMISSIONS,
+    ),
+    기타: normalizePermissions((raw?.기타 as Partial<Record<string, unknown>> | undefined) || DEFAULT_PAGE_PERMISSIONS),
   }
 }
 
@@ -551,12 +584,14 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
           const raw = docSnap.data() as {
             email?: unknown
             lastLoginAt?: { toDate?: () => Date }
+            department?: unknown
             taskAliases?: unknown
             myPageTaskPreferences?: unknown
           }
           return {
             email: normalizeEmail(toStringOrEmpty(raw?.email)),
             lastLoginAt: raw?.lastLoginAt?.toDate?.() || undefined,
+            department: normalizeDepartmentGroup(raw?.department),
             taskAliases: Array.isArray(raw?.taskAliases)
               ? raw.taskAliases.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
               : [],
@@ -592,12 +627,14 @@ export function subscribeCurrentUserProfile(email: string, callback: (profile: U
       const raw = snapshot.data() as {
         email?: unknown
         lastLoginAt?: { toDate?: () => Date }
+        department?: unknown
         taskAliases?: unknown
         myPageTaskPreferences?: unknown
       }
       callback({
         email: normalizeEmail(toStringOrEmpty(raw?.email)),
         lastLoginAt: raw?.lastLoginAt?.toDate?.() || undefined,
+        department: normalizeDepartmentGroup(raw?.department),
         taskAliases: Array.isArray(raw?.taskAliases)
           ? raw.taskAliases.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
           : [],
@@ -619,6 +656,21 @@ export async function saveUserTaskAliases(email: string, taskAliases: string[]):
     {
       email: normalizedEmail,
       taskAliases: Array.from(new Set(taskAliases.map((alias) => alias.trim()).filter(Boolean))),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export async function saveUserDepartment(email: string, department?: DepartmentPersonGroup): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  await setDoc(
+    doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
+    {
+      email: normalizedEmail,
+      department: department || null,
       updatedAt: serverTimestamp(),
     },
     { merge: true },
@@ -665,6 +717,19 @@ export function subscribeCurrentUserPagePermissions(
   )
 }
 
+export function subscribeDepartmentPagePermissions(callback: (permissions: DepartmentPagePermissions) => void) {
+  return onSnapshot(
+    doc(db, SETTINGS_COLLECTION, DEPARTMENT_PAGE_PERMISSIONS_DOC),
+    (snapshot) => {
+      const raw = snapshot.data() as Partial<Record<DepartmentPersonGroup, unknown>> | undefined
+      callback(normalizeDepartmentPagePermissions(raw))
+    },
+    (error) => {
+      console.error("Department page permissions snapshot error:", error)
+    },
+  )
+}
+
 export function subscribeAllUserPagePermissions(callback: (entries: UserPagePermissionEntry[]) => void) {
   return onSnapshot(
     collection(db, USER_PAGE_PERMISSIONS_COLLECTION),
@@ -706,6 +771,20 @@ export async function saveUserPagePermissions(email: string, permissions: UserPa
     {
       email: normalizedEmail,
       ...normalizePermissions(permissions),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export async function saveDepartmentPagePermissions(permissions: DepartmentPagePermissions): Promise<void> {
+  await setDoc(
+    doc(db, SETTINGS_COLLECTION, DEPARTMENT_PAGE_PERMISSIONS_DOC),
+    {
+      ICT: normalizePermissions(permissions.ICT),
+      FA: normalizePermissions(permissions.FA),
+      전략기획: normalizePermissions(permissions.전략기획),
+      기타: normalizePermissions(permissions.기타),
       updatedAt: serverTimestamp(),
     },
     { merge: true },
