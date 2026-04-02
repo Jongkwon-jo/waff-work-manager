@@ -93,6 +93,8 @@ export function EditProjectDialog({ project, onEditProject, trigger }: EditProje
                   <SelectItem value="SI">SI</SelectItem>
                   <SelectItem value="R&D">R&amp;D</SelectItem>
                   <SelectItem value="S/F">S/F</SelectItem>
+                  <SelectItem value="공사">공사</SelectItem>
+                  <SelectItem value="A/S">A/S</SelectItem>
                   <SelectItem value="Etc">Etc</SelectItem>
                 </SelectContent>
               </Select>

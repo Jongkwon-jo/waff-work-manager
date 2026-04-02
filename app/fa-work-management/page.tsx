@@ -18,6 +18,8 @@ import {
   updateTaskOrdersInDB,
   saveDashboardSortBy,
   subscribeDashboardSortBy,
+  saveGanttCollapseState,
+  subscribeGanttCollapseState,
   addHistoryEntry,
   fetchHistoryEntries,
   rollbackHistoryEntry,
@@ -51,6 +53,9 @@ export default function FaWorkManagementPage() {
   const [isRollingBack, setIsRollingBack] = useState(false)
   const [rollingBackEntryId, setRollingBackEntryId] = useState<string | null>(null)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
+  const [ganttCollapsedProjectIds, setGanttCollapsedProjectIds] = useState<string[]>([])
+  const [ganttCollapsedTaskIds, setGanttCollapsedTaskIds] = useState<string[]>([])
+  const [isGanttCollapseStateReady, setIsGanttCollapseStateReady] = useState(false)
   const deferredSearchQuery = useDeferredValue(searchQuery)
 
   useEffect(() => {
@@ -92,6 +97,23 @@ export default function FaWorkManagementPage() {
     const unsubscribe = subscribeDashboardSortBy((savedSortBy) => {
       setSortBy(savedSortBy)
     })
+    return () => unsubscribe()
+  }, [user])
+
+  useEffect(() => {
+    if (!user) {
+      setGanttCollapsedProjectIds([])
+      setGanttCollapsedTaskIds([])
+      setIsGanttCollapseStateReady(false)
+      return
+    }
+
+    const unsubscribe = subscribeGanttCollapseState((state) => {
+      setGanttCollapsedProjectIds(state.collapsedProjectIds)
+      setGanttCollapsedTaskIds(state.collapsedTaskIds)
+      setIsGanttCollapseStateReady(true)
+    })
+
     return () => unsubscribe()
   }, [user])
 
@@ -222,6 +244,19 @@ export default function FaWorkManagementPage() {
         ...task,
         subTasks: task.subTasks ? removeTaskFromTree(task.subTasks, taskId) : task.subTasks,
       }))
+  }
+
+  const replaceTaskIdInTree = (tasks: Task[], fromId: string, toId: string): Task[] => {
+    return tasks.map((task) => {
+      const nextId = task.id === fromId ? toId : task.id
+      const nextParentId = task.parentId === fromId ? toId : task.parentId
+      return {
+        ...task,
+        id: nextId,
+        parentId: nextParentId,
+        subTasks: task.subTasks ? replaceTaskIdInTree(task.subTasks, fromId, toId) : task.subTasks,
+      }
+    })
   }
 
   const clampDepth = (depth: number) => Math.min(3, Math.max(0, Math.floor(depth)))
@@ -498,6 +533,18 @@ export default function FaWorkManagementPage() {
     })
   }
 
+  const handlePersistGanttCollapseState = async (state: {
+    collapsedProjectIds: string[]
+    collapsedTaskIds: string[]
+  }) => {
+    if (!user) return
+    try {
+      await saveGanttCollapseState(state)
+    } catch (error) {
+      console.error("Failed to save gantt collapse state:", error)
+    }
+  }
+
   const handleEditProject = async (updatedProject: Project) => {
     try {
       const beforeProject = projectList.find((p) => p.id === updatedProject.id)
@@ -578,6 +625,13 @@ export default function FaWorkManagementPage() {
       }
 
       const createdTaskId = await addTaskToDB(sanitizedTaskData)
+      setProjectList((prev) =>
+        prev.map((project) =>
+          project.id === newTask.projectId
+            ? { ...project, tasks: replaceTaskIdInTree(project.tasks, newTask.id, createdTaskId) }
+            : project,
+        ),
+      )
       await recordHistory({
         entityType: "task",
         action: "create",
@@ -637,6 +691,124 @@ export default function FaWorkManagementPage() {
       toast.success("업무가 삭제되었습니다.")
     } catch (error) {
       toast.error("업무 삭제 실패")
+    }
+  }
+
+  const handleDeleteTasksBulk = async (targets: Array<{ taskId: string; projectId: string }>) => {
+    const uniqueTargets = Array.from(new Map(targets.map((target) => [target.taskId, target])).values())
+    if (uniqueTargets.length === 0) return
+
+    let deletedCount = 0
+    let failedCount = 0
+
+    for (const target of uniqueTargets) {
+      try {
+        const beforeTask = allTasksFlat.find((task) => task.id === target.taskId)
+        await deleteTaskFromDB(target.taskId)
+        if (beforeTask) {
+          await recordHistory({
+            entityType: "task",
+            action: "delete",
+            entityId: target.taskId,
+            projectId: target.projectId,
+            before: serializeTaskData(beforeTask),
+          })
+        }
+        deletedCount += 1
+      } catch (error) {
+        failedCount += 1
+      }
+    }
+
+    if (deletedCount > 0) {
+      toast.success(`${deletedCount}개 업무가 삭제되었습니다.`)
+    }
+    if (failedCount > 0) {
+      toast.error(`${failedCount}개 업무 삭제에 실패했습니다.`)
+    }
+  }
+
+  const handleCopyTasksBulk = async (taskIds: string[]) => {
+    const uniqueIds = Array.from(new Set(taskIds))
+    if (uniqueIds.length === 0) return
+
+    const taskMap = new Map(allTasksFlat.map((task) => [task.id, task]))
+    const selectedSet = new Set(uniqueIds.filter((id) => taskMap.has(id)))
+    const rootIds = Array.from(selectedSet).filter((id) => {
+      let parentId = taskMap.get(id)?.parentId
+      while (parentId) {
+        if (selectedSet.has(parentId)) return false
+        parentId = taskMap.get(parentId)?.parentId
+      }
+      return true
+    })
+    if (rootIds.length === 0) return
+
+    type CopyPayload = { data: Omit<Task, "id">; projectId: string }
+    const payloads: CopyPayload[] = []
+    let sequence = 0
+    const baseTimestamp = Date.now()
+
+    const cloneSubTree = (source: Task, parentId: string | undefined, isRoot: boolean): string => {
+      const newId = `t${baseTimestamp}_${sequence}`
+      sequence += 1
+
+      const clonedTask: Omit<Task, "id"> = {
+        ...source,
+        task: isRoot ? `${source.task} (복사)` : source.task,
+        parentId,
+        isSubTask: Boolean(parentId),
+        displayOrder: baseTimestamp + sequence,
+        subTasks: [],
+      }
+      payloads.push({ data: clonedTask, projectId: clonedTask.projectId })
+
+      ;(source.subTasks || []).forEach((child) => {
+        cloneSubTree(child, newId, false)
+      })
+
+      return newId
+    }
+
+    rootIds.forEach((rootId) => {
+      const rootTask = taskMap.get(rootId)
+      if (!rootTask) return
+      cloneSubTree(rootTask, rootTask.parentId, true)
+    })
+
+    let copiedCount = 0
+    let failedCount = 0
+
+    for (const payload of payloads) {
+      try {
+        const { id: _ignoredId, subTasks, ...taskData } = payload.data as Task
+        const sanitizedTaskData = compact(taskData as Record<string, unknown>) as Omit<Task, "id">
+        if (sanitizedTaskData.parentId === undefined) {
+          delete sanitizedTaskData.parentId
+        }
+        if (sanitizedTaskData.isSubTask === undefined) {
+          delete sanitizedTaskData.isSubTask
+        }
+
+        const createdTaskId = await addTaskToDB(sanitizedTaskData)
+        await recordHistory({
+          entityType: "task",
+          action: "create",
+          entityId: createdTaskId,
+          projectId: payload.projectId,
+          after: sanitizedTaskData as unknown as Record<string, unknown>,
+        })
+        copiedCount += 1
+      } catch (error) {
+        failedCount += 1
+      }
+    }
+
+    if (copiedCount > 0) {
+      toast.success(`${copiedCount}개 업무가 복사되었습니다.`)
+    }
+    if (failedCount > 0) {
+      toast.error(`${failedCount}개 업무 복사에 실패했습니다.`)
     }
   }
 
@@ -1008,6 +1180,7 @@ export default function FaWorkManagementPage() {
                 statusFilter={statusFilter}
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
+                defaultTaskDepartment="FA"
                 searchQuery={deferredSearchQuery}
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
@@ -1021,15 +1194,22 @@ export default function FaWorkManagementPage() {
                 statusFilter={statusFilter}
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
+                defaultTaskDepartment="FA"
                 searchQuery={deferredSearchQuery}
                 onAddProject={handleAddProject}
                 onEditProject={handleEditProject}
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
                 onDeleteTask={handleDeleteTask}
+                onDeleteTasks={handleDeleteTasksBulk}
+                onCopyTasks={handleCopyTasksBulk}
                 onMoveProject={handleMoveProject}
                 onMoveTask={handleMoveTask}
                 onReorderTask={handleReorderTask}
+                persistedCollapsedProjectIds={ganttCollapsedProjectIds}
+                persistedCollapsedTaskIds={ganttCollapsedTaskIds}
+                isCollapseStateReady={isGanttCollapseStateReady}
+                onPersistCollapseState={handlePersistGanttCollapseState}
               />
             ) : (
               <ProjectCardView

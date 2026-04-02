@@ -30,20 +30,26 @@ import {
   ArrowDown,
   ChevronsUp,
   ChevronsDown,
+  Copy,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { calculateManDaysBetweenDates } from "@/lib/man-days"
+import { ko } from "date-fns/locale"
 
 interface GanttViewProps {
   projects: Project[]
   statusFilter: TaskStatus | "all"
   departmentFilter: string
   personFilter: string
+  defaultTaskDepartment?: string
   searchQuery: string
   onAddProject: (project: Project) => void
   onEditProject: (project: Project) => void
   onAddTask: (task: Task) => void
   onEditTask: (task: Task) => void
   onDeleteTask: (taskId: string, projectId: string) => void
+  onDeleteTasks?: (tasks: Array<{ taskId: string; projectId: string }>) => Promise<void> | void
+  onCopyTasks?: (taskIds: string[]) => Promise<void> | void
   onMoveProject: (projectId: string, direction: "up" | "down") => void
   onMoveTask: (projectId: string, taskId: string, direction: "up" | "down") => void
   onReorderTask: (
@@ -52,6 +58,10 @@ interface GanttViewProps {
     targetTaskId: string,
     position: "before" | "after" | "child",
   ) => void
+  persistedCollapsedProjectIds?: string[]
+  persistedCollapsedTaskIds?: string[]
+  isCollapseStateReady?: boolean
+  onPersistCollapseState?: (state: { collapsedProjectIds: string[]; collapsedTaskIds: string[] }) => void
 }
 
 type FlattenedTask = Task & {
@@ -82,8 +92,8 @@ type ExportProject = Pick<Project, "id" | "name" | "type"> & {
 }
 
 const CELL_WIDTH = 28
-const LEFT_PANEL_MIN_WIDTH = 320
-const LEFT_PANEL_MAX_WIDTH = 680
+const LEFT_PANEL_MIN_WIDTH = 380
+const LEFT_PANEL_MAX_WIDTH = 820
 const DETAIL_PANEL_MIN_WIDTH = 700
 const DETAIL_PANEL_MAX_WIDTH = 1100
 const HEADER_APPROX_HEIGHT = 110
@@ -190,6 +200,14 @@ function getDepthRowBgClass(depth: number): string {
   return depthClasses[clampedDepth]
 }
 
+function areSetsEqual(a: Set<string>, b: Set<string>) {
+  if (a.size !== b.size) return false
+  for (const value of a) {
+    if (!b.has(value)) return false
+  }
+  return true
+}
+
 function formatTaskHoverDetails(task: Task): string {
   const lines = [
     task.task,
@@ -226,15 +244,22 @@ export function GanttView({
   statusFilter,
   departmentFilter,
   personFilter,
+  defaultTaskDepartment = "전략기획",
   searchQuery,
   onAddProject,
   onEditProject,
   onAddTask,
   onEditTask,
   onDeleteTask,
+  onDeleteTasks,
+  onCopyTasks,
   onMoveProject,
   onMoveTask,
   onReorderTask,
+  persistedCollapsedProjectIds = [],
+  persistedCollapsedTaskIds = [],
+  isCollapseStateReady = false,
+  onPersistCollapseState,
 }: GanttViewProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const timelineScrollRef = useRef<HTMLDivElement>(null)
@@ -274,8 +299,11 @@ export function GanttView({
   const [dragOverInfo, setDragOverInfo] = useState<{ taskId: string; position: "before" | "after" | "child" } | null>(
     null,
   )
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set())
+  const lastCollapseStateSignatureRef = useRef("")
 
   const allProjectIds = useMemo(() => projects.map((project) => project.id), [projects])
+  const allProjectIdSet = useMemo(() => new Set(allProjectIds), [allProjectIds])
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const hiddenProjectCount = useMemo(
     () => Array.from(hiddenProjectIds).filter((id) => projectById.has(id)).length,
@@ -292,6 +320,50 @@ export function GanttView({
     projects.forEach((project) => walk(project.tasks))
     return ids
   }, [projects])
+  const allCollapsibleTaskIdSet = useMemo(() => new Set(allCollapsibleTaskIds), [allCollapsibleTaskIds])
+
+  useEffect(() => {
+    if (!isCollapseStateReady) return
+
+    const nextProjectIds = persistedCollapsedProjectIds.filter((id) => allProjectIdSet.has(id)).sort()
+    const nextTaskIds = persistedCollapsedTaskIds.filter((id) => allCollapsibleTaskIdSet.has(id)).sort()
+    const signature = `${nextProjectIds.join(",")}|${nextTaskIds.join(",")}`
+    lastCollapseStateSignatureRef.current = signature
+
+    const nextProjectSet = new Set(nextProjectIds)
+    const nextTaskSet = new Set(nextTaskIds)
+
+    setCollapsedProjectIds((prev) => (areSetsEqual(prev, nextProjectSet) ? prev : nextProjectSet))
+    setCollapsedTaskIds((prev) => (areSetsEqual(prev, nextTaskSet) ? prev : nextTaskSet))
+  }, [
+    allCollapsibleTaskIdSet,
+    allProjectIdSet,
+    isCollapseStateReady,
+    persistedCollapsedProjectIds,
+    persistedCollapsedTaskIds,
+  ])
+
+  useEffect(() => {
+    if (!isCollapseStateReady || !onPersistCollapseState) return
+
+    const normalizedProjectIds = Array.from(collapsedProjectIds).filter((id) => allProjectIdSet.has(id)).sort()
+    const normalizedTaskIds = Array.from(collapsedTaskIds).filter((id) => allCollapsibleTaskIdSet.has(id)).sort()
+    const signature = `${normalizedProjectIds.join(",")}|${normalizedTaskIds.join(",")}`
+
+    if (lastCollapseStateSignatureRef.current === signature) return
+    lastCollapseStateSignatureRef.current = signature
+    onPersistCollapseState({
+      collapsedProjectIds: normalizedProjectIds,
+      collapsedTaskIds: normalizedTaskIds,
+    })
+  }, [
+    allCollapsibleTaskIdSet,
+    allProjectIdSet,
+    collapsedProjectIds,
+    collapsedTaskIds,
+    isCollapseStateReady,
+    onPersistCollapseState,
+  ])
 
   const departmentOptions = useMemo(() => {
     const base = getDepartmentList()
@@ -480,6 +552,18 @@ export function GanttView({
     onEditTask({ ...task, ...updates })
   }
 
+  const buildTaskWithAutoManDays = (task: Task, updates: Partial<Task>): Task => {
+    const nextTask: Task = { ...task, ...updates }
+    const parsedStart = parseDateToDate(nextTask.startDate || "")
+    const parsedEnd = parseDateToDate(nextTask.endDate || "")
+
+    if (parsedStart && parsedEnd) {
+      nextTask.manDays = calculateManDaysBetweenDates(parsedStart, parsedEnd, false)
+    }
+
+    return nextTask
+  }
+
   const handleAddProjectLevelTask = (newTask: Task) => {
     const normalizedTask: Task = {
       ...newTask,
@@ -638,26 +722,8 @@ export function GanttView({
 
   const displayMonthLabel = `${displayMonthDate.getFullYear()}년 ${displayMonthDate.getMonth() + 1}월`
 
-  const monthPickerYearOptions = useMemo(() => {
-    const baseYear = displayMonthDate.getFullYear()
-    return Array.from({ length: 9 }, (_, index) => String(baseYear - 4 + index))
-  }, [displayMonthDate])
-
   const handleDisplayMonthMove = (offset: number) => {
     setDisplayMonthDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + offset, 1))
-  }
-
-  const handleDisplayMonthYearChange = (value: string) => {
-    const nextYear = Number.parseInt(value, 10)
-    if (!Number.isFinite(nextYear)) return
-    setDisplayMonthDate((prev) => new Date(nextYear, prev.getMonth(), 1))
-  }
-
-  const handleDisplayMonthMonthChange = (value: string) => {
-    const nextMonth = Number.parseInt(value, 10)
-    if (!Number.isFinite(nextMonth)) return
-    setDisplayMonthDate((prev) => new Date(prev.getFullYear(), nextMonth, 1))
-    setIsMonthPickerOpen(false)
   }
 
 
@@ -675,7 +741,7 @@ export function GanttView({
     const maxLeftTextWidth = Math.max(...leftTexts.map((text) => getMeasuredTextWidth(text, font)), 200)
     const computedLeftPanelWidth = Math.min(
       LEFT_PANEL_MAX_WIDTH,
-      Math.max(LEFT_PANEL_MIN_WIDTH, Math.ceil(maxLeftTextWidth + 170)),
+      Math.max(LEFT_PANEL_MIN_WIDTH, Math.ceil(maxLeftTextWidth + 240)),
     )
 
     const maxCategoryTextWidth = Math.max(
@@ -952,6 +1018,54 @@ export function GanttView({
     projects.forEach((project) => walk(project.tasks))
     return map
   }, [projects])
+  const selectedTaskCount = useMemo(
+    () => Array.from(selectedTaskIds).filter((id) => taskById.has(id)).length,
+    [selectedTaskIds, taskById],
+  )
+
+  useEffect(() => {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(Array.from(prev).filter((id) => taskById.has(id)))
+      return areSetsEqual(prev, next) ? prev : next
+    })
+  }, [taskById])
+
+  const toggleTaskSelection = (taskId: string, checked: boolean) => {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(taskId)
+      else next.delete(taskId)
+      return next
+    })
+  }
+
+  const clearSelectedTasks = () => {
+    setSelectedTaskIds(new Set())
+  }
+
+  const handleBulkDeleteSelectedTasks = async () => {
+    const targets = Array.from(selectedTaskIds)
+      .map((taskId) => taskById.get(taskId))
+      .filter((task): task is Task => Boolean(task))
+      .map((task) => ({ taskId: task.id, projectId: task.projectId }))
+
+    if (targets.length === 0) return
+    if (!confirm(`선택한 ${targets.length}개 업무를 삭제하시겠습니까?`)) return
+
+    if (onDeleteTasks) {
+      await onDeleteTasks(targets)
+    } else {
+      targets.forEach((target) => onDeleteTask(target.taskId, target.projectId))
+    }
+
+    clearSelectedTasks()
+  }
+
+  const handleBulkCopySelectedTasks = async () => {
+    const taskIds = Array.from(selectedTaskIds).filter((taskId) => taskById.has(taskId))
+    if (taskIds.length === 0 || !onCopyTasks) return
+    await onCopyTasks(taskIds)
+  }
 
   const timelineWidth = allDays.length * CELL_WIDTH
   const showDetailColumns = isDetailColumnsOpen
@@ -1176,11 +1290,12 @@ export function GanttView({
             nextEnd = Math.max(startIdx, Math.min(endIdx + daysDelta, allDays.length - 1))
           }
 
-          onEditTask({
-            ...task,
-            startDate: formatDateKorean(new Date(new Date().getFullYear(), allDays[nextStart].month, allDays[nextStart].day)),
-            endDate: formatDateKorean(new Date(new Date().getFullYear(), allDays[nextEnd].month, allDays[nextEnd].day)),
-          })
+          onEditTask(
+            buildTaskWithAutoManDays(task, {
+              startDate: formatDateKorean(new Date(new Date().getFullYear(), allDays[nextStart].month, allDays[nextStart].day)),
+              endDate: formatDateKorean(new Date(new Date().getFullYear(), allDays[nextEnd].month, allDays[nextEnd].day)),
+            }),
+          )
         }
       }
 
@@ -1204,11 +1319,11 @@ export function GanttView({
         <div className="relative min-w-fit flex flex-col isolate">
           <div className="sticky top-0 z-40 flex bg-card border-b border-border shadow-sm">
             <div
-              className="sticky left-0 z-[80] shrink-0 border-r border-border bg-card px-4 py-2.5 flex items-end overflow-visible"
+              className="sticky left-0 z-[80] shrink-0 border-r border-border bg-card px-4 py-2.5 flex items-stretch overflow-visible"
               style={{ width: leftPanelWidth }}
             >
-              <div className="flex w-full items-center justify-between gap-2">
-                <div className="flex min-w-0 flex-col items-start gap-1">
+              <div className="flex w-full flex-col items-stretch gap-1.5">
+                <div className="flex w-full items-center justify-between gap-2">
                   <div className="flex items-center gap-0.5 rounded-md border border-border bg-background/90 px-1 py-0.5">
                     <Button
                       type="button"
@@ -1231,42 +1346,23 @@ export function GanttView({
                           <ChevronDown className="ml-0.5 h-3 w-3" />
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-[220px] p-3" align="end">
-                        <div className="grid gap-3">
-                          <div className="text-[11px] font-semibold text-muted-foreground">표시 월 선택</div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <Select
-                              value={String(displayMonthDate.getFullYear())}
-                              onValueChange={handleDisplayMonthYearChange}
-                            >
-                              <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder="연도" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {monthPickerYearOptions.map((year) => (
-                                  <SelectItem key={year} value={year}>
-                                    {year}년
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <Select
-                              value={String(displayMonthDate.getMonth())}
-                              onValueChange={handleDisplayMonthMonthChange}
-                            >
-                              <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder="월" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {Array.from({ length: 12 }, (_, monthIndex) => (
-                                  <SelectItem key={monthIndex} value={String(monthIndex)}>
-                                    {monthIndex + 1}월
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
+                      <PopoverContent className="w-auto p-0" align="end">
+                        <Calendar
+                          mode="single"
+                          month={displayMonthDate}
+                          onMonthChange={(month) => setDisplayMonthDate(new Date(month.getFullYear(), month.getMonth(), 1))}
+                          onSelect={(date) => {
+                            if (!date) return
+                            setDisplayMonthDate(new Date(date.getFullYear(), date.getMonth(), 1))
+                            setIsMonthPickerOpen(false)
+                          }}
+                          captionLayout="dropdown"
+                          locale={ko}
+                          formatters={{
+                            formatCaption: (month) => `${month.getFullYear()}년 ${month.getMonth() + 1}월`,
+                          }}
+                          initialFocus
+                        />
                       </PopoverContent>
                     </Popover>
                     <Button
@@ -1280,11 +1376,31 @@ export function GanttView({
                       <ChevronRight className="h-3 w-3" />
                     </Button>
                   </div>
-                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-                    Project & Task Details
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {hiddenProjectCount > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 gap-1 px-2 text-[11px]"
+                        onClick={() => setShowHiddenProjects((prev) => !prev)}
+                      >
+                        {showHiddenProjects
+                          ? "- 숨긴 프로젝트 숨기기"
+                          : `+ 숨긴 프로젝트(${String(hiddenProjectCount).padStart(2, "0")}개)`}
+                      </Button>
+                    )}
+                    <AddProjectDialog
+                      onAddProject={onAddProject}
+                      trigger={
+                        <Button size="sm" className="h-7 gap-1.5 px-2 text-[11px]">
+                          <Plus className="h-3.5 w-3.5" />
+                          새 프로젝트
+                        </Button>
+                      }
+                    />
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center justify-end gap-1">
+                <div className="flex w-full flex-wrap items-center gap-1.5">
                   <Dialog open={isExportPickerOpen} onOpenChange={setIsExportPickerOpen}>
                     <DialogTrigger asChild>
                       <Button
@@ -1364,27 +1480,37 @@ export function GanttView({
                       </div>
                     </DialogContent>
                   </Dialog>
-                  {hiddenProjectCount > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 gap-1 px-2 text-[11px]"
-                      onClick={() => setShowHiddenProjects((prev) => !prev)}
-                    >
-                      {showHiddenProjects
-                        ? "- 숨긴 프로젝트 숨기기"
-                        : `+ 숨긴 프로젝트(${String(hiddenProjectCount).padStart(2, "0")}개)`}
-                    </Button>
-                  )}
-                  <AddProjectDialog
-                    onAddProject={onAddProject}
-                    trigger={
-                      <Button size="sm" className="h-7 gap-1.5 px-2 text-[11px]">
-                        <Plus className="h-3.5 w-3.5" />
-                        새 프로젝트
+                  {selectedTaskCount > 0 && (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1 border-emerald-200 bg-emerald-50 px-2 text-[11px] text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
+                        onClick={() => void handleBulkCopySelectedTasks()}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        선택 복사 ({selectedTaskCount})
                       </Button>
-                    }
-                  />
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        className="h-7 gap-1 px-2 text-[11px]"
+                        onClick={() => void handleBulkDeleteSelectedTasks()}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        선택 삭제 ({selectedTaskCount})
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 border-slate-200 bg-slate-50 px-2 text-[11px] text-slate-700 hover:bg-slate-100 hover:text-slate-800"
+                        onClick={clearSelectedTasks}
+                      >
+                        선택 해제
+                      </Button>
+                    </>
+                  )}
+                  <div className="ml-auto flex items-center gap-1.5">
                   <Button
                     variant="ghost"
                     size="sm"
@@ -1403,6 +1529,7 @@ export function GanttView({
                     <PanelRight className="h-3.5 w-3.5" />
                     {showDetailColumns ? "상세 숨기기" : "상세 보기"}
                   </Button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1557,6 +1684,7 @@ export function GanttView({
                       <div className="ml-auto flex shrink-0 items-center gap-1">
                         <AddTaskDialog
                           projectId={project.id}
+                          defaultDepartment={defaultTaskDepartment}
                           onAddTask={handleAddProjectLevelTask}
                           trigger={
                             <Button
@@ -1609,6 +1737,8 @@ export function GanttView({
                         .slice(virtualItem.startTaskIndex, virtualItem.endTaskIndex)
                         .map((task) => {
                       const bar = getBarPosition(task.startDate, task.endDate)
+                      const barRenderWidth = bar ? Math.max(12, bar.width - 4) : 0
+                      const resizeHandleWidth = barRenderWidth <= CELL_WIDTH ? 2 : 3
                       const isTaskCollapsed = collapsedTaskIds.has(task.id)
                       const barStyle = getStatusBarStyle(task.status)
                       const displayDepth = Math.min(3, Math.max(0, Math.floor(task.depth)))
@@ -1684,6 +1814,16 @@ export function GanttView({
                               style={{ width: leftPanelWidth }}
                             >
                               <div className="flex items-center gap-1.5 w-full min-w-0">
+                                <label className="flex h-5 w-5 shrink-0 items-center justify-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedTaskIds.has(task.id)}
+                                    onChange={(e) => toggleTaskSelection(task.id, e.target.checked)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="h-3.5 w-3.5 cursor-pointer rounded border-border"
+                                    aria-label="업무 선택"
+                                  />
+                                </label>
                                 <div style={{ width: displayDepth * 12 }} className="shrink-0" />
                                 <button
                                   type="button"
@@ -1740,6 +1880,8 @@ export function GanttView({
                                     <EditTaskDialog
                                       task={task}
                                       onEditTask={onEditTask}
+                                      defaultDepartment={defaultTaskDepartment}
+                                      openOnDoubleClick
                               trigger={
                                         <button
                                           type="button"
@@ -1780,6 +1922,8 @@ export function GanttView({
                                     <EditTaskDialog
                                       task={task}
                                       onEditTask={onEditTask}
+                                      defaultDepartment={defaultTaskDepartment}
+                                      openOnDoubleClick
                                       trigger={
                                         <button className="min-w-0 flex-1 text-left text-xs font-normal transition-colors hover:text-primary">
                                           <span className="flex min-w-0 items-center gap-1.5">
@@ -1828,6 +1972,7 @@ export function GanttView({
                                   projectId={task.projectId}
                                   parentId={task.id}
                                   defaultPerson={task.person}
+                                  defaultDepartment={defaultTaskDepartment}
                                   onAddTask={handleAddNestedSubTask}
                                   trigger={
                                     <Button
@@ -1847,6 +1992,12 @@ export function GanttView({
                                   className="ml-0.5 h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
                                   onClick={() => {
                                     if (confirm("Delete this task?")) {
+                                      setSelectedTaskIds((prev) => {
+                                        if (!prev.has(task.id)) return prev
+                                        const next = new Set(prev)
+                                        next.delete(task.id)
+                                        return next
+                                      })
                                       onDeleteTask(task.id, task.projectId)
                                     }
                                   }}
@@ -1918,12 +2069,12 @@ export function GanttView({
 
                                     <DateCell
                                       value={task.startDate}
-                                      onChange={(value) => updateTaskInline(task, { startDate: value })}
+                                      onChange={(value) => onEditTask(buildTaskWithAutoManDays(task, { startDate: value }))}
                                     />
 
                                     <DateCell
                                       value={task.endDate}
-                                      onChange={(value) => updateTaskInline(task, { endDate: value })}
+                                      onChange={(value) => onEditTask(buildTaskWithAutoManDays(task, { endDate: value }))}
                                     />
 
                                     <input
@@ -1977,15 +2128,17 @@ export function GanttView({
                                         ? "opacity-100 scale-y-110 z-10 shadow-md ring-2 ring-white/50"
                                         : "opacity-90 hover:opacity-100",
                                     )}
-                                    style={{ left: bar.left + 2, width: bar.width - 4 }}
+                                    style={{ left: bar.left + 2, width: barRenderWidth }}
                                     onMouseDown={(e) => handleMouseDown(e, task, "move")}
                                   >
                                     <div
-                                      className="absolute left-0 top-0 bottom-0 w-3 cursor-w-resize hover:bg-black/10 rounded-l-md z-10"
+                                      className="absolute left-0 top-0 bottom-0 cursor-w-resize hover:bg-black/10 rounded-l-md z-10"
+                                      style={{ width: resizeHandleWidth }}
                                       onMouseDown={(e) => handleMouseDown(e, task, "resize-left")}
                                     />
                                     <div
-                                      className="absolute right-0 top-0 bottom-0 w-3 cursor-e-resize hover:bg-black/10 rounded-r-md z-10"
+                                      className="absolute right-0 top-0 bottom-0 cursor-e-resize hover:bg-black/10 rounded-r-md z-10"
+                                      style={{ width: resizeHandleWidth }}
                                       onMouseDown={(e) => handleMouseDown(e, task, "resize-right")}
                                     />
                                     <div
@@ -2063,6 +2216,10 @@ function DateCell({ value, onChange }: { value: string; onChange: (value: string
         <Calendar
           mode="single"
           selected={selected}
+          locale={ko}
+          formatters={{
+            formatCaption: (month) => `${month.getFullYear()}년 ${month.getMonth() + 1}월`,
+          }}
           onSelect={(date) => {
             if (!date) return
             onChange(formatDateKorean(date))

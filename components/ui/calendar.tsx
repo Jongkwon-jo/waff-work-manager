@@ -7,6 +7,7 @@ import {
   ChevronRightIcon,
 } from 'lucide-react'
 import { DayButton, DayPicker, getDefaultClassNames } from 'react-day-picker'
+import { ko } from 'date-fns/locale'
 
 import { cn } from '@/lib/utils'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -17,6 +18,7 @@ function Calendar({
   showOutsideDays = true,
   captionLayout = 'label',
   buttonVariant = 'ghost',
+  locale = ko,
   formatters,
   components,
   ...props
@@ -35,9 +37,11 @@ function Calendar({
         className,
       )}
       captionLayout={captionLayout}
+      locale={locale}
       formatters={{
+        formatCaption: (date) => `${date.getFullYear()}년 ${date.getMonth() + 1}월`,
         formatMonthDropdown: (date) =>
-          date.toLocaleString('default', { month: 'short' }),
+          `${date.getMonth() + 1}월`,
         ...formatters,
       }}
       classNames={{
@@ -87,7 +91,7 @@ function Calendar({
         table: 'w-full border-collapse',
         weekdays: cn('flex', defaultClassNames.weekdays),
         weekday: cn(
-          'text-muted-foreground rounded-md flex-1 font-normal text-[0.8rem] select-none',
+          'text-muted-foreground rounded-md flex-1 font-normal text-[0.8rem] select-none first:text-red-500 last:text-blue-500',
           defaultClassNames.weekday,
         ),
         week: cn('flex w-full mt-2', defaultClassNames.week),
@@ -100,7 +104,7 @@ function Calendar({
           defaultClassNames.week_number,
         ),
         day: cn(
-          'relative w-full h-full p-0 text-center [&:first-child[data-selected=true]_button]:rounded-l-md [&:last-child[data-selected=true]_button]:rounded-r-md group/day aspect-square select-none',
+          'relative w-full h-full p-0 text-center [&:first-child[data-selected=true]_button]:rounded-l-md [&:last-child[data-selected=true]_button]:rounded-r-md [&:first-child_button]:text-red-500 [&:last-child_button]:text-blue-500 group/day aspect-square select-none',
           defaultClassNames.day,
         ),
         range_start: cn(

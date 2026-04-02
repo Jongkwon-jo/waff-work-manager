@@ -30,10 +30,15 @@ const TASKS_COLLECTION = "fa_tasks"
 const HISTORY_COLLECTION = "fa_history"
 const SETTINGS_COLLECTION = "fa_settings"
 const DASHBOARD_PREFERENCES_DOC = "fa_dashboard_preferences"
+const GANTT_COLLAPSE_STATE_DOC = "gantt_collapse_state"
 const USER_PROFILES_COLLECTION = "user_profiles"
 const USER_PAGE_PERMISSIONS_COLLECTION = "user_page_permissions"
 
 export type DashboardSortBy = "name" | "type" | "progress" | "latest"
+export type GanttCollapseState = {
+  collapsedProjectIds: string[]
+  collapsedTaskIds: string[]
+}
 export type UserProfile = {
   email: string
   lastLoginAt?: Date
@@ -68,6 +73,10 @@ export interface ChangeHistoryEntry {
 }
 
 export type HistoryEntryInput = Omit<ChangeHistoryEntry, "id" | "createdAt">
+export const DEFAULT_GANTT_COLLAPSE_STATE: GanttCollapseState = {
+  collapsedProjectIds: [],
+  collapsedTaskIds: [],
+}
 
 function toStringOrEmpty(value: unknown): string {
   if (typeof value === "string") return value.trim()
@@ -102,6 +111,23 @@ function toBooleanOr(value: unknown, fallback: boolean): boolean {
 
 function compactObject<T extends Record<string, unknown>>(obj: T): T {
   return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T
+}
+
+function uniqueTrimmedStrings(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
+}
+
+function normalizeGanttCollapseState(
+  raw?: Partial<Record<keyof GanttCollapseState, unknown>>,
+): GanttCollapseState {
+  return {
+    collapsedProjectIds: Array.isArray(raw?.collapsedProjectIds)
+      ? uniqueTrimmedStrings(raw.collapsedProjectIds.filter((value): value is string => typeof value === "string"))
+      : [],
+    collapsedTaskIds: Array.isArray(raw?.collapsedTaskIds)
+      ? uniqueTrimmedStrings(raw.collapsedTaskIds.filter((value): value is string => typeof value === "string"))
+      : [],
+  }
 }
 
 function todayLabel(): string {
@@ -208,7 +234,7 @@ export function subscribeToData(callback: (projects: Project[]) => void) {
   const unsubscribeProjects = onSnapshot(
     projectsQuery,
     (snapshot) => {
-      projects = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+      projects = snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
       updateAndNotify()
     },
     (error) => {
@@ -219,7 +245,7 @@ export function subscribeToData(callback: (projects: Project[]) => void) {
   const unsubscribeTasks = onSnapshot(
     tasksQuery,
     (snapshot) => {
-      tasks = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+      tasks = snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
       updateAndNotify()
     },
     (error) => {
@@ -237,8 +263,8 @@ export async function fetchProjectsWithTasks(): Promise<Project[]> {
   const projectsSnapshot = await getDocs(collection(db, PROJECTS_COLLECTION))
   const tasksSnapshot = await getDocs(collection(db, TASKS_COLLECTION))
 
-  const projectsData = projectsSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-  const tasksData = tasksSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+  const projectsData = projectsSnapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
+  const tasksData = tasksSnapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
 
   return buildProjectTree(projectsData, tasksData)
 }
@@ -413,6 +439,33 @@ export async function saveDashboardSortBy(sortBy: DashboardSortBy): Promise<void
     preferencesRef,
     {
       sortBy,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export function subscribeGanttCollapseState(callback: (state: GanttCollapseState) => void) {
+  const stateRef = doc(db, SETTINGS_COLLECTION, GANTT_COLLAPSE_STATE_DOC)
+  return onSnapshot(
+    stateRef,
+    (snapshot) => {
+      const raw = snapshot.data() as Partial<Record<keyof GanttCollapseState, unknown>> | undefined
+      callback(normalizeGanttCollapseState(raw))
+    },
+    (error) => {
+      console.error("Gantt collapse state snapshot error:", error)
+      callback({ ...DEFAULT_GANTT_COLLAPSE_STATE })
+    },
+  )
+}
+
+export async function saveGanttCollapseState(state: GanttCollapseState): Promise<void> {
+  const stateRef = doc(db, SETTINGS_COLLECTION, GANTT_COLLAPSE_STATE_DOC)
+  await setDoc(
+    stateRef,
+    {
+      ...normalizeGanttCollapseState(state),
       updatedAt: serverTimestamp(),
     },
     { merge: true },

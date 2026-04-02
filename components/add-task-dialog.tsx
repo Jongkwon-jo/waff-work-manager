@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Plus, CalendarIcon } from "lucide-react"
+import { Plus, CalendarIcon, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -32,16 +32,33 @@ interface AddTaskDialogProps {
   projectId: string
   parentId?: string
   defaultPerson?: string
+  defaultDepartment?: string
   onAddTask: (task: Task) => void
   trigger?: React.ReactNode
 }
 
-export function AddTaskDialog({ projectId, parentId, defaultPerson = "", onAddTask, trigger }: AddTaskDialogProps) {
+export function AddTaskDialog({
+  projectId,
+  parentId,
+  defaultPerson = "",
+  defaultDepartment = "전략기획",
+  onAddTask,
+  trigger,
+}: AddTaskDialogProps) {
+  const parseListValue = (value: string): string[] =>
+    value
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean)
+
+  const joinListValue = (values: string[]): string =>
+    Array.from(new Set(values.map((v) => v.trim()).filter(Boolean))).join(", ")
+
   const [open, setOpen] = useState(false)
   const [taskName, setTaskName] = useState("")
   const [category, setCategory] = useState<TaskCategory>("일반")
-  const [department, setDepartment] = useState("전략기획")
-  const [person, setPerson] = useState(defaultPerson)
+  const [department, setDepartment] = useState(defaultDepartment)
+  const [personList, setPersonList] = useState<string[]>(parseListValue(defaultPerson))
   const [status, setStatus] = useState<TaskStatus>("대기")
   const [manDays, setManDays] = useState("0")
   const [includeWeekends, setIncludeWeekends] = useState(false)
@@ -61,12 +78,18 @@ export function AddTaskDialog({ projectId, parentId, defaultPerson = "", onAddTa
 
   useEffect(() => {
     if (!open) return
-    if (defaultPerson && personOptions.includes(defaultPerson)) {
-      setPerson(defaultPerson)
+    const fromDefault = parseListValue(defaultPerson)
+    if (fromDefault.length > 0) {
+      setPersonList(fromDefault)
       return
     }
-    setPerson((prev) => (personOptions.includes(prev) ? prev : personOptions[0] || ""))
+    setPersonList((prev) => (prev.length > 0 ? prev : personOptions.slice(0, 1)))
   }, [defaultPerson, open, personOptions])
+
+  useEffect(() => {
+    if (!open) return
+    setDepartment(defaultDepartment)
+  }, [defaultDepartment, open])
 
   const formatDate = (date: Date | undefined) => {
     if (!date) return ""
@@ -84,7 +107,7 @@ export function AddTaskDialog({ projectId, parentId, defaultPerson = "", onAddTa
       task: taskName,
       category,
       department,
-      person,
+      person: joinListValue(personList),
       startDate: formatDate(startDate),
       endDate: formatDate(endDate),
       status,
@@ -103,16 +126,39 @@ export function AddTaskDialog({ projectId, parentId, defaultPerson = "", onAddTa
     setManDays(String(calculated))
   }
 
+  useEffect(() => {
+    if (!startDate || !endDate) return
+    const calculated = calculateManDaysBetweenDates(startDate, endDate, includeWeekends)
+    setManDays(String(calculated))
+  }, [startDate, endDate, includeWeekends])
+
   const resetForm = () => {
     setTaskName("")
     setCategory("일반")
-    setDepartment("전략기획")
-    setPerson(defaultPerson || departmentPersonSettings["전략기획"]?.[0] || "")
+    setDepartment(defaultDepartment)
+    const resetDefaultPersons = parseListValue(defaultPerson)
+    const defaultGroup = resolveDepartmentPersonGroup(defaultDepartment)
+    setPersonList(
+      resetDefaultPersons.length > 0
+        ? resetDefaultPersons
+        : departmentPersonSettings[defaultGroup]?.[0]
+          ? [departmentPersonSettings[defaultGroup][0]]
+          : [],
+    )
     setStatus("대기")
     setManDays("0")
     setIncludeWeekends(false)
     setStartDate(new Date())
     setEndDate(new Date())
+  }
+
+  const togglePerson = (owner: string) => {
+    setPersonList((prev) => {
+      if (prev.includes(owner)) {
+        return prev.filter((name) => name !== owner)
+      }
+      return [...prev, owner]
+    })
   }
 
   return (
@@ -174,19 +220,39 @@ export function AddTaskDialog({ projectId, parentId, defaultPerson = "", onAddTa
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="person">담당자</Label>
-                <Select value={person || "__none__"} onValueChange={(v) => setPerson(v === "__none__" ? "" : v)}>
-                  <SelectTrigger id="person">
-                    <SelectValue placeholder="담당자 선택" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">담당자 미지정</SelectItem>
-                    {personOptions.map((owner) => (
-                      <SelectItem key={owner} value={owner}>
-                        {owner}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button id="person" type="button" variant="outline" className="w-full justify-start font-normal">
+                      <span className="truncate">{personList.length > 0 ? joinListValue(personList) : "담당자 선택(복수 가능)"}</span>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[260px] p-2" align="start">
+                    <div className="max-h-56 space-y-1 overflow-auto">
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
+                        onClick={() => setPersonList([])}
+                      >
+                        <span>담당자 미지정</span>
+                        {personList.length === 0 && <Check className="h-3.5 w-3.5" />}
+                      </button>
+                      {personOptions.map((owner) => {
+                        const checked = personList.includes(owner)
+                        return (
+                          <button
+                            key={owner}
+                            type="button"
+                            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
+                            onClick={() => togglePerson(owner)}
+                          >
+                            <span>{owner}</span>
+                            {checked && <Check className="h-3.5 w-3.5" />}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-2">
@@ -222,7 +288,7 @@ export function AddTaskDialog({ projectId, parentId, defaultPerson = "", onAddTa
                   <PopoverTrigger asChild>
                     <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !startDate && "text-muted-foreground")}>
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {startDate ? format(startDate, "MM월 dd일", { locale: ko }) : <span>날짜 선택</span>}
+                      {startDate ? format(startDate, "yy-MM", { locale: ko }) : <span>날짜 선택</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
@@ -236,7 +302,7 @@ export function AddTaskDialog({ projectId, parentId, defaultPerson = "", onAddTa
                   <PopoverTrigger asChild>
                     <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !endDate && "text-muted-foreground")}>
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {endDate ? format(endDate, "MM월 dd일", { locale: ko }) : <span>날짜 선택</span>}
+                      {endDate ? format(endDate, "yy-MM", { locale: ko }) : <span>날짜 선택</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">

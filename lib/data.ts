@@ -21,7 +21,7 @@ export interface Task {
   subTasks?: Task[]
 }
 
-export type ProjectType = "SI" | "R&D" | "S/F" | "Etc"
+export type ProjectType = "SI" | "R&D" | "S/F" | "공사" | "A/S" | "Etc"
 
 export interface Project {
   id: string

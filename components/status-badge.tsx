@@ -43,6 +43,8 @@ const projectTypeConfig: Record<string, { bg: string; text: string }> = {
   SI: { bg: "bg-blue-100", text: "text-blue-800" },
   "R&D": { bg: "bg-green-100", text: "text-green-800" },
   "S/F": { bg: "bg-amber-100", text: "text-amber-600" },
+  "공사": { bg: "bg-orange-100", text: "text-orange-700" },
+  "A/S": { bg: "bg-cyan-100", text: "text-cyan-700" },
   Etc: { bg: "bg-slate-50", text: "text-slate-700" },
 }
 

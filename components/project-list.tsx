@@ -18,6 +18,7 @@ interface ProjectListProps {
   statusFilter: TaskStatus | "all"
   departmentFilter: string
   personFilter: string
+  defaultTaskDepartment?: string
   searchQuery: string
   onAddTask: (task: Task) => void
   onEditTask: (task: Task) => void
@@ -31,6 +32,7 @@ export function ProjectList({
   statusFilter,
   departmentFilter,
   personFilter,
+  defaultTaskDepartment = "전략기획",
   searchQuery,
   onAddTask,
   onEditTask,
@@ -249,6 +251,7 @@ export function ProjectList({
                           key={task.id}
                           task={task}
                           depth={0}
+                          defaultTaskDepartment={defaultTaskDepartment}
                           onEditTask={onEditTask}
                           onDeleteTask={onDeleteTask}
                           onAddTask={onAddTask}
@@ -269,12 +272,14 @@ export function ProjectList({
 function RecursiveTaskRow({
   task,
   depth,
+  defaultTaskDepartment = "전략기획",
   onEditTask,
   onDeleteTask,
   onAddTask,
 }: {
   task: Task
   depth: number
+  defaultTaskDepartment?: string
   onEditTask: (task: Task) => void
   onDeleteTask: (taskId: string, projectId: string) => void
   onAddTask: (task: Task) => void
@@ -337,7 +342,7 @@ function RecursiveTaskRow({
         </td>
         <td className="px-2 py-2.5 text-center">
           <div className="flex items-center justify-center gap-1">
-            <EditTaskDialog task={task} onEditTask={onEditTask} />
+            <EditTaskDialog task={task} onEditTask={onEditTask} defaultDepartment={defaultTaskDepartment} />
             <Button
               variant="ghost"
               size="icon"
@@ -359,6 +364,7 @@ function RecursiveTaskRow({
             key={subTask.id}
             task={subTask}
             depth={depth + 1}
+            defaultTaskDepartment={defaultTaskDepartment}
             onEditTask={onEditTask}
             onDeleteTask={onDeleteTask}
             onAddTask={onAddTask}

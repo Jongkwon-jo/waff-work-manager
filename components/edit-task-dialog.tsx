@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Pencil, CalendarIcon } from "lucide-react"
+import { Pencil, CalendarIcon, Check, ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -32,6 +32,8 @@ import type { Task, TaskStatus, TaskCategory } from "@/lib/data"
 interface EditTaskDialogProps {
   task: Task
   onEditTask: (task: Task) => void
+  defaultDepartment?: string
+  openOnDoubleClick?: boolean
   trigger?: React.ReactNode
 }
 
@@ -60,13 +62,28 @@ function parseKoreanDate(value: string): Date | undefined {
   return undefined
 }
 
-export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProps) {
+export function EditTaskDialog({
+  task,
+  onEditTask,
+  defaultDepartment = "전략기획",
+  openOnDoubleClick = false,
+  trigger,
+}: EditTaskDialogProps) {
+  const parseListValue = (value: string): string[] =>
+    value
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean)
+
+  const joinListValue = (values: string[]): string =>
+    Array.from(new Set(values.map((v) => v.trim()).filter(Boolean))).join(", ")
+
   const [open, setOpen] = useState(false)
   const [taskName, setTaskName] = useState(task.task)
   const [category, setCategory] = useState<TaskCategory>(task.category)
   const [memo, setMemo] = useState(task.memo || "")
-  const [department, setDepartment] = useState(task.department)
-  const [person, setPerson] = useState(task.person)
+  const [department, setDepartment] = useState(task.department || defaultDepartment)
+  const [personList, setPersonList] = useState<string[]>(parseListValue(task.person))
   const [status, setStatus] = useState<TaskStatus>(task.status)
   const [manDays, setManDays] = useState(task.manDays.toString())
   const [includeWeekends, setIncludeWeekends] = useState(false)
@@ -83,6 +100,10 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
     const group = resolveDepartmentPersonGroup(department)
     return departmentPersonSettings[group] || []
   }, [department, departmentPersonSettings])
+  const personOptionValues = useMemo(
+    () => Array.from(new Set([...personOptions, ...personList])).filter(Boolean),
+    [personList, personOptions],
+  )
 
   useEffect(() => {
     if (!open) return
@@ -90,14 +111,14 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
     setTaskName(task.task)
     setCategory(task.category)
     setMemo(task.memo || "")
-    setDepartment(task.department)
-    setPerson(task.person)
+    setDepartment(task.department || defaultDepartment)
+    setPersonList(parseListValue(task.person))
     setStatus(task.status)
     setManDays(task.manDays.toString())
     setIncludeWeekends(false)
     setStartDate(parseKoreanDate(task.startDate))
     setEndDate(parseKoreanDate(task.endDate))
-  }, [open, task])
+  }, [defaultDepartment, open, task])
 
   const formatDate = (date: Date | undefined) => {
     if (!date) return ""
@@ -114,7 +135,7 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
       memo: memo.trim(),
       category,
       department,
-      person,
+      person: joinListValue(personList),
       startDate: startDate ? formatDate(startDate) : task.startDate,
       endDate: endDate ? formatDate(endDate) : task.endDate,
       status,
@@ -131,16 +152,39 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
     setManDays(String(calculated))
   }
 
+  useEffect(() => {
+    if (!startDate || !endDate) return
+    const calculated = calculateManDaysBetweenDates(startDate, endDate, includeWeekends)
+    setManDays(String(calculated))
+  }, [startDate, endDate, includeWeekends])
+
+  const togglePerson = (owner: string) => {
+    setPersonList((prev) => {
+      if (prev.includes(owner)) {
+        return prev.filter((name) => name !== owner)
+      }
+      return [...prev, owner]
+    })
+  }
+
+  const triggerNode = trigger || (
+    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary">
+      <Pencil className="h-3.5 w-3.5" />
+      <span className="sr-only">수정</span>
+    </Button>
+  )
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {trigger || (
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary">
-            <Pencil className="h-3.5 w-3.5" />
-            <span className="sr-only">수정</span>
-          </Button>
-        )}
-      </DialogTrigger>
+      {openOnDoubleClick ? (
+        <div onDoubleClick={() => setOpen(true)}>
+          {triggerNode}
+        </div>
+      ) : (
+        <DialogTrigger asChild>
+          {triggerNode}
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-[500px]">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
@@ -188,19 +232,40 @@ export function EditTaskDialog({ task, onEditTask, trigger }: EditTaskDialogProp
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="edit-person">담당자</Label>
-                <Select value={person || "__none__"} onValueChange={(v) => setPerson(v === "__none__" ? "" : v)}>
-                  <SelectTrigger id="edit-person">
-                    <SelectValue placeholder="담당자 선택" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">담당자 미지정</SelectItem>
-                    {personOptions.map((owner) => (
-                      <SelectItem key={owner} value={owner}>
-                        {owner}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button id="edit-person" type="button" variant="outline" className="w-full justify-between font-normal">
+                      <span className="truncate">{personList.length > 0 ? joinListValue(personList) : "담당자 선택(복수 가능)"}</span>
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[280px] p-2" align="start">
+                    <div className="max-h-56 space-y-1 overflow-auto">
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
+                        onClick={() => setPersonList([])}
+                      >
+                        <span>담당자 미지정</span>
+                        {personList.length === 0 && <Check className="h-3.5 w-3.5" />}
+                      </button>
+                      {personOptionValues.map((owner) => {
+                        const checked = personList.includes(owner)
+                        return (
+                          <button
+                            key={owner}
+                            type="button"
+                            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
+                            onClick={() => togglePerson(owner)}
+                          >
+                            <span>{owner}</span>
+                            {checked && <Check className="h-3.5 w-3.5" />}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-2">

@@ -30,12 +30,17 @@ const TASKS_COLLECTION = "tasks"
 const HISTORY_COLLECTION = "history"
 const SETTINGS_COLLECTION = "settings"
 const DASHBOARD_PREFERENCES_DOC = "dashboard_preferences"
+const GANTT_COLLAPSE_STATE_DOC = "gantt_collapse_state"
 const DEPARTMENT_PERSON_SETTINGS_DOC = "department_person_settings"
 const DEPARTMENT_PAGE_PERMISSIONS_DOC = "department_page_permissions"
 const USER_PROFILES_COLLECTION = "user_profiles"
 const USER_PAGE_PERMISSIONS_COLLECTION = "user_page_permissions"
 
 export type DashboardSortBy = "name" | "type" | "progress" | "latest"
+export type GanttCollapseState = {
+  collapsedProjectIds: string[]
+  collapsedTaskIds: string[]
+}
 export const DEPARTMENT_PERSON_GROUPS = ["ICT", "FA", "전략기획", "기타"] as const
 export type DepartmentPersonGroup = (typeof DEPARTMENT_PERSON_GROUPS)[number]
 export type MyPageTaskPriority = "high" | "medium" | "low"
@@ -99,6 +104,10 @@ export const DEFAULT_DEPARTMENT_PAGE_PERMISSIONS: DepartmentPagePermissions = {
   FA: { ...DEFAULT_PAGE_PERMISSIONS },
   전략기획: { ...DEFAULT_PAGE_PERMISSIONS },
   기타: { ...DEFAULT_PAGE_PERMISSIONS },
+}
+export const DEFAULT_GANTT_COLLAPSE_STATE: GanttCollapseState = {
+  collapsedProjectIds: [],
+  collapsedTaskIds: [],
 }
 
 function toStringOrEmpty(value: unknown): string {
@@ -208,6 +217,19 @@ function normalizeDepartmentPagePermissions(
   }
 }
 
+function normalizeGanttCollapseState(
+  raw?: Partial<Record<keyof GanttCollapseState, unknown>>,
+): GanttCollapseState {
+  return {
+    collapsedProjectIds: Array.isArray(raw?.collapsedProjectIds)
+      ? uniqueTrimmedStrings(raw.collapsedProjectIds.filter((value): value is string => typeof value === "string"))
+      : [],
+    collapsedTaskIds: Array.isArray(raw?.collapsedTaskIds)
+      ? uniqueTrimmedStrings(raw.collapsedTaskIds.filter((value): value is string => typeof value === "string"))
+      : [],
+  }
+}
+
 export function resolveDepartmentPersonGroup(department: string): DepartmentPersonGroup {
   const normalized = department.trim()
   if (normalized === "ICT") return "ICT"
@@ -313,7 +335,7 @@ export function subscribeToData(callback: (projects: Project[]) => void) {
   const unsubscribeProjects = onSnapshot(
     projectsQuery,
     (snapshot) => {
-      projects = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+      projects = snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
       updateAndNotify()
     },
     (error) => {
@@ -324,7 +346,7 @@ export function subscribeToData(callback: (projects: Project[]) => void) {
   const unsubscribeTasks = onSnapshot(
     tasksQuery,
     (snapshot) => {
-      tasks = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+      tasks = snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
       updateAndNotify()
     },
     (error) => {
@@ -342,8 +364,8 @@ export async function fetchProjectsWithTasks(): Promise<Project[]> {
   const projectsSnapshot = await getDocs(collection(db, PROJECTS_COLLECTION))
   const tasksSnapshot = await getDocs(collection(db, TASKS_COLLECTION))
 
-  const projectsData = projectsSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-  const tasksData = tasksSnapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+  const projectsData = projectsSnapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
+  const tasksData = tasksSnapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
 
   return buildProjectTree(projectsData, tasksData)
 }
@@ -528,6 +550,33 @@ export async function saveDashboardSortBy(sortBy: DashboardSortBy): Promise<void
     preferencesRef,
     {
       sortBy,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export function subscribeGanttCollapseState(callback: (state: GanttCollapseState) => void) {
+  const stateRef = doc(db, SETTINGS_COLLECTION, GANTT_COLLAPSE_STATE_DOC)
+  return onSnapshot(
+    stateRef,
+    (snapshot) => {
+      const raw = snapshot.data() as Partial<Record<keyof GanttCollapseState, unknown>> | undefined
+      callback(normalizeGanttCollapseState(raw))
+    },
+    (error) => {
+      console.error("Gantt collapse state snapshot error:", error)
+      callback({ ...DEFAULT_GANTT_COLLAPSE_STATE })
+    },
+  )
+}
+
+export async function saveGanttCollapseState(state: GanttCollapseState): Promise<void> {
+  const stateRef = doc(db, SETTINGS_COLLECTION, GANTT_COLLAPSE_STATE_DOC)
+  await setDoc(
+    stateRef,
+    {
+      ...normalizeGanttCollapseState(state),
       updatedAt: serverTimestamp(),
     },
     { merge: true },

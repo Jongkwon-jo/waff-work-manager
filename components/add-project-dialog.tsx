@@ -87,6 +87,8 @@ export function AddProjectDialog({ onAddProject, trigger }: AddProjectDialogProp
                   <SelectItem value="SI">SI</SelectItem>
                   <SelectItem value="R&D">R&D</SelectItem>
                   <SelectItem value="S/F">S/F</SelectItem>
+                  <SelectItem value="공사">공사</SelectItem>
+                  <SelectItem value="A/S">A/S</SelectItem>
                   <SelectItem value="Etc">Etc</SelectItem>
                 </SelectContent>
               </Select>
