@@ -1324,57 +1324,19 @@ export function GanttView({
             >
               <div className="flex w-full flex-col items-stretch gap-1.5">
                 <div className="flex w-full items-center justify-between gap-2">
-                  <div className="flex items-center gap-0.5 rounded-md border border-border bg-background/90 px-1 py-0.5">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5"
-                      onClick={() => handleDisplayMonthMove(-1)}
-                      aria-label="이전 월 보기"
-                    >
-                      <ChevronLeft className="h-3 w-3" />
-                    </Button>
-                    <Popover open={isMonthPickerOpen} onOpenChange={setIsMonthPickerOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="h-5 min-w-[110px] justify-center px-2 text-[10px] font-semibold"
-                        >
-                          {displayMonthLabel}
-                          <ChevronDown className="ml-0.5 h-3 w-3" />
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Project & Task Details
+                    </span>
+                    <AddProjectDialog
+                      onAddProject={onAddProject}
+                      trigger={
+                        <Button size="sm" className="h-7 gap-1.5 px-2 text-[11px]">
+                          <Plus className="h-3.5 w-3.5" />
+                          새 프로젝트
                         </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="end">
-                        <Calendar
-                          mode="single"
-                          month={displayMonthDate}
-                          onMonthChange={(month) => setDisplayMonthDate(new Date(month.getFullYear(), month.getMonth(), 1))}
-                          onSelect={(date) => {
-                            if (!date) return
-                            setDisplayMonthDate(new Date(date.getFullYear(), date.getMonth(), 1))
-                            setIsMonthPickerOpen(false)
-                          }}
-                          captionLayout="dropdown"
-                          locale={ko}
-                          formatters={{
-                            formatCaption: (month) => `${month.getFullYear()}년 ${month.getMonth() + 1}월`,
-                          }}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5"
-                      onClick={() => handleDisplayMonthMove(1)}
-                      aria-label="다음 월 보기"
-                    >
-                      <ChevronRight className="h-3 w-3" />
-                    </Button>
+                      }
+                    />
                   </div>
                   <div className="flex items-center gap-1.5">
                     {hiddenProjectCount > 0 && (
@@ -1386,27 +1348,70 @@ export function GanttView({
                       >
                         {showHiddenProjects
                           ? "- 숨긴 프로젝트 숨기기"
-                          : `+ 숨긴 프로젝트(${String(hiddenProjectCount).padStart(2, "0")}개)`}
+                        : `+ 숨긴 프로젝트(${String(hiddenProjectCount).padStart(2, "0")}개)`}
                       </Button>
                     )}
-                    <AddProjectDialog
-                      onAddProject={onAddProject}
-                      trigger={
-                        <Button size="sm" className="h-7 gap-1.5 px-2 text-[11px]">
-                          <Plus className="h-3.5 w-3.5" />
-                          새 프로젝트
-                        </Button>
-                      }
-                    />
+                    <div className="flex items-center gap-0.5 rounded-md border border-border bg-background/90 px-1 py-0.5">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5"
+                        onClick={() => handleDisplayMonthMove(-1)}
+                        aria-label="이전 월 보기"
+                      >
+                        <ChevronLeft className="h-3 w-3" />
+                      </Button>
+                      <Popover open={isMonthPickerOpen} onOpenChange={setIsMonthPickerOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            className="h-5 min-w-[110px] justify-center px-2 text-[10px] font-semibold"
+                          >
+                            {displayMonthLabel}
+                            <ChevronDown className="ml-0.5 h-3 w-3" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="end">
+                          <Calendar
+                            mode="single"
+                            month={displayMonthDate}
+                            onMonthChange={(month) => setDisplayMonthDate(new Date(month.getFullYear(), month.getMonth(), 1))}
+                            onSelect={(date) => {
+                              if (!date) return
+                              setDisplayMonthDate(new Date(date.getFullYear(), date.getMonth(), 1))
+                              setIsMonthPickerOpen(false)
+                            }}
+                            captionLayout="dropdown"
+                            locale={ko}
+                            formatters={{
+                              formatCaption: (month) => `${month.getFullYear()}년 ${month.getMonth() + 1}월`,
+                            }}
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5"
+                        onClick={() => handleDisplayMonthMove(1)}
+                        aria-label="다음 월 보기"
+                      >
+                        <ChevronRight className="h-3 w-3" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
                 <div className="flex w-full flex-wrap items-center gap-1.5">
                   <Dialog open={isExportPickerOpen} onOpenChange={setIsExportPickerOpen}>
                     <DialogTrigger asChild>
                       <Button
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
-                        className="h-7 gap-1.5 px-2 text-[11px]"
+                        className="h-7 gap-1.5 border-emerald-700 bg-emerald-700 px-2 text-[11px] text-white hover:bg-emerald-800 hover:text-white"
                       >
                         <FileSpreadsheet className="h-3.5 w-3.5" />
                         엑셀 내보내기
