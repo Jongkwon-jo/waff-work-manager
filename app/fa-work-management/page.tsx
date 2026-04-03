@@ -108,7 +108,7 @@ export default function FaWorkManagementPage() {
       return
     }
 
-    const unsubscribe = subscribeGanttCollapseState((state) => {
+    const unsubscribe = subscribeGanttCollapseState(user.email || "", (state) => {
       setGanttCollapsedProjectIds(state.collapsedProjectIds)
       setGanttCollapsedTaskIds(state.collapsedTaskIds)
       setIsGanttCollapseStateReady(true)
@@ -539,7 +539,7 @@ export default function FaWorkManagementPage() {
   }) => {
     if (!user) return
     try {
-      await saveGanttCollapseState(state)
+      await saveGanttCollapseState(user.email || "", state)
     } catch (error) {
       console.error("Failed to save gantt collapse state:", error)
     }

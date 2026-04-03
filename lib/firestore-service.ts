@@ -30,10 +30,10 @@ const TASKS_COLLECTION = "tasks"
 const HISTORY_COLLECTION = "history"
 const SETTINGS_COLLECTION = "settings"
 const DASHBOARD_PREFERENCES_DOC = "dashboard_preferences"
-const GANTT_COLLAPSE_STATE_DOC = "gantt_collapse_state"
 const DEPARTMENT_PERSON_SETTINGS_DOC = "department_person_settings"
 const DEPARTMENT_PAGE_PERMISSIONS_DOC = "department_page_permissions"
 const USER_PROFILES_COLLECTION = "user_profiles"
+const GANTT_COLLAPSE_STATE_FIELD = "ganttCollapseState"
 const USER_PAGE_PERMISSIONS_COLLECTION = "user_page_permissions"
 
 export type DashboardSortBy = "name" | "type" | "progress" | "latest"
@@ -556,12 +556,19 @@ export async function saveDashboardSortBy(sortBy: DashboardSortBy): Promise<void
   )
 }
 
-export function subscribeGanttCollapseState(callback: (state: GanttCollapseState) => void) {
-  const stateRef = doc(db, SETTINGS_COLLECTION, GANTT_COLLAPSE_STATE_DOC)
+export function subscribeGanttCollapseState(email: string, callback: (state: GanttCollapseState) => void) {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) {
+    callback({ ...DEFAULT_GANTT_COLLAPSE_STATE })
+    return () => {}
+  }
+
+  const profileRef = doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail))
   return onSnapshot(
-    stateRef,
+    profileRef,
     (snapshot) => {
-      const raw = snapshot.data() as Partial<Record<keyof GanttCollapseState, unknown>> | undefined
+      const profile = snapshot.data() as { ganttCollapseState?: Partial<Record<keyof GanttCollapseState, unknown>> } | undefined
+      const raw = profile?.[GANTT_COLLAPSE_STATE_FIELD]
       callback(normalizeGanttCollapseState(raw))
     },
     (error) => {
@@ -571,12 +578,16 @@ export function subscribeGanttCollapseState(callback: (state: GanttCollapseState
   )
 }
 
-export async function saveGanttCollapseState(state: GanttCollapseState): Promise<void> {
-  const stateRef = doc(db, SETTINGS_COLLECTION, GANTT_COLLAPSE_STATE_DOC)
+export async function saveGanttCollapseState(email: string, state: GanttCollapseState): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  const profileRef = doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail))
   await setDoc(
-    stateRef,
+    profileRef,
     {
-      ...normalizeGanttCollapseState(state),
+      email: normalizedEmail,
+      [GANTT_COLLAPSE_STATE_FIELD]: normalizeGanttCollapseState(state),
       updatedAt: serverTimestamp(),
     },
     { merge: true },
