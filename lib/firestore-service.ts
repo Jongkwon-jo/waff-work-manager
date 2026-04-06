@@ -48,12 +48,25 @@ export type MyPageTaskPreference = {
   checked: boolean
   priority: MyPageTaskPriority
   important: boolean
+  order?: number
+}
+export type MyPagePersonalTask = {
+  id: string
+  title: string
+  memo?: string
+  checked: boolean
+  priority: MyPageTaskPriority
+  important: boolean
+  order: number
+  createdAt?: number
+  updatedAt?: number
 }
 export type UserProfile = {
   email: string
   lastLoginAt?: Date
   taskAliases?: string[]
   myPageTaskPreferences?: Record<string, MyPageTaskPreference>
+  myPagePersonalTasks?: MyPagePersonalTask[]
   department?: DepartmentPersonGroup
 }
 
@@ -148,27 +161,50 @@ function compactObject<T extends Record<string, unknown>>(obj: T): T {
 function normalizeMyPageTaskPreferences(raw: unknown): Record<string, MyPageTaskPreference> {
   if (!raw || typeof raw !== "object") return {}
 
-  return Object.fromEntries(
-    Object.entries(raw as Record<string, unknown>)
-      .map(([key, value]) => {
-        if (!value || typeof value !== "object") return null
-        const candidate = value as Record<string, unknown>
-        const priority =
-          candidate.priority === "high" || candidate.priority === "medium" || candidate.priority === "low"
-            ? candidate.priority
-            : "medium"
+  const result: Record<string, MyPageTaskPreference> = {}
+  Object.entries(raw as Record<string, unknown>).forEach(([key, value]) => {
+    if (!value || typeof value !== "object") return
+    const candidate = value as Record<string, unknown>
+    const priority =
+      candidate.priority === "high" || candidate.priority === "medium" || candidate.priority === "low"
+        ? candidate.priority
+        : "medium"
+    result[key] = {
+      checked: Boolean(candidate.checked),
+      priority,
+      important: Boolean(candidate.important),
+      order: toNumberOr(candidate.order, Number.MAX_SAFE_INTEGER),
+    }
+  })
+  return result
+}
 
-        return [
-          key,
-          {
-            checked: Boolean(candidate.checked),
-            priority,
-            important: Boolean(candidate.important),
-          } satisfies MyPageTaskPreference,
-        ] as const
-      })
-      .filter((entry): entry is readonly [string, MyPageTaskPreference] => Boolean(entry)),
-  )
+function normalizeMyPagePersonalTasks(raw: unknown): MyPagePersonalTask[] {
+  if (!Array.isArray(raw)) return []
+
+  const tasks: MyPagePersonalTask[] = []
+  raw.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return
+    const candidate = entry as Record<string, unknown>
+    const title = toStringOrEmpty(candidate.title)
+    if (!title) return
+    const priority =
+      candidate.priority === "high" || candidate.priority === "medium" || candidate.priority === "low"
+        ? candidate.priority
+        : "medium"
+    tasks.push({
+      id: toStringOrEmpty(candidate.id) || `personal-${Date.now()}-${index}`,
+      title,
+      memo: toOptionalString(candidate.memo),
+      checked: Boolean(candidate.checked),
+      priority,
+      important: Boolean(candidate.important),
+      order: toNumberOr(candidate.order, index),
+      createdAt: toNumberOr(candidate.createdAt, Date.now()),
+      updatedAt: toNumberOr(candidate.updatedAt, Date.now()),
+    })
+  })
+  return tasks.sort((a, b) => a.order - b.order)
 }
 
 function uniqueTrimmedStrings(values: string[]) {
@@ -647,6 +683,7 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
             department?: unknown
             taskAliases?: unknown
             myPageTaskPreferences?: unknown
+            myPagePersonalTasks?: unknown
           }
           return {
             email: normalizeEmail(toStringOrEmpty(raw?.email)),
@@ -656,6 +693,7 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
               ? raw.taskAliases.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
               : [],
             myPageTaskPreferences: normalizeMyPageTaskPreferences(raw?.myPageTaskPreferences),
+            myPagePersonalTasks: normalizeMyPagePersonalTasks(raw?.myPagePersonalTasks),
           } satisfies UserProfile
         })
         .filter((profile) => Boolean(profile.email))
@@ -690,6 +728,7 @@ export function subscribeCurrentUserProfile(email: string, callback: (profile: U
         department?: unknown
         taskAliases?: unknown
         myPageTaskPreferences?: unknown
+        myPagePersonalTasks?: unknown
       }
       callback({
         email: normalizeEmail(toStringOrEmpty(raw?.email)),
@@ -699,6 +738,7 @@ export function subscribeCurrentUserProfile(email: string, callback: (profile: U
           ? raw.taskAliases.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
           : [],
         myPageTaskPreferences: normalizeMyPageTaskPreferences(raw?.myPageTaskPreferences),
+        myPagePersonalTasks: normalizeMyPagePersonalTasks(raw?.myPagePersonalTasks),
       })
     },
     (error) => {
@@ -749,6 +789,36 @@ export async function saveMyPageTaskPreferences(
     {
       email: normalizedEmail,
       myPageTaskPreferences,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export async function saveMyPagePersonalTasks(email: string, tasks: MyPagePersonalTask[]): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  const sanitized = tasks.map((task, index) => {
+    const priority = task.priority === "high" || task.priority === "medium" || task.priority === "low" ? task.priority : "medium"
+    return {
+      id: toStringOrEmpty(task.id) || `personal-${Date.now()}-${index}`,
+      title: toStringOrEmpty(task.title),
+      memo: toOptionalString(task.memo),
+      checked: Boolean(task.checked),
+      priority,
+      important: Boolean(task.important),
+      order: toNumberOr(task.order, index),
+      createdAt: toNumberOr(task.createdAt, Date.now()),
+      updatedAt: toNumberOr(task.updatedAt, Date.now()),
+    } satisfies MyPagePersonalTask
+  })
+
+  await setDoc(
+    doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
+    {
+      email: normalizedEmail,
+      myPagePersonalTasks: sanitized,
       updatedAt: serverTimestamp(),
     },
     { merge: true },

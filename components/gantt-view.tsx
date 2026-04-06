@@ -42,6 +42,7 @@ interface GanttViewProps {
   departmentFilter: string
   personFilter: string
   defaultTaskDepartment?: string
+  defaultTaskPerson?: string
   searchQuery: string
   onAddProject: (project: Project) => void
   onEditProject: (project: Project) => void
@@ -52,6 +53,7 @@ interface GanttViewProps {
   onCopyTasks?: (taskIds: string[]) => Promise<void> | void
   onMoveProject: (projectId: string, direction: "up" | "down") => void
   onMoveTask: (projectId: string, taskId: string, direction: "up" | "down") => void
+  onMoveTaskToProjectTop?: (targetProjectId: string, draggedTaskId: string) => Promise<void> | void
   onReorderTask: (
     projectId: string,
     draggedTaskId: string,
@@ -245,6 +247,7 @@ export function GanttView({
   departmentFilter,
   personFilter,
   defaultTaskDepartment = "전략기획",
+  defaultTaskPerson = "",
   searchQuery,
   onAddProject,
   onEditProject,
@@ -255,6 +258,7 @@ export function GanttView({
   onCopyTasks,
   onMoveProject,
   onMoveTask,
+  onMoveTaskToProjectTop,
   onReorderTask,
   persistedCollapsedProjectIds = [],
   persistedCollapsedTaskIds = [],
@@ -299,6 +303,7 @@ export function GanttView({
   const [dragOverInfo, setDragOverInfo] = useState<{ taskId: string; position: "before" | "after" | "child" } | null>(
     null,
   )
+  const [dragOverProjectHeaderId, setDragOverProjectHeaderId] = useState<string | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set())
   const lastCollapseStateSignatureRef = useRef("")
 
@@ -696,13 +701,21 @@ export function GanttView({
   const clearDragState = () => {
     setDraggedTaskId(null)
     setDragOverInfo(null)
+    setDragOverProjectHeaderId(null)
   }
 
   const canDropOnTask = (targetTask: FlattenedTask): boolean => {
     if (!draggedTaskId || draggedTaskId === targetTask.id) return false
     const draggedTask = visibleTaskMap.get(draggedTaskId)
     if (!draggedTask) return false
-    return draggedTask.projectId === targetTask.projectId
+    return true
+  }
+
+  const canDropOnProjectHeader = (projectId: string): boolean => {
+    if (!draggedTaskId) return false
+    const draggedTask = visibleTaskMap.get(draggedTaskId)
+    if (!draggedTask) return false
+    return Boolean(projectId)
   }
 
   const months = useMemo(() => {
@@ -1619,7 +1632,34 @@ export function GanttView({
                     const hiddenProjectCount = countHiddenInProjectById(project.id)
                     const isProjectHidden = hiddenProjectIds.has(project.id)
                     return (
-                  <div className={cn("sticky top-[70px] z-30 flex min-h-9 border-b border-border", PROJECT_HEADER_ROW_BG_CLASS, isProjectHidden && "opacity-70")}>
+                  <div
+                    className={cn(
+                      "sticky top-[70px] z-30 flex min-h-9 border-b border-border",
+                      PROJECT_HEADER_ROW_BG_CLASS,
+                      isProjectHidden && "opacity-70",
+                      dragOverProjectHeaderId === project.id && "ring-2 ring-blue-400/70 ring-inset",
+                    )}
+                    onDragOver={(e) => {
+                      if (!canDropOnProjectHeader(project.id)) return
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = "move"
+                      if (dragOverProjectHeaderId !== project.id) setDragOverProjectHeaderId(project.id)
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverProjectHeaderId === project.id) setDragOverProjectHeaderId(null)
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      if (!canDropOnProjectHeader(project.id) || !draggedTaskId) {
+                        clearDragState()
+                        return
+                      }
+                      if (onMoveTaskToProjectTop) {
+                        void onMoveTaskToProjectTop(project.id, draggedTaskId)
+                      }
+                      clearDragState()
+                    }}
+                  >
                     <div
                       className={cn(
                         "sticky left-0 z-30 flex shrink-0 items-center gap-2 border-r border-border px-4 py-1.5 shadow-[2px_0_5px_rgba(0,0,0,0.05)] overflow-visible",
@@ -1689,6 +1729,7 @@ export function GanttView({
                       <div className="ml-auto flex shrink-0 items-center gap-1">
                         <AddTaskDialog
                           projectId={project.id}
+                          defaultPerson={defaultTaskPerson}
                           defaultDepartment={defaultTaskDepartment}
                           onAddTask={handleAddProjectLevelTask}
                           trigger={
@@ -1976,7 +2017,7 @@ export function GanttView({
                                 <AddTaskDialog
                                   projectId={task.projectId}
                                   parentId={task.id}
-                                  defaultPerson={task.person}
+                                  defaultPerson={defaultTaskPerson || task.person}
                                   defaultDepartment={defaultTaskDepartment}
                                   onAddTask={handleAddNestedSubTask}
                                   trigger={

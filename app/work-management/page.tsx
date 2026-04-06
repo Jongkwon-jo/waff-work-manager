@@ -24,6 +24,7 @@ import {
   fetchHistoryEntries,
   rollbackHistoryEntry,
   deleteHistoryEntry,
+  subscribeCurrentUserProfile,
   type ChangeHistoryEntry,
 } from "@/lib/firestore-service"
 import { auth } from "@/lib/firebase"
@@ -56,6 +57,7 @@ export default function StrategyWorkManagementPage() {
   const [ganttCollapsedProjectIds, setGanttCollapsedProjectIds] = useState<string[]>([])
   const [ganttCollapsedTaskIds, setGanttCollapsedTaskIds] = useState<string[]>([])
   const [isGanttCollapseStateReady, setIsGanttCollapseStateReady] = useState(false)
+  const [defaultTaskPerson, setDefaultTaskPerson] = useState("")
   const deferredSearchQuery = useDeferredValue(searchQuery)
 
   useEffect(() => {
@@ -117,6 +119,20 @@ export default function StrategyWorkManagementPage() {
       setGanttCollapsedProjectIds(state.collapsedProjectIds)
       setGanttCollapsedTaskIds(state.collapsedTaskIds)
       setIsGanttCollapseStateReady(true)
+    })
+
+    return () => unsubscribe()
+  }, [user])
+
+  useEffect(() => {
+    if (!user?.email) {
+      setDefaultTaskPerson("")
+      return
+    }
+
+    const unsubscribe = subscribeCurrentUserProfile(user.email, (profile) => {
+      const accountDefaultPerson = (profile?.taskAliases || [])[0]?.trim() || ""
+      setDefaultTaskPerson(accountDefaultPerson)
     })
 
     return () => unsubscribe()
@@ -424,6 +440,37 @@ export default function StrategyWorkManagementPage() {
 
   type TaskReorderUpdates = Omit<Partial<Task>, "parentId"> & { parentId?: string | null }
 
+  const applyProjectIdToSubtree = (task: Task, projectId: string): Task => ({
+    ...task,
+    projectId,
+    subTasks: (task.subTasks || []).map((child) => applyProjectIdToSubtree(child, projectId)),
+  })
+
+  const buildTaskUpdatesFromMaps = (
+    prevMap: Map<string, Task>,
+    nextMap: Map<string, Task>,
+  ): Array<{ id: string; updates: TaskReorderUpdates }> => {
+    const updates: Array<{ id: string; updates: TaskReorderUpdates }> = []
+
+    nextMap.forEach((nextTask, id) => {
+      const prevTask = prevMap.get(id)
+      if (!prevTask) return
+
+      const itemUpdates: TaskReorderUpdates = {}
+      if ((prevTask.parentId || undefined) !== (nextTask.parentId || undefined)) itemUpdates.parentId = nextTask.parentId ?? null
+      if ((prevTask.depth ?? 0) !== (nextTask.depth ?? 0)) itemUpdates.depth = nextTask.depth
+      if ((prevTask.displayOrder ?? -1) !== (nextTask.displayOrder ?? -1)) itemUpdates.displayOrder = nextTask.displayOrder
+      if (Boolean(prevTask.isSubTask) !== Boolean(nextTask.isSubTask)) itemUpdates.isSubTask = nextTask.isSubTask
+      if ((prevTask.projectId || "") !== (nextTask.projectId || "")) itemUpdates.projectId = nextTask.projectId
+
+      if (Object.keys(itemUpdates).length > 0) {
+        updates.push({ id, updates: itemUpdates })
+      }
+    })
+
+    return updates
+  }
+
   const reorderTaskInTree = (
     tasks: Task[],
     draggedTaskId: string,
@@ -438,22 +485,7 @@ export default function StrategyWorkManagementPage() {
 
     const prevMap = collectTaskMap(tasks)
     const nextMap = collectTaskMap(inserted.tasks)
-    const taskUpdates: Array<{ id: string; updates: TaskReorderUpdates }> = []
-
-    nextMap.forEach((nextTask, id) => {
-      const prevTask = prevMap.get(id)
-      if (!prevTask) return
-
-      const updates: TaskReorderUpdates = {}
-      if ((prevTask.parentId || undefined) !== (nextTask.parentId || undefined)) updates.parentId = nextTask.parentId ?? null
-      if ((prevTask.depth ?? 0) !== (nextTask.depth ?? 0)) updates.depth = nextTask.depth
-      if ((prevTask.displayOrder ?? -1) !== (nextTask.displayOrder ?? -1)) updates.displayOrder = nextTask.displayOrder
-      if (Boolean(prevTask.isSubTask) !== Boolean(nextTask.isSubTask)) updates.isSubTask = nextTask.isSubTask
-
-      if (Object.keys(updates).length > 0) {
-        taskUpdates.push({ id, updates })
-      }
-    })
+    const taskUpdates = buildTaskUpdatesFromMaps(prevMap, nextMap)
 
     return { tasks: inserted.tasks, taskUpdates, moved: taskUpdates.length > 0 }
   }
@@ -754,30 +786,41 @@ export default function StrategyWorkManagementPage() {
     })
     if (rootIds.length === 0) return
 
-    type CopyPayload = { data: Omit<Task, "id">; projectId: string }
+    type CopyPayload = {
+      tempId: string
+      parentTempId?: string
+      originalParentId?: string
+      data: Omit<Task, "id">
+      projectId: string
+    }
     const payloads: CopyPayload[] = []
     let sequence = 0
     const baseTimestamp = Date.now()
 
-    const cloneSubTree = (source: Task, parentId: string | undefined, isRoot: boolean): string => {
-      const newId = `t${baseTimestamp}_${sequence}`
+    const cloneSubTree = (source: Task, parentTempId: string | undefined, isRoot: boolean): string => {
+      const tempId = `tmp_${baseTimestamp}_${sequence}`
       sequence += 1
 
       const clonedTask: Omit<Task, "id"> = {
         ...source,
         task: isRoot ? `${source.task} (복사)` : source.task,
-        parentId,
-        isSubTask: Boolean(parentId),
+        isSubTask: Boolean(parentTempId || source.parentId),
         displayOrder: baseTimestamp + sequence,
         subTasks: [],
       }
-      payloads.push({ data: clonedTask, projectId: clonedTask.projectId })
-
-      ;(source.subTasks || []).forEach((child) => {
-        cloneSubTree(child, newId, false)
+      payloads.push({
+        tempId,
+        parentTempId,
+        originalParentId: source.parentId,
+        data: clonedTask,
+        projectId: clonedTask.projectId,
       })
 
-      return newId
+      ;(source.subTasks || []).forEach((child) => {
+        cloneSubTree(child, tempId, false)
+      })
+
+      return tempId
     }
 
     rootIds.forEach((rootId) => {
@@ -788,11 +831,26 @@ export default function StrategyWorkManagementPage() {
 
     let copiedCount = 0
     let failedCount = 0
+    const createdIdByTempId = new Map<string, string>()
 
     for (const payload of payloads) {
       try {
         const { id: _ignoredId, subTasks, ...taskData } = payload.data as Task
-        const sanitizedTaskData = compact(taskData as Record<string, unknown>) as Omit<Task, "id">
+        const resolvedParentId = payload.parentTempId
+          ? createdIdByTempId.get(payload.parentTempId)
+          : payload.originalParentId
+
+        if (payload.parentTempId && !resolvedParentId) {
+          failedCount += 1
+          continue
+        }
+
+        const sanitizedTaskData = compact({
+          ...(taskData as Record<string, unknown>),
+          parentId: resolvedParentId,
+          isSubTask: Boolean(resolvedParentId),
+        }) as Omit<Task, "id">
+
         if (sanitizedTaskData.parentId === undefined) {
           delete sanitizedTaskData.parentId
         }
@@ -801,6 +859,7 @@ export default function StrategyWorkManagementPage() {
         }
 
         const createdTaskId = await addTaskToDB(sanitizedTaskData)
+        createdIdByTempId.set(payload.tempId, createdTaskId)
         await recordHistory({
           entityType: "task",
           action: "create",
@@ -887,7 +946,7 @@ export default function StrategyWorkManagementPage() {
   }
 
   const handleReorderTask = async (
-    projectId: string,
+    targetProjectId: string,
     draggedTaskId: string,
     targetTaskId: string,
     position: "before" | "after" | "child",
@@ -897,15 +956,45 @@ export default function StrategyWorkManagementPage() {
     let taskUpdates: Array<{ id: string; updates: TaskReorderUpdates }> = []
     let moved = false
 
-    setProjectList((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project
-        const reordered = reorderTaskInTree(project.tasks, draggedTaskId, targetTaskId, position)
-        moved = reordered.moved
-        taskUpdates = reordered.taskUpdates
-        return reordered.moved ? { ...project, tasks: reordered.tasks } : project
-      }),
-    )
+    setProjectList((prev) => {
+      const draggedTask = allTasksFlat.find((task) => task.id === draggedTaskId)
+      const sourceProjectId = draggedTask?.projectId
+      if (!sourceProjectId) return prev
+
+      if (sourceProjectId === targetProjectId) {
+        return prev.map((project) => {
+          if (project.id !== targetProjectId) return project
+          const reordered = reorderTaskInTree(project.tasks, draggedTaskId, targetTaskId, position)
+          moved = reordered.moved
+          taskUpdates = reordered.taskUpdates
+          return reordered.moved ? { ...project, tasks: reordered.tasks } : project
+        })
+      }
+
+      const sourceProject = prev.find((project) => project.id === sourceProjectId)
+      const targetProject = prev.find((project) => project.id === targetProjectId)
+      if (!sourceProject || !targetProject) return prev
+
+      const removed = removeTaskNode(sourceProject.tasks, draggedTaskId, 0)
+      if (!removed.removed) return prev
+
+      const movedSubtree = applyProjectIdToSubtree(removed.removed, targetProjectId)
+      const inserted = insertTaskAtTarget(targetProject.tasks, movedSubtree, targetTaskId, position, 0, undefined)
+      if (!inserted.inserted) return prev
+
+      const prevMap = collectTaskMap(sourceProject.tasks, collectTaskMap(targetProject.tasks))
+      const nextMap = collectTaskMap(removed.tasks, collectTaskMap(inserted.tasks))
+      taskUpdates = buildTaskUpdatesFromMaps(prevMap, nextMap)
+      moved = taskUpdates.length > 0
+
+      if (!moved) return prev
+
+      return prev.map((project) => {
+        if (project.id === sourceProjectId) return { ...project, tasks: removed.tasks }
+        if (project.id === targetProjectId) return { ...project, tasks: inserted.tasks }
+        return project
+      })
+    })
 
     if (!moved || taskUpdates.length === 0) return
 
@@ -914,7 +1003,7 @@ export default function StrategyWorkManagementPage() {
       await recordHistory({
         entityType: "batch",
         action: "batch_update",
-        projectId,
+        projectId: targetProjectId,
         batch: taskUpdates.map((item) => {
           const beforeTask = allTasksFlat.find((task) => task.id === item.id)
           const afterTask = {
@@ -931,6 +1020,78 @@ export default function StrategyWorkManagementPage() {
       })
     } catch (error) {
       toast.error("업무 순서 저장 실패")
+    }
+  }
+
+  const handleMoveTaskToProjectTop = async (targetProjectId: string, draggedTaskId: string) => {
+    if (!draggedTaskId || !targetProjectId) return
+
+    let taskUpdates: Array<{ id: string; updates: TaskReorderUpdates }> = []
+    let moved = false
+
+    setProjectList((prev) => {
+      const draggedTask = allTasksFlat.find((task) => task.id === draggedTaskId)
+      const sourceProjectId = draggedTask?.projectId
+      if (!sourceProjectId) return prev
+
+      const sourceProject = prev.find((project) => project.id === sourceProjectId)
+      const targetProject = prev.find((project) => project.id === targetProjectId)
+      if (!sourceProject || !targetProject) return prev
+
+      const removed = removeTaskNode(sourceProject.tasks, draggedTaskId, 0)
+      if (!removed.removed) return prev
+
+      const movedSubtree = applyProjectIdToSubtree(removed.removed, targetProjectId)
+      const normalizedRoot = normalizeDepthSubtree(
+        { ...movedSubtree, parentId: undefined, isSubTask: false },
+        0,
+      )
+
+      if (sourceProjectId === targetProjectId) {
+        const nextTasks = withDisplayOrder([...removed.tasks, normalizedRoot])
+        const prevMap = collectTaskMap(sourceProject.tasks)
+        const nextMap = collectTaskMap(nextTasks)
+        taskUpdates = buildTaskUpdatesFromMaps(prevMap, nextMap)
+        moved = taskUpdates.length > 0
+        if (!moved) return prev
+        return prev.map((project) => (project.id === targetProjectId ? { ...project, tasks: nextTasks } : project))
+      }
+
+      const nextTargetTasks = withDisplayOrder([...targetProject.tasks, normalizedRoot])
+      const prevMap = collectTaskMap(sourceProject.tasks, collectTaskMap(targetProject.tasks))
+      const nextMap = collectTaskMap(removed.tasks, collectTaskMap(nextTargetTasks))
+      taskUpdates = buildTaskUpdatesFromMaps(prevMap, nextMap)
+      moved = taskUpdates.length > 0
+      if (!moved) return prev
+
+      return prev.map((project) => {
+        if (project.id === sourceProjectId) return { ...project, tasks: removed.tasks }
+        if (project.id === targetProjectId) return { ...project, tasks: nextTargetTasks }
+        return project
+      })
+    })
+
+    if (!moved || taskUpdates.length === 0) return
+
+    try {
+      await Promise.all(taskUpdates.map((item) => updateTaskInDB(item.id, item.updates)))
+      await recordHistory({
+        entityType: "batch",
+        action: "batch_update",
+        projectId: targetProjectId,
+        batch: taskUpdates.map((item) => {
+          const beforeTask = allTasksFlat.find((task) => task.id === item.id)
+          const afterTask = { ...beforeTask, ...item.updates } as Task
+          return {
+            entityType: "task" as const,
+            entityId: item.id,
+            before: beforeTask ? serializeTaskData(beforeTask) : undefined,
+            after: serializeTaskData(afterTask),
+          }
+        }),
+      })
+    } catch (error) {
+      toast.error("업무 이동 저장 실패")
     }
   }
 
@@ -1205,6 +1366,7 @@ export default function StrategyWorkManagementPage() {
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
                 defaultTaskDepartment="전략기획"
+                defaultTaskPerson={defaultTaskPerson}
                 searchQuery={deferredSearchQuery}
                 onAddProject={handleAddProject}
                 onEditProject={handleEditProject}
@@ -1215,6 +1377,7 @@ export default function StrategyWorkManagementPage() {
                 onCopyTasks={handleCopyTasksBulk}
                 onMoveProject={handleMoveProject}
                 onMoveTask={handleMoveTask}
+                onMoveTaskToProjectTop={handleMoveTaskToProjectTop}
                 onReorderTask={handleReorderTask}
                 persistedCollapsedProjectIds={ganttCollapsedProjectIds}
                 persistedCollapsedTaskIds={ganttCollapsedTaskIds}
