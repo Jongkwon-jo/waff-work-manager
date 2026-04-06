@@ -1043,17 +1043,85 @@ export function GanttView({
     })
   }, [taskById])
 
+  const collectTaskAndDescendantIds = (rootTaskId: string): string[] => {
+    const rootTask = taskById.get(rootTaskId)
+    if (!rootTask) return []
+
+    const collectedIds: string[] = []
+    const stack: Task[] = [rootTask]
+
+    while (stack.length > 0) {
+      const current = stack.pop()
+      if (!current) continue
+      collectedIds.push(current.id)
+      const children = current.subTasks || []
+      for (let i = children.length - 1; i >= 0; i -= 1) {
+        stack.push(children[i])
+      }
+    }
+
+    return collectedIds
+  }
+
   const toggleTaskSelection = (taskId: string, checked: boolean) => {
     setSelectedTaskIds((prev) => {
       const next = new Set(prev)
-      if (checked) next.add(taskId)
-      else next.delete(taskId)
+      const affectedIds = collectTaskAndDescendantIds(taskId)
+      if (checked) {
+        affectedIds.forEach((id) => next.add(id))
+      } else {
+        affectedIds.forEach((id) => next.delete(id))
+      }
       return next
     })
   }
 
   const clearSelectedTasks = () => {
     setSelectedTaskIds(new Set())
+  }
+
+  const getSelectedRootTaskIds = (): string[] => {
+    const selectedSet = new Set(Array.from(selectedTaskIds).filter((id) => taskById.has(id)))
+    return Array.from(selectedSet).filter((id) => {
+      let parentId = taskById.get(id)?.parentId
+      while (parentId) {
+        if (selectedSet.has(parentId)) return false
+        parentId = taskById.get(parentId)?.parentId
+      }
+      return true
+    })
+  }
+
+  const handleBulkMoveSelectedTasks = async (direction: "up" | "down") => {
+    const rootIds = getSelectedRootTaskIds()
+    if (rootIds.length === 0) return
+
+    const sortedRootIds = rootIds.sort((a, b) => {
+      const aTask = taskById.get(a)
+      const bTask = taskById.get(b)
+      if (!aTask || !bTask) return 0
+
+      const byProject = aTask.projectId.localeCompare(bTask.projectId)
+      if (byProject !== 0) return byProject
+
+      const aParent = aTask.parentId || ""
+      const bParent = bTask.parentId || ""
+      const byParent = aParent.localeCompare(bParent)
+      if (byParent !== 0) return byParent
+
+      const orderA = Number.isFinite(aTask.displayOrder) ? aTask.displayOrder : Number.MAX_SAFE_INTEGER
+      const orderB = Number.isFinite(bTask.displayOrder) ? bTask.displayOrder : Number.MAX_SAFE_INTEGER
+      if (orderA !== orderB) return orderA - orderB
+
+      return aTask.id.localeCompare(bTask.id)
+    })
+
+    const processIds = direction === "up" ? sortedRootIds : [...sortedRootIds].reverse()
+    for (const taskId of processIds) {
+      const task = taskById.get(taskId)
+      if (!task) continue
+      await Promise.resolve(onMoveTask(task.projectId, taskId, direction))
+    }
   }
 
   const handleBulkDeleteSelectedTasks = async () => {
@@ -1500,6 +1568,24 @@ export function GanttView({
                   </Dialog>
                   {selectedTaskCount > 0 && (
                     <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1 border-sky-200 bg-sky-50 px-2 text-[11px] text-sky-700 hover:bg-sky-100 hover:text-sky-800"
+                        onClick={() => void handleBulkMoveSelectedTasks("up")}
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                        선택 위로 이동
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1 border-sky-200 bg-sky-50 px-2 text-[11px] text-sky-700 hover:bg-sky-100 hover:text-sky-800"
+                        onClick={() => void handleBulkMoveSelectedTasks("down")}
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                        선택 아래로 이동
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"

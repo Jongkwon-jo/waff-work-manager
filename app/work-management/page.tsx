@@ -58,6 +58,7 @@ export default function StrategyWorkManagementPage() {
   const [ganttCollapsedTaskIds, setGanttCollapsedTaskIds] = useState<string[]>([])
   const [isGanttCollapseStateReady, setIsGanttCollapseStateReady] = useState(false)
   const [defaultTaskPerson, setDefaultTaskPerson] = useState("")
+  const [operationInProgress, setOperationInProgress] = useState<"copy" | "delete" | null>(null)
   const deferredSearchQuery = useDeferredValue(searchQuery)
 
   useEffect(() => {
@@ -173,7 +174,10 @@ export default function StrategyWorkManagementPage() {
   const flattenTaskRecords = (tasks: Task[]): Array<{ id: string; data: Record<string, unknown> }> =>
     tasks.flatMap((task) => [{ id: task.id, data: serializeTaskData(task) }, ...flattenTaskRecords(task.subTasks || [])])
 
-  const recordHistory = async (entry: Omit<ChangeHistoryEntry, "id" | "createdAt">) => {
+  const recordHistory = async (
+    entry: Omit<ChangeHistoryEntry, "id" | "createdAt">,
+    options?: { refreshHistory?: boolean },
+  ) => {
     if (!user?.email) return
 
     try {
@@ -181,7 +185,9 @@ export default function StrategyWorkManagementPage() {
         ...entry,
         actorEmail: user.email,
       })
-      await loadHistory()
+      if (options?.refreshHistory ?? true) {
+        await loadHistory()
+      }
     } catch (error) {
       console.error("History write failed:", error)
     }
@@ -718,59 +724,177 @@ export default function StrategyWorkManagementPage() {
   }
 
   const handleDeleteTask = async (taskId: string, projectId: string) => {
-    try {
-      const beforeTask = allTasksFlat.find((t) => t.id === taskId)
-      await deleteTaskFromDB(taskId)
-      if (beforeTask) {
-        await recordHistory({
-          entityType: "task",
-          action: "delete",
-          entityId: taskId,
-          projectId,
-          before: serializeTaskData(beforeTask),
-        })
+    if (operationInProgress) {
+      toast.info("다른 작업이 진행 중입니다.")
+      return
+    }
+
+    const taskMap = new Map(allTasksFlat.map((task) => [task.id, task]))
+    const childrenByParentId = new Map<string, string[]>()
+
+    allTasksFlat.forEach((task) => {
+      if (!task.parentId) return
+      const siblings = childrenByParentId.get(task.parentId) || []
+      siblings.push(task.id)
+      childrenByParentId.set(task.parentId, siblings)
+    })
+
+    const deleteTaskIds: string[] = []
+    const stack = [taskId]
+    const visited = new Set<string>()
+
+    while (stack.length > 0) {
+      const currentId = stack.pop()
+      if (!currentId || visited.has(currentId)) continue
+      if (!taskMap.has(currentId)) continue
+      visited.add(currentId)
+      deleteTaskIds.push(currentId)
+
+      const children = childrenByParentId.get(currentId) || []
+      for (let i = children.length - 1; i >= 0; i -= 1) {
+        stack.push(children[i])
       }
-      toast.success("업무가 삭제되었습니다.")
+    }
+
+    if (deleteTaskIds.length === 0) return
+
+    let deletedCount = 0
+    let failedCount = 0
+    let wroteHistory = false
+
+    setOperationInProgress("delete")
+    try {
+      for (const deleteTaskId of deleteTaskIds) {
+        try {
+          const beforeTask = taskMap.get(deleteTaskId)
+          await deleteTaskFromDB(deleteTaskId)
+          if (beforeTask) {
+            await recordHistory({
+              entityType: "task",
+              action: "delete",
+              entityId: deleteTaskId,
+              projectId: beforeTask.projectId || projectId,
+              before: serializeTaskData(beforeTask),
+            }, { refreshHistory: false })
+            wroteHistory = true
+          }
+          deletedCount += 1
+        } catch (error) {
+          failedCount += 1
+        }
+      }
+      if (wroteHistory) {
+        await loadHistory()
+      }
+
+      if (deletedCount > 0) {
+        toast.success(`${deletedCount}개 업무가 삭제되었습니다.`)
+      }
+      if (failedCount > 0) {
+        toast.error(`${failedCount}개 업무 삭제에 실패했습니다.`)
+      }
     } catch (error) {
       toast.error("업무 삭제 실패")
+    } finally {
+      setOperationInProgress(null)
     }
   }
 
   const handleDeleteTasksBulk = async (targets: Array<{ taskId: string; projectId: string }>) => {
-    const uniqueTargets = Array.from(new Map(targets.map((target) => [target.taskId, target])).values())
-    if (uniqueTargets.length === 0) return
+    if (operationInProgress) {
+      toast.info("다른 작업이 진행 중입니다.")
+      return
+    }
 
-    let deletedCount = 0
-    let failedCount = 0
+    const uniqueIds = Array.from(new Set(targets.map((target) => target.taskId)))
+    if (uniqueIds.length === 0) return
 
-    for (const target of uniqueTargets) {
-      try {
-        const beforeTask = allTasksFlat.find((task) => task.id === target.taskId)
-        await deleteTaskFromDB(target.taskId)
-        if (beforeTask) {
-          await recordHistory({
-            entityType: "task",
-            action: "delete",
-            entityId: target.taskId,
-            projectId: target.projectId,
-            before: serializeTaskData(beforeTask),
-          })
-        }
-        deletedCount += 1
-      } catch (error) {
-        failedCount += 1
+    const taskMap = new Map(allTasksFlat.map((task) => [task.id, task]))
+    const selectedSet = new Set(uniqueIds.filter((id) => taskMap.has(id)))
+    const rootIds = Array.from(selectedSet).filter((id) => {
+      let parentId = taskMap.get(id)?.parentId
+      while (parentId) {
+        if (selectedSet.has(parentId)) return false
+        parentId = taskMap.get(parentId)?.parentId
+      }
+      return true
+    })
+    if (rootIds.length === 0) return
+
+    const childrenByParentId = new Map<string, string[]>()
+    allTasksFlat.forEach((task) => {
+      if (!task.parentId) return
+      const children = childrenByParentId.get(task.parentId) || []
+      children.push(task.id)
+      childrenByParentId.set(task.parentId, children)
+    })
+
+    const deleteIds: string[] = []
+    const visited = new Set<string>()
+    const stack = [...rootIds]
+
+    while (stack.length > 0) {
+      const currentId = stack.pop()
+      if (!currentId || visited.has(currentId)) continue
+      if (!taskMap.has(currentId)) continue
+
+      visited.add(currentId)
+      deleteIds.push(currentId)
+
+      const children = childrenByParentId.get(currentId) || []
+      for (let i = children.length - 1; i >= 0; i -= 1) {
+        stack.push(children[i])
       }
     }
 
-    if (deletedCount > 0) {
-      toast.success(`${deletedCount}개 업무가 삭제되었습니다.`)
-    }
-    if (failedCount > 0) {
-      toast.error(`${failedCount}개 업무 삭제에 실패했습니다.`)
+    if (deleteIds.length === 0) return
+
+    let deletedCount = 0
+    let failedCount = 0
+    let wroteHistory = false
+
+    setOperationInProgress("delete")
+    try {
+      for (const taskId of deleteIds) {
+        try {
+          const beforeTask = taskMap.get(taskId)
+          await deleteTaskFromDB(taskId)
+          if (beforeTask) {
+            await recordHistory({
+              entityType: "task",
+              action: "delete",
+              entityId: taskId,
+              projectId: beforeTask.projectId,
+              before: serializeTaskData(beforeTask),
+            }, { refreshHistory: false })
+            wroteHistory = true
+          }
+          deletedCount += 1
+        } catch (error) {
+          failedCount += 1
+        }
+      }
+      if (wroteHistory) {
+        await loadHistory()
+      }
+
+      if (deletedCount > 0) {
+        toast.success(`${deletedCount}개 업무가 삭제되었습니다.`)
+      }
+      if (failedCount > 0) {
+        toast.error(`${failedCount}개 업무 삭제에 실패했습니다.`)
+      }
+    } finally {
+      setOperationInProgress(null)
     }
   }
 
   const handleCopyTasksBulk = async (taskIds: string[]) => {
+    if (operationInProgress) {
+      toast.info("다른 작업이 진행 중입니다.")
+      return
+    }
+
     const uniqueIds = Array.from(new Set(taskIds))
     if (uniqueIds.length === 0) return
 
@@ -786,6 +910,48 @@ export default function StrategyWorkManagementPage() {
     })
     if (rootIds.length === 0) return
 
+    const siblingGroupMap = new Map<string, Task[]>()
+    Array.from(taskMap.values()).forEach((task) => {
+      const key = `${task.projectId}::${task.parentId || "__root__"}`
+      const list = siblingGroupMap.get(key) || []
+      list.push(task)
+      siblingGroupMap.set(key, list)
+    })
+    siblingGroupMap.forEach((list) => {
+      list.sort((a, b) => {
+        const orderA = Number.isFinite(a.displayOrder) ? a.displayOrder : Number.MAX_SAFE_INTEGER
+        const orderB = Number.isFinite(b.displayOrder) ? b.displayOrder : Number.MAX_SAFE_INTEGER
+        if (orderA !== orderB) return orderA - orderB
+        const byName = (a.task || "").localeCompare(b.task || "", "ko")
+        if (byName !== 0) return byName
+        return a.id.localeCompare(b.id)
+      })
+    })
+
+    const copiedRootOrderBySourceId = new Map<string, number>()
+    rootIds.forEach((rootId, index) => {
+      const source = taskMap.get(rootId)
+      if (!source) return
+      const siblingKey = `${source.projectId}::${source.parentId || "__root__"}`
+      const siblings = siblingGroupMap.get(siblingKey) || []
+      const sourceIndex = siblings.findIndex((task) => task.id === source.id)
+      const nextSibling = sourceIndex >= 0 ? siblings[sourceIndex + 1] : undefined
+      const sourceOrder = Number.isFinite(source.displayOrder) ? source.displayOrder : undefined
+      const nextOrder =
+        nextSibling && Number.isFinite(nextSibling.displayOrder) ? nextSibling.displayOrder : undefined
+
+      let copiedOrder: number
+      if (sourceOrder !== undefined && nextOrder !== undefined && nextOrder > sourceOrder) {
+        copiedOrder = (sourceOrder + nextOrder) / 2
+      } else if (sourceOrder !== undefined) {
+        copiedOrder = sourceOrder + (index + 1) * 0.0001
+      } else {
+        copiedOrder = Date.now() + index
+      }
+
+      copiedRootOrderBySourceId.set(rootId, copiedOrder)
+    })
+
     type CopyPayload = {
       tempId: string
       parentTempId?: string
@@ -797,7 +963,12 @@ export default function StrategyWorkManagementPage() {
     let sequence = 0
     const baseTimestamp = Date.now()
 
-    const cloneSubTree = (source: Task, parentTempId: string | undefined, isRoot: boolean): string => {
+    const cloneSubTree = (
+      source: Task,
+      parentTempId: string | undefined,
+      isRoot: boolean,
+      rootDisplayOrder?: number,
+    ): string => {
       const tempId = `tmp_${baseTimestamp}_${sequence}`
       sequence += 1
 
@@ -805,7 +976,7 @@ export default function StrategyWorkManagementPage() {
         ...source,
         task: isRoot ? `${source.task} (복사)` : source.task,
         isSubTask: Boolean(parentTempId || source.parentId),
-        displayOrder: baseTimestamp + sequence,
+        displayOrder: isRoot ? rootDisplayOrder ?? source.displayOrder : baseTimestamp + sequence,
         subTasks: [],
       }
       payloads.push({
@@ -826,58 +997,69 @@ export default function StrategyWorkManagementPage() {
     rootIds.forEach((rootId) => {
       const rootTask = taskMap.get(rootId)
       if (!rootTask) return
-      cloneSubTree(rootTask, rootTask.parentId, true)
+      const copiedRootOrder = copiedRootOrderBySourceId.get(rootId)
+      cloneSubTree(rootTask, undefined, true, copiedRootOrder)
     })
 
     let copiedCount = 0
     let failedCount = 0
     const createdIdByTempId = new Map<string, string>()
+    let wroteHistory = false
 
-    for (const payload of payloads) {
-      try {
-        const { id: _ignoredId, subTasks, ...taskData } = payload.data as Task
-        const resolvedParentId = payload.parentTempId
-          ? createdIdByTempId.get(payload.parentTempId)
-          : payload.originalParentId
+    setOperationInProgress("copy")
+    try {
+      for (const payload of payloads) {
+        try {
+          const { id: _ignoredId, subTasks, ...taskData } = payload.data as Task
+          const resolvedParentId = payload.parentTempId
+            ? createdIdByTempId.get(payload.parentTempId)
+            : payload.originalParentId
 
-        if (payload.parentTempId && !resolvedParentId) {
+          if (payload.parentTempId && !resolvedParentId) {
+            failedCount += 1
+            continue
+          }
+
+          const sanitizedTaskData = compact({
+            ...(taskData as Record<string, unknown>),
+            parentId: resolvedParentId,
+            isSubTask: Boolean(resolvedParentId),
+          }) as Omit<Task, "id">
+
+          if (sanitizedTaskData.parentId === undefined) {
+            delete sanitizedTaskData.parentId
+          }
+          if (sanitizedTaskData.isSubTask === undefined) {
+            delete sanitizedTaskData.isSubTask
+          }
+
+          const createdTaskId = await addTaskToDB(sanitizedTaskData)
+          createdIdByTempId.set(payload.tempId, createdTaskId)
+          await recordHistory({
+            entityType: "task",
+            action: "create",
+            entityId: createdTaskId,
+            projectId: payload.projectId,
+            after: sanitizedTaskData as unknown as Record<string, unknown>,
+          }, { refreshHistory: false })
+          wroteHistory = true
+          copiedCount += 1
+        } catch (error) {
           failedCount += 1
-          continue
         }
-
-        const sanitizedTaskData = compact({
-          ...(taskData as Record<string, unknown>),
-          parentId: resolvedParentId,
-          isSubTask: Boolean(resolvedParentId),
-        }) as Omit<Task, "id">
-
-        if (sanitizedTaskData.parentId === undefined) {
-          delete sanitizedTaskData.parentId
-        }
-        if (sanitizedTaskData.isSubTask === undefined) {
-          delete sanitizedTaskData.isSubTask
-        }
-
-        const createdTaskId = await addTaskToDB(sanitizedTaskData)
-        createdIdByTempId.set(payload.tempId, createdTaskId)
-        await recordHistory({
-          entityType: "task",
-          action: "create",
-          entityId: createdTaskId,
-          projectId: payload.projectId,
-          after: sanitizedTaskData as unknown as Record<string, unknown>,
-        })
-        copiedCount += 1
-      } catch (error) {
-        failedCount += 1
       }
-    }
+      if (wroteHistory) {
+        await loadHistory()
+      }
 
-    if (copiedCount > 0) {
-      toast.success(`${copiedCount}개 업무가 복사되었습니다.`)
-    }
-    if (failedCount > 0) {
-      toast.error(`${failedCount}개 업무 복사에 실패했습니다.`)
+      if (copiedCount > 0) {
+        toast.success(`${copiedCount}개 업무가 복사되었습니다.`)
+      }
+      if (failedCount > 0) {
+        toast.error(`${failedCount}개 업무 복사에 실패했습니다.`)
+      }
+    } finally {
+      setOperationInProgress(null)
     }
   }
 
@@ -1396,6 +1578,17 @@ export default function StrategyWorkManagementPage() {
           </div>
         )}
       </main>
+      {operationInProgress && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/25 backdrop-blur-[1px]">
+          <div className="min-w-[220px] rounded-lg border border-border bg-card px-6 py-5 text-center shadow-xl">
+            <div className="mx-auto mb-3 h-7 w-7 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+            <p className="text-sm font-semibold text-foreground">
+              {operationInProgress === "copy" ? "복사중..." : "삭제중..."}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">처리 중에는 다른 작업이 잠시 제한됩니다.</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
