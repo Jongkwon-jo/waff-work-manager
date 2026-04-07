@@ -919,8 +919,8 @@ export default function StrategyWorkManagementPage() {
     })
     siblingGroupMap.forEach((list) => {
       list.sort((a, b) => {
-        const orderA = Number.isFinite(a.displayOrder) ? a.displayOrder : Number.MAX_SAFE_INTEGER
-        const orderB = Number.isFinite(b.displayOrder) ? b.displayOrder : Number.MAX_SAFE_INTEGER
+        const orderA = Number(a.displayOrder ?? Number.MAX_SAFE_INTEGER)
+        const orderB = Number(b.displayOrder ?? Number.MAX_SAFE_INTEGER)
         if (orderA !== orderB) return orderA - orderB
         const byName = (a.task || "").localeCompare(b.task || "", "ko")
         if (byName !== 0) return byName

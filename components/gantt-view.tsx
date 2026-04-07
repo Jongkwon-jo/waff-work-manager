@@ -1109,8 +1109,8 @@ export function GanttView({
       const byParent = aParent.localeCompare(bParent)
       if (byParent !== 0) return byParent
 
-      const orderA = Number.isFinite(aTask.displayOrder) ? aTask.displayOrder : Number.MAX_SAFE_INTEGER
-      const orderB = Number.isFinite(bTask.displayOrder) ? bTask.displayOrder : Number.MAX_SAFE_INTEGER
+      const orderA = Number(aTask.displayOrder ?? Number.MAX_SAFE_INTEGER)
+      const orderB = Number(bTask.displayOrder ?? Number.MAX_SAFE_INTEGER)
       if (orderA !== orderB) return orderA - orderB
 
       return aTask.id.localeCompare(bTask.id)
