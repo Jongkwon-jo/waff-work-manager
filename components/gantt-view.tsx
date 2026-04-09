@@ -1570,7 +1570,7 @@ export function GanttView({
                       </div>
                     </DialogContent>
                   </Dialog>
-                  {selectedTaskCount > 0 && (
+                  {canEdit && selectedTaskCount > 0 && (
                     <>
                       <Button
                         variant="outline"
@@ -1965,32 +1965,36 @@ export function GanttView({
                               style={{ width: leftPanelWidth }}
                             >
                               <div className="flex items-center gap-1.5 w-full min-w-0">
-                                <label className="flex h-5 w-5 shrink-0 items-center justify-center">
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedTaskIds.has(task.id)}
-                                    onChange={(e) => toggleTaskSelection(task.id, e.target.checked)}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="h-3.5 w-3.5 cursor-pointer rounded border-border"
-                                    aria-label="업무 선택"
-                                  />
-                                </label>
+                                {canEdit && (
+                                  <label className="flex h-5 w-5 shrink-0 items-center justify-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedTaskIds.has(task.id)}
+                                      onChange={(e) => toggleTaskSelection(task.id, e.target.checked)}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="h-3.5 w-3.5 cursor-pointer rounded border-border"
+                                      aria-label="업무 선택"
+                                    />
+                                  </label>
+                                )}
                                 <div style={{ width: displayDepth * 12 }} className="shrink-0" />
-                                <button
-                                  type="button"
-                                  draggable
-                                  onDragStart={(e) => {
-                                    e.dataTransfer.effectAllowed = "move"
-                                    e.dataTransfer.setData("text/plain", task.id)
-                                    setDraggedTaskId(task.id)
-                                  }}
-                                  onDragEnd={clearDragState}
-                                  className="flex h-5 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:bg-accent hover:text-foreground cursor-grab active:cursor-grabbing"
-                                  aria-label="업무 순서 드래그 이동"
-                                  title="드래그로 순서 변경"
-                                >
-                                  <GripVertical className="h-3.5 w-3.5" />
-                                </button>
+                                {canEdit && (
+                                  <button
+                                    type="button"
+                                    draggable
+                                    onDragStart={(e) => {
+                                      e.dataTransfer.effectAllowed = "move"
+                                      e.dataTransfer.setData("text/plain", task.id)
+                                      setDraggedTaskId(task.id)
+                                    }}
+                                    onDragEnd={clearDragState}
+                                    className="flex h-5 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:bg-accent hover:text-foreground cursor-grab active:cursor-grabbing"
+                                    aria-label="업무 순서 드래그 이동"
+                                    title="드래그로 순서 변경"
+                                  >
+                                    <GripVertical className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
 
                                 {task.hasChildren ? (
                                   <button
@@ -2224,34 +2228,40 @@ export function GanttView({
                                     <Trash2 className="h-3 w-3" />
                                   </Button>
                                 )}
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
-                                  onClick={() => onMoveTask(task.projectId, task.id, "up")}
-                                >
-                                  <ArrowUp className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
-                                  onClick={() => onMoveTask(task.projectId, task.id, "down")}
-                                >
-                                  <ArrowDown className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 shrink-0"
-                                  onClick={() => toggleTaskHidden(task)}
-                                  title={hiddenTaskIds.has(task.id) ? "업무 숨김 해제" : "업무 숨기기"}
-                                >
-                                  {hiddenTaskIds.has(task.id) ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                                </Button>
+                                {canEdit && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
+                                    onClick={() => onMoveTask(task.projectId, task.id, "up")}
+                                  >
+                                    <ArrowUp className="h-3 w-3" />
+                                  </Button>
+                                )}
+                                {canEdit && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
+                                    onClick={() => onMoveTask(task.projectId, task.id, "down")}
+                                  >
+                                    <ArrowDown className="h-3 w-3" />
+                                  </Button>
+                                )}
+                                {canEdit && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0"
+                                    onClick={() => toggleTaskHidden(task)}
+                                    title={hiddenTaskIds.has(task.id) ? "업무 숨김 해제" : "업무 숨기기"}
+                                  >
+                                    {hiddenTaskIds.has(task.id) ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                                  </Button>
+                                )}
                               </div>
                             </div>
 
