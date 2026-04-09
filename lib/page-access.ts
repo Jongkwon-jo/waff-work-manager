@@ -3,8 +3,10 @@ export const ADMIN_EMAIL = "admin@waff.co.kr"
 export const PAGE_PERMISSIONS = [
   { key: "myPage", label: "마이 페이지", path: "/my-page" },
   { key: "strategyWorkManagement", label: "전략기획사업부 업무관리", path: "/work-management" },
+  { key: "strategyWorkManagementEdit", label: "전략기획사업부 업무관리 수정", path: "/work-management" },
   { key: "strategyWeeklyWork", label: "전략기획사업부 주간업무", path: "/work-management/weekly" },
   { key: "faWorkManagement", label: "FA사업부 업무관리", path: "/fa-work-management" },
+  { key: "faWorkManagementEdit", label: "FA사업부 업무관리 수정", path: "/fa-work-management" },
   { key: "faWeeklyWork", label: "FA사업부 주간업무", path: "/fa-work-management/weekly" },
   { key: "gptTest", label: "GPT 테스트", path: "/gpt-test" },
 ] as const
@@ -16,8 +18,10 @@ export type UserPagePermissions = Record<PagePermissionKey, boolean>
 export const DEFAULT_PAGE_PERMISSIONS: UserPagePermissions = {
   myPage: true,
   strategyWorkManagement: true,
+  strategyWorkManagementEdit: true,
   strategyWeeklyWork: true,
   faWorkManagement: true,
+  faWorkManagementEdit: true,
   faWeeklyWork: true,
   gptTest: true,
 }
@@ -41,12 +45,20 @@ export function normalizePermissions(raw?: Partial<Record<string, unknown>>): Us
   return {
     myPage: typeof raw?.myPage === "boolean" ? raw.myPage : DEFAULT_PAGE_PERMISSIONS.myPage,
     strategyWorkManagement: legacyWorkManagement,
+    strategyWorkManagementEdit:
+      typeof raw?.strategyWorkManagementEdit === "boolean"
+        ? raw.strategyWorkManagementEdit
+        : DEFAULT_PAGE_PERMISSIONS.strategyWorkManagementEdit,
     strategyWeeklyWork:
       typeof raw?.strategyWeeklyWork === "boolean"
         ? raw.strategyWeeklyWork
         : DEFAULT_PAGE_PERMISSIONS.strategyWeeklyWork,
     faWorkManagement:
       typeof raw?.faWorkManagement === "boolean" ? raw.faWorkManagement : DEFAULT_PAGE_PERMISSIONS.faWorkManagement,
+    faWorkManagementEdit:
+      typeof raw?.faWorkManagementEdit === "boolean"
+        ? raw.faWorkManagementEdit
+        : DEFAULT_PAGE_PERMISSIONS.faWorkManagementEdit,
     faWeeklyWork:
       typeof raw?.faWeeklyWork === "boolean" ? raw.faWeeklyWork : DEFAULT_PAGE_PERMISSIONS.faWeeklyWork,
     gptTest: typeof raw?.gptTest === "boolean" ? raw.gptTest : DEFAULT_PAGE_PERMISSIONS.gptTest,
