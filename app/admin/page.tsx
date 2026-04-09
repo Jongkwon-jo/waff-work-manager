@@ -297,7 +297,7 @@ export default function AdminPage() {
             <CardTitle className="text-xl">부서별 페이지 권한</CardTitle>
           </CardHeader>
           <CardContent className="overflow-x-auto">
-            <Table className="min-w-[1100px]">
+            <Table className="min-w-[1300px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[180px]">부서</TableHead>
@@ -372,7 +372,7 @@ export default function AdminPage() {
             {rows.length === 0 ? (
               <p className="text-sm text-muted-foreground">아직 관리할 사용자가 없습니다.</p>
             ) : (
-              <Table className="min-w-[1450px]">
+              <Table className="min-w-[1700px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[240px]">사용자</TableHead>
