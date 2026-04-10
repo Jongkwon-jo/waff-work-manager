@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { ArrowLeft, Save, ShieldCheck } from "lucide-react"
+import { ArrowLeft, Save, ShieldCheck, Users } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -16,9 +16,11 @@ import {
   DEPARTMENT_PERSON_GROUPS,
   DEFAULT_DEPARTMENT_PAGE_PERMISSIONS,
   DEFAULT_DEPARTMENT_PERSON_SETTINGS,
+  MBTI_TYPES,
   saveDepartmentPagePermissions,
   saveDepartmentPersonSettings,
   saveUserDepartment,
+  saveUserMbti,
   saveUserPagePermissions,
   saveUserTaskAliases,
   subscribeAllUserPagePermissions,
@@ -28,6 +30,7 @@ import {
   type DepartmentPagePermissions,
   type DepartmentPersonGroup,
   type DepartmentPersonSettings,
+  type MbtiType,
   type UserPagePermissionEntry,
   type UserProfile,
 } from "@/lib/firestore-service"
@@ -42,7 +45,20 @@ import {
 type DraftPermissionMap = Record<string, UserPagePermissions>
 type DraftAliasMap = Record<string, string>
 type DraftUserDepartmentMap = Record<string, DepartmentPersonGroup | "none">
+type DraftUserMbtiMap = Record<string, MbtiType | "none">
 type DraftDepartmentPersonMap = Record<DepartmentPersonGroup, string>
+
+const PAGE_PERMISSION_SHORT_LABELS: Record<string, string> = {
+  myPage: "마이\n페이지",
+  strategyWorkManagement: "전략\n업무관리",
+  strategyWorkManagementEdit: "전략\n업무수정",
+  strategyWeeklyWork: "전략\n주간업무",
+  faWorkManagement: "FA\n업무관리",
+  faWorkManagementEdit: "FA\n업무수정",
+  faWeeklyWork: "FA\n주간업무",
+  gptTest: "GPT\n테스트",
+  mbtiPage: "MBTI",
+}
 
 export default function AdminPage() {
   const { isAdmin } = useAuth()
@@ -58,6 +74,7 @@ export default function AdminPage() {
   const [draftPermissions, setDraftPermissions] = useState<DraftPermissionMap>({})
   const [draftAliases, setDraftAliases] = useState<DraftAliasMap>({})
   const [draftDepartments, setDraftDepartments] = useState<DraftUserDepartmentMap>({})
+  const [draftMbti, setDraftMbti] = useState<DraftUserMbtiMap>({})
   const [draftDepartmentPersons, setDraftDepartmentPersons] = useState<DraftDepartmentPersonMap>({
     ICT: "",
     FA: "",
@@ -67,7 +84,9 @@ export default function AdminPage() {
   const [draftDepartmentPermissions, setDraftDepartmentPermissions] = useState<DepartmentPagePermissions>(
     DEFAULT_DEPARTMENT_PAGE_PERMISSIONS,
   )
+  const [bulkTargetKey, setBulkTargetKey] = useState<keyof UserPagePermissions>(PAGE_PERMISSIONS[0].key)
   const [savingEmail, setSavingEmail] = useState<string | null>(null)
+  const [savingAll, setSavingAll] = useState(false)
   const [savingDepartmentPersons, setSavingDepartmentPersons] = useState(false)
   const [savingDepartmentPermissions, setSavingDepartmentPermissions] = useState(false)
 
@@ -101,6 +120,7 @@ export default function AdminPage() {
     const nextDraftPermissions: DraftPermissionMap = {}
     const nextDraftAliases: DraftAliasMap = {}
     const nextDraftDepartments: DraftUserDepartmentMap = {}
+    const nextDraftMbti: DraftUserMbtiMap = {}
 
     rows.forEach((email) => {
       const savedPermission = permissionEntries.find((entry) => entry.email === email)
@@ -109,11 +129,13 @@ export default function AdminPage() {
       nextDraftPermissions[email] = savedPermission?.permissions || DEFAULT_PAGE_PERMISSIONS
       nextDraftAliases[email] = (profile?.taskAliases || []).join(", ")
       nextDraftDepartments[email] = profile?.department || "none"
+      nextDraftMbti[email] = profile?.mbti || "none"
     })
 
     setDraftPermissions(nextDraftPermissions)
     setDraftAliases(nextDraftAliases)
     setDraftDepartments(nextDraftDepartments)
+    setDraftMbti(nextDraftMbti)
   }, [rows, permissionEntries, profiles])
 
   useEffect(() => {
@@ -137,6 +159,36 @@ export default function AdminPage() {
         [key]: checked,
       },
     }))
+  }
+
+  const handleBulkTogglePermission = (key: keyof UserPagePermissions, checked: boolean) => {
+    setDraftPermissions((prev) => {
+      const next = { ...prev }
+      rows.forEach((email) => {
+        next[email] = {
+          ...(prev[email] || DEFAULT_PAGE_PERMISSIONS),
+          [key]: checked,
+        }
+      })
+      return next
+    })
+  }
+
+  const handleSaveAllUsers = async () => {
+    if (rows.length === 0) return
+    setSavingAll(true)
+    try {
+      await Promise.all(
+        rows.map((email) =>
+          saveUserPagePermissions(email, draftPermissions[email] || DEFAULT_PAGE_PERMISSIONS),
+        ),
+      )
+      toast.success(`${rows.length}명의 페이지 권한이 일괄 저장되었습니다.`)
+    } catch {
+      toast.error("일괄 저장에 실패했습니다.")
+    } finally {
+      setSavingAll(false)
+    }
   }
 
   const handleToggleDepartmentPermission = (
@@ -173,8 +225,12 @@ export default function AdminPage() {
           normalized,
           draftDepartments[normalized] !== "none" ? draftDepartments[normalized] : undefined,
         ),
+        saveUserMbti(
+          normalized,
+          draftMbti[normalized] !== "none" ? (draftMbti[normalized] as MbtiType) : undefined,
+        ),
       ])
-      toast.success("사용자 권한, 별칭, 소속 부서가 저장되었습니다.")
+      toast.success("사용자 권한, 별칭, 소속 부서, MBTI가 저장되었습니다.")
     } catch {
       toast.error("사용자 설정 저장에 실패했습니다.")
     } finally {
@@ -366,106 +422,181 @@ export default function AdminPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">계정별 설정</CardTitle>
+            <div className="flex items-center justify-between gap-4">
+              <CardTitle className="text-xl">계정별 설정</CardTitle>
+              {rows.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleSaveAllUsers()}
+                  disabled={savingAll}
+                  className="shrink-0"
+                >
+                  <Users className="h-4 w-4" />
+                  {savingAll ? "저장 중..." : `전체 ${rows.length}명 권한 저장`}
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="overflow-x-auto">
             {rows.length === 0 ? (
               <p className="text-sm text-muted-foreground">아직 관리할 사용자가 없습니다.</p>
             ) : (
-              <Table className="min-w-[1700px]">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[240px]">사용자</TableHead>
-                    <TableHead className="w-[180px]">소속 부서</TableHead>
-                    {PAGE_PERMISSIONS.map((page) => (
-                      <TableHead key={page.key}>{page.label}</TableHead>
-                    ))}
-                    <TableHead className="min-w-[260px]">담당자명 별칭</TableHead>
-                    <TableHead className="w-[140px] text-right">저장</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((email) => {
-                    const permissions = draftPermissions[email] || DEFAULT_PAGE_PERMISSIONS
-                    const profile = profiles.find((item) => item.email === email)
+              <>
+                {/* 일괄 권한 설정 툴바 */}
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+                  <span className="shrink-0 text-xs font-semibold text-muted-foreground">일괄 권한 설정</span>
+                  <Select
+                    value={bulkTargetKey}
+                    onValueChange={(v) => setBulkTargetKey(v as keyof UserPagePermissions)}
+                  >
+                    <SelectTrigger className="h-7 w-[200px] bg-white text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAGE_PERMISSIONS.map((page) => (
+                        <SelectItem key={page.key} value={page.key} className="text-xs">
+                          {page.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <button
+                    type="button"
+                    onClick={() => handleBulkTogglePermission(bulkTargetKey, true)}
+                    className="rounded border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+                  >
+                    전체 허용
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleBulkTogglePermission(bulkTargetKey, false)}
+                    className="rounded border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 transition-colors hover:bg-rose-100"
+                  >
+                    전체 해제
+                  </button>
+                </div>
 
-                    return (
-                      <TableRow key={email}>
-                        <TableCell className="align-top">
-                          <div className="min-w-0">
-                            <p className="font-medium text-foreground">{email}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {profile?.lastLoginAt
-                                ? `최근 로그인 ${profile.lastLoginAt.toLocaleString("ko-KR")}`
-                                : "아직 로그인 기록 없음"}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="align-top">
-                          <Select
-                            value={draftDepartments[email] || "none"}
-                            onValueChange={(value) =>
-                              setDraftDepartments((prev) => ({
-                                ...prev,
-                                [email]: value as DepartmentPersonGroup | "none",
-                              }))
-                            }
-                          >
-                            <SelectTrigger className="w-[160px] bg-white">
-                              <SelectValue placeholder="부서 선택" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">미지정</SelectItem>
-                              {DEPARTMENT_PERSON_GROUPS.map((group) => (
-                                <SelectItem key={group} value={group}>
-                                  {group}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        {PAGE_PERMISSIONS.map((page) => (
-                          <TableCell key={page.key} className="align-top">
-                            <label className="flex items-center gap-2 text-sm">
+                <Table className="min-w-[1300px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[200px]">사용자</TableHead>
+                      <TableHead className="w-[120px]">소속 부서</TableHead>
+                      {PAGE_PERMISSIONS.map((page) => (
+                        <TableHead key={page.key} className="w-16 text-center" title={page.label}>
+                          <span className="block whitespace-pre-line text-[11px] font-semibold leading-snug text-foreground/80">
+                            {PAGE_PERMISSION_SHORT_LABELS[page.key]}
+                          </span>
+                        </TableHead>
+                      ))}
+                      <TableHead className="w-[110px]">MBTI</TableHead>
+                      <TableHead className="w-[90px]">담당자명 별칭</TableHead>
+                      <TableHead className="w-[72px] text-right">저장</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((email) => {
+                      const permissions = draftPermissions[email] || DEFAULT_PAGE_PERMISSIONS
+                      const profile = profiles.find((item) => item.email === email)
+
+                      return (
+                        <TableRow key={email}>
+                          <TableCell className="py-2 align-middle">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium text-foreground">{email}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {profile?.lastLoginAt
+                                  ? profile.lastLoginAt.toLocaleString("ko-KR")
+                                  : "로그인 기록 없음"}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2 align-middle">
+                            <Select
+                              value={draftDepartments[email] || "none"}
+                              onValueChange={(value) =>
+                                setDraftDepartments((prev) => ({
+                                  ...prev,
+                                  [email]: value as DepartmentPersonGroup | "none",
+                                }))
+                              }
+                            >
+                              <SelectTrigger className="h-8 w-[108px] bg-white text-xs">
+                                <SelectValue placeholder="부서 선택" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">미지정</SelectItem>
+                                {DEPARTMENT_PERSON_GROUPS.map((group) => (
+                                  <SelectItem key={group} value={group}>
+                                    {group}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          {PAGE_PERMISSIONS.map((page) => (
+                            <TableCell key={page.key} className="py-2 text-center align-middle">
                               <Checkbox
                                 checked={permissions[page.key]}
                                 onCheckedChange={(checked) =>
                                   handleTogglePermission(email, page.key, checked === true)
                                 }
+                                title={page.label}
                               />
-                              허용
-                            </label>
+                            </TableCell>
+                          ))}
+                          <TableCell className="py-2 align-middle">
+                            <Select
+                              value={draftMbti[email] || "none"}
+                              onValueChange={(value) =>
+                                setDraftMbti((prev) => ({
+                                  ...prev,
+                                  [email]: value as MbtiType | "none",
+                                }))
+                              }
+                            >
+                              <SelectTrigger className="h-8 w-[100px] bg-white text-xs">
+                                <SelectValue placeholder="유형 선택" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">미지정</SelectItem>
+                                {MBTI_TYPES.map((type) => (
+                                  <SelectItem key={type} value={type}>
+                                    {type}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
-                        ))}
-                        <TableCell className="align-top">
-                          <Textarea
-                            value={draftAliases[email] || ""}
-                            onChange={(event) =>
-                              setDraftAliases((prev) => ({ ...prev, [email]: event.target.value }))
-                            }
-                            className="min-h-24"
-                            placeholder="예) admin@waff.co.kr, admin, 관리자"
-                          />
-                          <p className="mt-2 text-xs text-muted-foreground">
-                            쉼표로 구분해서 여러 담당자명 별칭을 입력해 주세요.
-                          </p>
-                        </TableCell>
-                        <TableCell className="align-top text-right">
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={() => void handleSaveUser(email)}
-                            disabled={savingEmail === email}
-                          >
-                            <Save className="h-4 w-4" />
-                            {savingEmail === email ? "저장 중..." : "저장"}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
+                          <TableCell className="py-2 align-middle">
+                            <Input
+                              value={draftAliases[email] || ""}
+                              onChange={(event) =>
+                                setDraftAliases((prev) => ({ ...prev, [email]: event.target.value }))
+                              }
+                              className="h-8 w-[82px] text-xs"
+                              placeholder="홍길동, 길동"
+                              title={draftAliases[email] || ""}
+                            />
+                          </TableCell>
+                          <TableCell className="py-2 text-right align-middle">
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => void handleSaveUser(email)}
+                              disabled={savingEmail === email}
+                              className="h-8 px-2"
+                            >
+                              <Save className="h-3.5 w-3.5" />
+                              {savingEmail === email ? "…" : "저장"}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </>
             )}
           </CardContent>
         </Card>
