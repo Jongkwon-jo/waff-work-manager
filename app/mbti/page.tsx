@@ -9,6 +9,25 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { MBTI_TYPES, subscribeUserProfiles, type MbtiType, type UserProfile } from "@/lib/firestore-service"
 
+const MBTI_COLORS: Record<MbtiType, { card: string; border: string; badge: string }> = {
+  INTJ: { card: "from-violet-50 to-purple-50/60", border: "border-violet-200/60", badge: "bg-violet-100 text-violet-700" },
+  INTP: { card: "from-violet-50 to-purple-50/60", border: "border-violet-200/60", badge: "bg-violet-100 text-violet-700" },
+  ENTJ: { card: "from-violet-50 to-purple-50/60", border: "border-violet-200/60", badge: "bg-violet-100 text-violet-700" },
+  ENTP: { card: "from-violet-50 to-purple-50/60", border: "border-violet-200/60", badge: "bg-violet-100 text-violet-700" },
+  INFJ: { card: "from-emerald-50 to-green-50/60", border: "border-emerald-200/60", badge: "bg-emerald-100 text-emerald-700" },
+  INFP: { card: "from-emerald-50 to-green-50/60", border: "border-emerald-200/60", badge: "bg-emerald-100 text-emerald-700" },
+  ENFJ: { card: "from-emerald-50 to-green-50/60", border: "border-emerald-200/60", badge: "bg-emerald-100 text-emerald-700" },
+  ENFP: { card: "from-emerald-50 to-green-50/60", border: "border-emerald-200/60", badge: "bg-emerald-100 text-emerald-700" },
+  ISTJ: { card: "from-sky-50 to-blue-50/60", border: "border-sky-200/60", badge: "bg-sky-100 text-sky-700" },
+  ISFJ: { card: "from-sky-50 to-blue-50/60", border: "border-sky-200/60", badge: "bg-sky-100 text-sky-700" },
+  ESTJ: { card: "from-sky-50 to-blue-50/60", border: "border-sky-200/60", badge: "bg-sky-100 text-sky-700" },
+  ESFJ: { card: "from-sky-50 to-blue-50/60", border: "border-sky-200/60", badge: "bg-sky-100 text-sky-700" },
+  ISTP: { card: "from-amber-50 to-orange-50/60", border: "border-amber-200/60", badge: "bg-amber-100 text-amber-700" },
+  ISFP: { card: "from-amber-50 to-orange-50/60", border: "border-amber-200/60", badge: "bg-amber-100 text-amber-700" },
+  ESTP: { card: "from-amber-50 to-orange-50/60", border: "border-amber-200/60", badge: "bg-amber-100 text-amber-700" },
+  ESFP: { card: "from-amber-50 to-orange-50/60", border: "border-amber-200/60", badge: "bg-amber-100 text-amber-700" },
+}
+
 const MBTI_LABELS: Record<MbtiType, string> = {
   INTJ: "전략가형",
   INTP: "논리사고형",
@@ -102,10 +121,12 @@ export default function MbtiPage() {
         </header>
 
         <section className="grid gap-4 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-          {mbtiCards.cards.map(({ type, members, count }) => (
+          {mbtiCards.cards.map(({ type, members, count }) => {
+            const colors = MBTI_COLORS[type]
+            return (
             <Card
               key={type}
-              className={`overflow-hidden border border-slate-200/60 bg-white shadow-sm transition-all duration-200 ${count === 0 ? "opacity-50" : ""}`}
+              className={`overflow-hidden border bg-gradient-to-br ${colors.card} ${colors.border} shadow-sm transition-all duration-200 ${count === 0 ? "opacity-50" : ""}`}
             >
               <CardHeader className="pb-2 pt-5 px-5">
                 <div className="flex items-center justify-between gap-2">
@@ -115,7 +136,7 @@ export default function MbtiPage() {
                     </CardTitle>
                     <p className="mt-0.5 text-xs font-medium text-slate-500">({MBTI_LABELS[type]})</p>
                   </div>
-                  <Badge className="border-0 bg-slate-100 text-slate-700 text-xs font-semibold px-2 py-0.5 shrink-0">
+                  <Badge className={`border-0 ${colors.badge} text-xs font-semibold px-2 py-0.5 shrink-0`}>
                     {count}명
                   </Badge>
                 </div>
@@ -138,7 +159,8 @@ export default function MbtiPage() {
                 )}
               </CardContent>
             </Card>
-          ))}
+            )
+          })}
         </section>
       </div>
     </main>
