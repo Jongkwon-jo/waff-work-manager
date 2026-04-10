@@ -16,9 +16,11 @@ import {
   DEPARTMENT_PERSON_GROUPS,
   DEFAULT_DEPARTMENT_PAGE_PERMISSIONS,
   DEFAULT_DEPARTMENT_PERSON_SETTINGS,
+  MBTI_TYPES,
   saveDepartmentPagePermissions,
   saveDepartmentPersonSettings,
   saveUserDepartment,
+  saveUserMbti,
   saveUserPagePermissions,
   saveUserTaskAliases,
   subscribeAllUserPagePermissions,
@@ -28,6 +30,7 @@ import {
   type DepartmentPagePermissions,
   type DepartmentPersonGroup,
   type DepartmentPersonSettings,
+  type MbtiType,
   type UserPagePermissionEntry,
   type UserProfile,
 } from "@/lib/firestore-service"
@@ -42,6 +45,7 @@ import {
 type DraftPermissionMap = Record<string, UserPagePermissions>
 type DraftAliasMap = Record<string, string>
 type DraftUserDepartmentMap = Record<string, DepartmentPersonGroup | "none">
+type DraftUserMbtiMap = Record<string, MbtiType | "none">
 type DraftDepartmentPersonMap = Record<DepartmentPersonGroup, string>
 
 export default function AdminPage() {
@@ -58,6 +62,7 @@ export default function AdminPage() {
   const [draftPermissions, setDraftPermissions] = useState<DraftPermissionMap>({})
   const [draftAliases, setDraftAliases] = useState<DraftAliasMap>({})
   const [draftDepartments, setDraftDepartments] = useState<DraftUserDepartmentMap>({})
+  const [draftMbti, setDraftMbti] = useState<DraftUserMbtiMap>({})
   const [draftDepartmentPersons, setDraftDepartmentPersons] = useState<DraftDepartmentPersonMap>({
     ICT: "",
     FA: "",
@@ -101,6 +106,7 @@ export default function AdminPage() {
     const nextDraftPermissions: DraftPermissionMap = {}
     const nextDraftAliases: DraftAliasMap = {}
     const nextDraftDepartments: DraftUserDepartmentMap = {}
+    const nextDraftMbti: DraftUserMbtiMap = {}
 
     rows.forEach((email) => {
       const savedPermission = permissionEntries.find((entry) => entry.email === email)
@@ -109,11 +115,13 @@ export default function AdminPage() {
       nextDraftPermissions[email] = savedPermission?.permissions || DEFAULT_PAGE_PERMISSIONS
       nextDraftAliases[email] = (profile?.taskAliases || []).join(", ")
       nextDraftDepartments[email] = profile?.department || "none"
+      nextDraftMbti[email] = profile?.mbti || "none"
     })
 
     setDraftPermissions(nextDraftPermissions)
     setDraftAliases(nextDraftAliases)
     setDraftDepartments(nextDraftDepartments)
+    setDraftMbti(nextDraftMbti)
   }, [rows, permissionEntries, profiles])
 
   useEffect(() => {
@@ -173,8 +181,12 @@ export default function AdminPage() {
           normalized,
           draftDepartments[normalized] !== "none" ? draftDepartments[normalized] : undefined,
         ),
+        saveUserMbti(
+          normalized,
+          draftMbti[normalized] !== "none" ? (draftMbti[normalized] as MbtiType) : undefined,
+        ),
       ])
-      toast.success("사용자 권한, 별칭, 소속 부서가 저장되었습니다.")
+      toast.success("사용자 권한, 별칭, 소속 부서, MBTI가 저장되었습니다.")
     } catch {
       toast.error("사용자 설정 저장에 실패했습니다.")
     } finally {
@@ -380,6 +392,7 @@ export default function AdminPage() {
                     {PAGE_PERMISSIONS.map((page) => (
                       <TableHead key={page.key}>{page.label}</TableHead>
                     ))}
+                    <TableHead className="w-[140px]">MBTI</TableHead>
                     <TableHead className="min-w-[260px]">담당자명 별칭</TableHead>
                     <TableHead className="w-[140px] text-right">저장</TableHead>
                   </TableRow>
@@ -437,6 +450,29 @@ export default function AdminPage() {
                             </label>
                           </TableCell>
                         ))}
+                        <TableCell className="align-top">
+                          <Select
+                            value={draftMbti[email] || "none"}
+                            onValueChange={(value) =>
+                              setDraftMbti((prev) => ({
+                                ...prev,
+                                [email]: value as MbtiType | "none",
+                              }))
+                            }
+                          >
+                            <SelectTrigger className="w-[130px] bg-white">
+                              <SelectValue placeholder="유형 선택" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">미지정</SelectItem>
+                              {MBTI_TYPES.map((type) => (
+                                <SelectItem key={type} value={type}>
+                                  {type}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
                         <TableCell className="align-top">
                           <Textarea
                             value={draftAliases[email] || ""}

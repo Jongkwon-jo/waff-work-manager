@@ -9,6 +9,7 @@ export const PAGE_PERMISSIONS = [
   { key: "faWorkManagementEdit", label: "FA사업부 업무관리 수정", path: "/fa-work-management" },
   { key: "faWeeklyWork", label: "FA사업부 주간업무", path: "/fa-work-management/weekly" },
   { key: "gptTest", label: "GPT 테스트", path: "/gpt-test" },
+  { key: "mbtiPage", label: "MBTI", path: "/mbti" },
 ] as const
 
 export type PagePermissionKey = (typeof PAGE_PERMISSIONS)[number]["key"]
@@ -24,6 +25,7 @@ export const DEFAULT_PAGE_PERMISSIONS: UserPagePermissions = {
   faWorkManagementEdit: true,
   faWeeklyWork: true,
   gptTest: true,
+  mbtiPage: true,
 }
 
 export function normalizeEmail(email: string) {
@@ -62,6 +64,7 @@ export function normalizePermissions(raw?: Partial<Record<string, unknown>>): Us
     faWeeklyWork:
       typeof raw?.faWeeklyWork === "boolean" ? raw.faWeeklyWork : DEFAULT_PAGE_PERMISSIONS.faWeeklyWork,
     gptTest: typeof raw?.gptTest === "boolean" ? raw.gptTest : DEFAULT_PAGE_PERMISSIONS.gptTest,
+    mbtiPage: typeof raw?.mbtiPage === "boolean" ? raw.mbtiPage : DEFAULT_PAGE_PERMISSIONS.mbtiPage,
   }
 }
 
@@ -72,6 +75,7 @@ export function resolvePathToPermissionKey(pathname: string): PagePermissionKey 
   if (pathname.startsWith("/fa-work-management/weekly")) return "faWeeklyWork"
   if (pathname.startsWith("/fa-work-management")) return "faWorkManagement"
   if (pathname.startsWith("/gpt-test")) return "gptTest"
+  if (pathname.startsWith("/mbti")) return "mbtiPage"
   return null
 }
 

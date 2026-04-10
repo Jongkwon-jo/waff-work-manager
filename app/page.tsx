@@ -5,6 +5,7 @@ import Link from "next/link"
 import { signOut } from "firebase/auth"
 import {
   ArrowRight,
+  Brain,
   BriefcaseBusiness,
   CalendarDays,
   Cpu,
@@ -90,6 +91,16 @@ export default function HomePage() {
       visible: isAdmin || pagePermissions.gptTest,
       tone: "from-sky-50 via-cyan-50/60 to-white",
       iconColor: "text-sky-500",
+      iconBg: "bg-white/60",
+    },
+    {
+      href: "/mbti",
+      title: "MBTI 분포",
+      description: "직원들의 MBTI 유형별 분포를 확인합니다.",
+      icon: Brain,
+      visible: isAdmin || pagePermissions.mbtiPage,
+      tone: "from-fuchsia-50 via-purple-50/60 to-white",
+      iconColor: "text-fuchsia-500",
       iconBg: "bg-white/60",
     },
     {
