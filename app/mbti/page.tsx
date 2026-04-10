@@ -9,6 +9,25 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { MBTI_TYPES, subscribeUserProfiles, type MbtiType, type UserProfile } from "@/lib/firestore-service"
 
+const MBTI_LABELS: Record<MbtiType, string> = {
+  INTJ: "전략가형",
+  INTP: "논리사고형",
+  ENTJ: "지휘관형",
+  ENTP: "변론가형",
+  INFJ: "옹호자형",
+  INFP: "중재자형",
+  ENFJ: "주도자형",
+  ENFP: "활동가형",
+  ISTJ: "현실주의자형",
+  ISFJ: "수호자형",
+  ESTJ: "경영자형",
+  ESFJ: "친선도모형",
+  ISTP: "장인형",
+  ISFP: "예술가형",
+  ESTP: "활동가형",
+  ESFP: "연예인형",
+}
+
 const MBTI_GROUPS: { label: string; types: MbtiType[]; color: string; badge: string; border: string }[] = [
   {
     label: "분석가",
@@ -135,10 +154,13 @@ export default function MbtiPage() {
             >
               <CardHeader className="pb-2 pt-5 px-5">
                 <div className="flex items-center justify-between gap-2">
-                  <CardTitle className="text-2xl font-bold tracking-tight text-slate-900">
-                    {type}
-                  </CardTitle>
-                  <Badge className={`${style.badge} border-0 text-xs font-semibold px-2 py-0.5`}>
+                  <div>
+                    <CardTitle className="text-2xl font-bold tracking-tight text-slate-900">
+                      {type}
+                    </CardTitle>
+                    <p className="mt-0.5 text-xs font-medium text-slate-500">({MBTI_LABELS[type]})</p>
+                  </div>
+                  <Badge className={`${style.badge} border-0 text-xs font-semibold px-2 py-0.5 shrink-0`}>
                     {count}명
                   </Badge>
                 </div>
