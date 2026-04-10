@@ -63,8 +63,8 @@ export default function MbtiPage() {
   }, [])
 
   const mbtiCards = useMemo(() => {
-    const grouped: Record<MbtiType, UserProfile[]> = Object.fromEntries(
-      MBTI_TYPES.map((type) => [type, []]),
+    const grouped = Object.fromEntries(
+      MBTI_TYPES.map((type) => [type, [] as UserProfile[]]),
     ) as Record<MbtiType, UserProfile[]>
 
     for (const profile of profiles) {
