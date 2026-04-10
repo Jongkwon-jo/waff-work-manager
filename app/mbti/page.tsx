@@ -28,46 +28,6 @@ const MBTI_LABELS: Record<MbtiType, string> = {
   ESFP: "연예인형",
 }
 
-const MBTI_GROUPS: { label: string; types: MbtiType[]; color: string; badge: string; border: string }[] = [
-  {
-    label: "분석가",
-    types: ["INTJ", "INTP", "ENTJ", "ENTP"],
-    color: "from-violet-50 to-purple-50/60",
-    badge: "bg-violet-100 text-violet-700",
-    border: "border-violet-200/60",
-  },
-  {
-    label: "외교관",
-    types: ["INFJ", "INFP", "ENFJ", "ENFP"],
-    color: "from-emerald-50 to-green-50/60",
-    badge: "bg-emerald-100 text-emerald-700",
-    border: "border-emerald-200/60",
-  },
-  {
-    label: "관리자형",
-    types: ["ISTJ", "ISFJ", "ESTJ", "ESFJ"],
-    color: "from-sky-50 to-blue-50/60",
-    badge: "bg-sky-100 text-sky-700",
-    border: "border-sky-200/60",
-  },
-  {
-    label: "탐험가",
-    types: ["ISTP", "ISFP", "ESTP", "ESFP"],
-    color: "from-amber-50 to-orange-50/60",
-    badge: "bg-amber-100 text-amber-700",
-    border: "border-amber-200/60",
-  },
-]
-
-function getMbtiStyle(mbti: MbtiType) {
-  for (const group of MBTI_GROUPS) {
-    if ((group.types as string[]).includes(mbti)) {
-      return { color: group.color, badge: group.badge, border: group.border, groupLabel: group.label }
-    }
-  }
-  return { color: "from-slate-50 to-gray-50/60", badge: "bg-slate-100 text-slate-700", border: "border-slate-200/60", groupLabel: "" }
-}
-
 function getDisplayName(profile: UserProfile): string {
   return profile.taskAliases?.[0] || profile.email
 }
@@ -98,7 +58,6 @@ export default function MbtiPage() {
       type,
       members: grouped[type],
       count: grouped[type].length,
-      style: getMbtiStyle(type),
     }))
 
     cards.sort((a, b) => {
@@ -143,14 +102,10 @@ export default function MbtiPage() {
         </header>
 
         <section className="grid gap-4 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-          {mbtiCards.cards.map(({ type, members, count, style }) => (
+          {mbtiCards.cards.map(({ type, members, count }) => (
             <Card
               key={type}
-              className={`
-                overflow-hidden border bg-gradient-to-br ${style.color} ${style.border}
-                shadow-sm transition-all duration-200
-                ${count === 0 ? "opacity-50" : ""}
-              `}
+              className={`overflow-hidden border border-slate-200/60 bg-white shadow-sm transition-all duration-200 ${count === 0 ? "opacity-50" : ""}`}
             >
               <CardHeader className="pb-2 pt-5 px-5">
                 <div className="flex items-center justify-between gap-2">
@@ -160,11 +115,10 @@ export default function MbtiPage() {
                     </CardTitle>
                     <p className="mt-0.5 text-xs font-medium text-slate-500">({MBTI_LABELS[type]})</p>
                   </div>
-                  <Badge className={`${style.badge} border-0 text-xs font-semibold px-2 py-0.5 shrink-0`}>
+                  <Badge className="border-0 bg-slate-100 text-slate-700 text-xs font-semibold px-2 py-0.5 shrink-0">
                     {count}명
                   </Badge>
                 </div>
-                <p className="text-xs text-muted-foreground">{style.groupLabel}</p>
               </CardHeader>
               <CardContent className="px-5 pb-5">
                 {count === 0 ? (
