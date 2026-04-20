@@ -24,8 +24,8 @@ const summaryItems = [
 
 export function StatusSummary({ counts }: StatusSummaryProps) {
   return (
-    <div className="overflow-x-auto">
-      <div className="grid min-w-[900px] grid-cols-6 gap-3">
+    <div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         {summaryItems.map((item) => {
           const Icon = item.icon
           const count = counts[item.key]

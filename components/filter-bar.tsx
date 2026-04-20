@@ -62,7 +62,7 @@ export function FilterBar({
 
   return (
     <div className="h-full rounded-lg border border-border bg-card p-3 shadow-sm">
-      <div className="flex h-full items-center gap-2 overflow-x-auto">
+      <div className="flex h-full flex-col gap-2 lg:flex-row lg:items-center">
         <div className="flex shrink-0 items-center gap-2">
           <Filter className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-medium text-card-foreground">필터 및 정렬</span>
@@ -77,7 +77,7 @@ export function FilterBar({
           )}
         </div>
 
-        <div className="relative min-w-[260px] flex-1">
+        <div className="relative w-full min-w-0 lg:min-w-[260px] lg:flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
@@ -88,7 +88,7 @@ export function FilterBar({
           />
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
           <div className="flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-2.5">
             <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
             <select

@@ -65,6 +65,7 @@ export type UserProfile = {
   email: string
   lastLoginAt?: Date
   taskAliases?: string[]
+  hiddenOwnerOptions?: string[]
   myPageTaskPreferences?: Record<string, MyPageTaskPreference>
   myPagePersonalTasks?: MyPagePersonalTask[]
   department?: DepartmentPersonGroup
@@ -682,6 +683,7 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
             lastLoginAt?: { toDate?: () => Date }
             department?: unknown
             taskAliases?: unknown
+            hiddenOwnerOptions?: unknown
             myPageTaskPreferences?: unknown
             myPagePersonalTasks?: unknown
           }
@@ -691,6 +693,12 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
             department: normalizeDepartmentGroup(raw?.department),
             taskAliases: Array.isArray(raw?.taskAliases)
               ? raw.taskAliases.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
+              : [],
+            hiddenOwnerOptions: Array.isArray(raw?.hiddenOwnerOptions)
+              ? raw.hiddenOwnerOptions
+                  .filter((value): value is string => typeof value === "string")
+                  .map((value) => value.trim())
+                  .filter(Boolean)
               : [],
             myPageTaskPreferences: normalizeMyPageTaskPreferences(raw?.myPageTaskPreferences),
             myPagePersonalTasks: normalizeMyPagePersonalTasks(raw?.myPagePersonalTasks),
@@ -727,6 +735,7 @@ export function subscribeCurrentUserProfile(email: string, callback: (profile: U
         lastLoginAt?: { toDate?: () => Date }
         department?: unknown
         taskAliases?: unknown
+        hiddenOwnerOptions?: unknown
         myPageTaskPreferences?: unknown
         myPagePersonalTasks?: unknown
       }
@@ -736,6 +745,12 @@ export function subscribeCurrentUserProfile(email: string, callback: (profile: U
         department: normalizeDepartmentGroup(raw?.department),
         taskAliases: Array.isArray(raw?.taskAliases)
           ? raw.taskAliases.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
+          : [],
+        hiddenOwnerOptions: Array.isArray(raw?.hiddenOwnerOptions)
+          ? raw.hiddenOwnerOptions
+              .filter((value): value is string => typeof value === "string")
+              .map((value) => value.trim())
+              .filter(Boolean)
           : [],
         myPageTaskPreferences: normalizeMyPageTaskPreferences(raw?.myPageTaskPreferences),
         myPagePersonalTasks: normalizeMyPagePersonalTasks(raw?.myPagePersonalTasks),
@@ -756,6 +771,21 @@ export async function saveUserTaskAliases(email: string, taskAliases: string[]):
     {
       email: normalizedEmail,
       taskAliases: Array.from(new Set(taskAliases.map((alias) => alias.trim()).filter(Boolean))),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export async function saveUserHiddenOwnerOptions(email: string, hiddenOwnerOptions: string[]): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  await setDoc(
+    doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
+    {
+      email: normalizedEmail,
+      hiddenOwnerOptions: Array.from(new Set(hiddenOwnerOptions.map((owner) => owner.trim()).filter(Boolean))),
       updatedAt: serverTimestamp(),
     },
     { merge: true },

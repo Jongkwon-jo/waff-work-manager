@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useMemo, useState, useRef, useEffect } from "react"
+import { useMemo, useState, useRef, useEffect, useCallback } from "react"
 import type { Project, Task, TaskStatus, TaskCategory } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import { ProjectTypeBadge } from "@/components/status-badge"
@@ -62,8 +62,10 @@ interface GanttViewProps {
   ) => void
   persistedCollapsedProjectIds?: string[]
   persistedCollapsedTaskIds?: string[]
+  persistedHiddenOwnerOptions?: string[]
   isCollapseStateReady?: boolean
   onPersistCollapseState?: (state: { collapsedProjectIds: string[]; collapsedTaskIds: string[] }) => void
+  onPersistHiddenOwnerOptions?: (owners: string[]) => void
 }
 
 type FlattenedTask = Task & {
@@ -262,13 +264,19 @@ export function GanttView({
   onReorderTask,
   persistedCollapsedProjectIds = [],
   persistedCollapsedTaskIds = [],
+  persistedHiddenOwnerOptions = [],
   isCollapseStateReady = false,
   onPersistCollapseState,
+  onPersistHiddenOwnerOptions,
 }: GanttViewProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const timelineScrollRef = useRef<HTMLDivElement>(null)
   const scrollRafRef = useRef<number | null>(null)
   const pendingScrollTopRef = useRef(0)
+  const touchStartXRef = useRef<number | null>(null)
+  const touchStartYRef = useRef<number | null>(null)
+  const touchStartTimelineScrollLeftRef = useRef(0)
+  const isHorizontalTouchScrollRef = useRef(false)
   const [displayMonthDate, setDisplayMonthDate] = useState(() => {
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth(), 1)
@@ -305,10 +313,12 @@ export function GanttView({
   )
   const [dragOverProjectHeaderId, setDragOverProjectHeaderId] = useState<string | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set())
+  const [removedOwnerOptions, setRemovedOwnerOptions] = useState<Set<string>>(new Set())
   const lastCollapseStateSignatureRef = useRef("")
+  const pendingPersistCollapseStateSignatureRef = useRef<string | null>(null)
+  const hasHydratedCollapseStateRef = useRef(false)
 
   const allProjectIds = useMemo(() => projects.map((project) => project.id), [projects])
-  const allProjectIdSet = useMemo(() => new Set(allProjectIds), [allProjectIds])
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const hiddenProjectCount = useMemo(
     () => Array.from(hiddenProjectIds).filter((id) => projectById.has(id)).length,
@@ -325,14 +335,33 @@ export function GanttView({
     projects.forEach((project) => walk(project.tasks))
     return ids
   }, [projects])
-  const allCollapsibleTaskIdSet = useMemo(() => new Set(allCollapsibleTaskIds), [allCollapsibleTaskIds])
+
+  useEffect(() => {
+    if (isCollapseStateReady) return
+    hasHydratedCollapseStateRef.current = false
+    pendingPersistCollapseStateSignatureRef.current = null
+    lastCollapseStateSignatureRef.current = ""
+  }, [isCollapseStateReady])
 
   useEffect(() => {
     if (!isCollapseStateReady) return
 
-    const nextProjectIds = persistedCollapsedProjectIds.filter((id) => allProjectIdSet.has(id)).sort()
-    const nextTaskIds = persistedCollapsedTaskIds.filter((id) => allCollapsibleTaskIdSet.has(id)).sort()
+    const nextProjectIds = Array.from(new Set(persistedCollapsedProjectIds.map((id) => id.trim()).filter(Boolean))).sort()
+    const nextTaskIds = Array.from(new Set(persistedCollapsedTaskIds.map((id) => id.trim()).filter(Boolean))).sort()
     const signature = `${nextProjectIds.join(",")}|${nextTaskIds.join(",")}`
+
+    const pendingSignature = pendingPersistCollapseStateSignatureRef.current
+    if (pendingSignature && signature !== pendingSignature) return
+    if (pendingSignature === signature) {
+      pendingPersistCollapseStateSignatureRef.current = null
+    }
+
+    if (!hasHydratedCollapseStateRef.current) {
+      hasHydratedCollapseStateRef.current = true
+    } else if (!pendingSignature && signature !== lastCollapseStateSignatureRef.current) {
+      return
+    }
+
     lastCollapseStateSignatureRef.current = signature
 
     const nextProjectSet = new Set(nextProjectIds)
@@ -341,29 +370,38 @@ export function GanttView({
     setCollapsedProjectIds((prev) => (areSetsEqual(prev, nextProjectSet) ? prev : nextProjectSet))
     setCollapsedTaskIds((prev) => (areSetsEqual(prev, nextTaskSet) ? prev : nextTaskSet))
   }, [
-    allCollapsibleTaskIdSet,
-    allProjectIdSet,
     isCollapseStateReady,
     persistedCollapsedProjectIds,
     persistedCollapsedTaskIds,
   ])
 
   useEffect(() => {
+    const normalized = Array.from(
+      new Set(
+        persistedHiddenOwnerOptions
+          .map((owner) => owner.trim())
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => a.localeCompare(b, "ko"))
+    const nextSet = new Set(normalized)
+    setRemovedOwnerOptions((prev) => (areSetsEqual(prev, nextSet) ? prev : nextSet))
+  }, [persistedHiddenOwnerOptions])
+
+  useEffect(() => {
     if (!isCollapseStateReady || !onPersistCollapseState) return
 
-    const normalizedProjectIds = Array.from(collapsedProjectIds).filter((id) => allProjectIdSet.has(id)).sort()
-    const normalizedTaskIds = Array.from(collapsedTaskIds).filter((id) => allCollapsibleTaskIdSet.has(id)).sort()
+    const normalizedProjectIds = Array.from(new Set(Array.from(collapsedProjectIds).map((id) => id.trim()).filter(Boolean))).sort()
+    const normalizedTaskIds = Array.from(new Set(Array.from(collapsedTaskIds).map((id) => id.trim()).filter(Boolean))).sort()
     const signature = `${normalizedProjectIds.join(",")}|${normalizedTaskIds.join(",")}`
 
     if (lastCollapseStateSignatureRef.current === signature) return
     lastCollapseStateSignatureRef.current = signature
+    pendingPersistCollapseStateSignatureRef.current = signature
     onPersistCollapseState({
       collapsedProjectIds: normalizedProjectIds,
       collapsedTaskIds: normalizedTaskIds,
     })
   }, [
-    allCollapsibleTaskIdSet,
-    allProjectIdSet,
     collapsedProjectIds,
     collapsedTaskIds,
     isCollapseStateReady,
@@ -402,6 +440,22 @@ export function GanttView({
     })
     return Array.from(owners).sort((a, b) => a.localeCompare(b))
   }, [projects])
+
+  const visibleOwnerOptions = useMemo(
+    () => ownerOptions.filter((owner) => !removedOwnerOptions.has(owner)),
+    [ownerOptions, removedOwnerOptions],
+  )
+
+  const handleDeleteOwnerOption = (owner: string) => {
+    if (removedOwnerOptions.has(owner)) return
+
+    const next = new Set(removedOwnerOptions)
+    next.add(owner)
+    setRemovedOwnerOptions(next)
+
+    const normalized = Array.from(next).sort((a, b) => a.localeCompare(b, "ko"))
+    onPersistHiddenOwnerOptions?.(normalized)
+  }
 
   const toggleProjectCollapse = (projectId: string) => {
     setCollapsedProjectIds((prev) => {
@@ -780,7 +834,7 @@ export function GanttView({
 
     const maxOwnerTextWidth = Math.max(
       getMeasuredTextWidth("Owner", font),
-      ...ownerOptions.map((text) => getMeasuredTextWidth(text, font)),
+      ...visibleOwnerOptions.map((text) => getMeasuredTextWidth(text, font)),
       ...projects.flatMap((project) => {
         const flattenOwners = (tasks: Task[]): string[] =>
           tasks.flatMap((task) => [task.person || "", ...flattenOwners(task.subTasks || [])])
@@ -814,7 +868,7 @@ export function GanttView({
       detailPanelWidth: computedDetailPanelWidth,
       detailGridTemplate: `${categoryColumnWidth}px ${departmentColumnWidth}px ${ownerColumnWidth}px ${startColumnWidth}px ${endColumnWidth}px ${manDayColumnWidth}px`,
     }
-  }, [projects, departmentOptions, ownerOptions])
+  }, [projects, departmentOptions, visibleOwnerOptions])
 
   const allDays = useMemo(() => {
     const today = new Date()
@@ -1152,6 +1206,55 @@ export function GanttView({
   const showDetailColumns = isDetailColumnsOpen
   const isAllExpanded = collapsedProjectIds.size === 0 && collapsedTaskIds.size === 0
 
+  const syncTimelineScrollLeft = useCallback((nextScrollLeft: number) => {
+    const timelineScroller = timelineScrollRef.current
+    if (!timelineScroller) {
+      setTimelineScrollLeft((prev) => (prev === nextScrollLeft ? prev : nextScrollLeft))
+      return
+    }
+
+    const maxScrollLeft = Math.max(0, timelineWidth - timelineScroller.clientWidth)
+    const clamped = Math.max(0, Math.min(nextScrollLeft, maxScrollLeft))
+
+    if (timelineScroller.scrollLeft !== clamped) {
+      timelineScroller.scrollLeft = clamped
+    }
+    setTimelineScrollLeft((prev) => (prev === clamped ? prev : clamped))
+  }, [timelineWidth])
+
+  const handleTouchScrollStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) return
+    const touch = event.touches[0]
+    touchStartXRef.current = touch.clientX
+    touchStartYRef.current = touch.clientY
+    touchStartTimelineScrollLeftRef.current = timelineScrollRef.current?.scrollLeft ?? timelineScrollLeft
+    isHorizontalTouchScrollRef.current = false
+  }
+
+  const handleTouchScrollMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) return
+    if (touchStartXRef.current === null || touchStartYRef.current === null) return
+
+    const touch = event.touches[0]
+    const deltaX = touch.clientX - touchStartXRef.current
+    const deltaY = touch.clientY - touchStartYRef.current
+
+    if (!isHorizontalTouchScrollRef.current) {
+      const horizontalThreshold = 8
+      if (Math.abs(deltaX) < horizontalThreshold) return
+      if (Math.abs(deltaX) <= Math.abs(deltaY)) return
+      isHorizontalTouchScrollRef.current = true
+    }
+
+    syncTimelineScrollLeft(touchStartTimelineScrollLeftRef.current - deltaX)
+  }
+
+  const handleTouchScrollEnd = () => {
+    touchStartXRef.current = null
+    touchStartYRef.current = null
+    isHorizontalTouchScrollRef.current = false
+  }
+
   const toggleAllRows = () => {
     if (isAllExpanded) {
       setCollapsedProjectIds(new Set(allProjectIds))
@@ -1175,10 +1278,9 @@ export function GanttView({
     const targetScrollLeft = Math.max(0, currentMonthStartX - CELL_WIDTH * 2)
 
     requestAnimationFrame(() => {
-      timelineScroller.scrollLeft = targetScrollLeft
-      setTimelineScrollLeft(targetScrollLeft)
+      syncTimelineScrollLeft(targetScrollLeft)
     })
-  }, [months])
+  }, [months, syncTimelineScrollLeft])
 
   useEffect(() => {
     const container = scrollContainerRef.current
@@ -1396,7 +1498,14 @@ export function GanttView({
 
   return (
     <div className="flex h-[calc(100dvh-200px)] min-h-[520px] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar touch-pan-y"
+        onTouchStart={handleTouchScrollStart}
+        onTouchMove={handleTouchScrollMove}
+        onTouchEnd={handleTouchScrollEnd}
+        onTouchCancel={handleTouchScrollEnd}
+      >
         <div className="relative min-w-fit flex flex-col isolate">
           <div className="sticky top-0 z-40 flex bg-card border-b border-border shadow-sm">
             <div
@@ -1883,8 +1992,7 @@ export function GanttView({
                         !collapsedHiddenParentIds.has(task.id) &&
                         expandedHiddenParentIds.has(task.id)
 
-                      const currentOwners = parseOwners(task.person || "")
-                      const ownerValues = Array.from(new Set([...ownerOptions, ...currentOwners])).filter(Boolean)
+                      const ownerValues = visibleOwnerOptions
                       const currentDepartments = parseDepartments(task.department || "")
                       const departmentValues = Array.from(new Set([...departmentOptions, ...currentDepartments])).filter(Boolean)
 
@@ -2196,6 +2304,7 @@ export function GanttView({
                                     <OwnerMultiSelect
                                       value={task.person || ""}
                                       options={ownerValues}
+                                      onDeleteOption={handleDeleteOwnerOption}
                                       onChange={(value) => updateTaskInline(task, { person: value })}
                                     />
 
@@ -2544,10 +2653,12 @@ function DepartmentMultiSelect({
 function OwnerMultiSelect({
   value,
   options,
+  onDeleteOption,
   onChange,
 }: {
   value: string
   options: string[]
+  onDeleteOption: (owner: string) => void
   onChange: (value: string) => void
 }) {
   const [newOwner, setNewOwner] = useState("")
@@ -2558,6 +2669,12 @@ function OwnerMultiSelect({
     const selectedSet = new Set(selected)
     if (selectedSet.has(owner)) selectedSet.delete(owner)
     else selectedSet.add(owner)
+    onChange(joinOwners(Array.from(selectedSet)))
+  }
+
+  const removeOwner = (owner: string) => {
+    const selectedSet = new Set(selected)
+    selectedSet.delete(owner)
     onChange(joinOwners(Array.from(selectedSet)))
   }
 
@@ -2615,15 +2732,28 @@ function OwnerMultiSelect({
           {allOptions.map((owner) => {
             const checked = selected.includes(owner)
             return (
-              <button
-                key={owner}
-                type="button"
-                onClick={() => toggleOwner(owner)}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
-              >
-                <input type="checkbox" readOnly checked={checked} className="h-3.5 w-3.5" />
-                <span className="truncate">{owner}</span>
-              </button>
+              <div key={owner} className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => toggleOwner(owner)}
+                  className="flex flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
+                >
+                  <input type="checkbox" readOnly checked={checked} className="h-3.5 w-3.5" />
+                  <span className="truncate">{owner}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (checked) removeOwner(owner)
+                    onDeleteOption(owner)
+                  }}
+                  className="h-7 shrink-0 rounded-md border border-border px-2 text-[10px] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  title={`${owner} 옵션 삭제`}
+                  aria-label={`${owner} 옵션 삭제`}
+                >
+                  삭제
+                </button>
+              </div>
             )
           })}
         </div>

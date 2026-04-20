@@ -25,6 +25,7 @@ import {
   rollbackHistoryEntry,
   deleteHistoryEntry,
   subscribeCurrentUserProfile,
+  saveUserHiddenOwnerOptions,
   type ChangeHistoryEntry,
 } from "@/lib/firestore-service"
 import { auth } from "@/lib/firebase"
@@ -58,6 +59,7 @@ export default function StrategyWorkManagementPage() {
   const [ganttCollapsedTaskIds, setGanttCollapsedTaskIds] = useState<string[]>([])
   const [isGanttCollapseStateReady, setIsGanttCollapseStateReady] = useState(false)
   const [defaultTaskPerson, setDefaultTaskPerson] = useState("")
+  const [hiddenOwnerOptions, setHiddenOwnerOptions] = useState<string[]>([])
   const [operationInProgress, setOperationInProgress] = useState<"copy" | "delete" | null>(null)
   const deferredSearchQuery = useDeferredValue(searchQuery)
 
@@ -109,31 +111,33 @@ export default function StrategyWorkManagementPage() {
   }, [user])
 
   useEffect(() => {
-    if (!user) {
-      setGanttCollapsedProjectIds([])
-      setGanttCollapsedTaskIds([])
-      setIsGanttCollapseStateReady(false)
-      return
-    }
+    const email = user?.email || ""
+    setGanttCollapsedProjectIds([])
+    setGanttCollapsedTaskIds([])
+    setIsGanttCollapseStateReady(false)
 
-    const unsubscribe = subscribeGanttCollapseState(user.email || "", (state) => {
+    if (!email) return
+
+    const unsubscribe = subscribeGanttCollapseState(email, (state) => {
       setGanttCollapsedProjectIds(state.collapsedProjectIds)
       setGanttCollapsedTaskIds(state.collapsedTaskIds)
       setIsGanttCollapseStateReady(true)
     })
 
     return () => unsubscribe()
-  }, [user])
+  }, [user?.email])
 
   useEffect(() => {
     if (!user?.email) {
       setDefaultTaskPerson("")
+      setHiddenOwnerOptions([])
       return
     }
 
     const unsubscribe = subscribeCurrentUserProfile(user.email, (profile) => {
       const accountDefaultPerson = (profile?.taskAliases || [])[0]?.trim() || ""
       setDefaultTaskPerson(accountDefaultPerson)
+      setHiddenOwnerOptions(profile?.hiddenOwnerOptions || [])
     })
 
     return () => unsubscribe()
@@ -590,6 +594,19 @@ export default function StrategyWorkManagementPage() {
       await saveGanttCollapseState(user.email || "", state)
     } catch (error) {
       console.error("Failed to save gantt collapse state:", error)
+    }
+  }
+
+  const handlePersistHiddenOwnerOptions = async (owners: string[]) => {
+    if (!user?.email) return
+    const normalized = Array.from(new Set(owners.map((owner) => owner.trim()).filter(Boolean))).sort((a, b) =>
+      a.localeCompare(b, "ko"),
+    )
+    setHiddenOwnerOptions(normalized)
+    try {
+      await saveUserHiddenOwnerOptions(user.email, normalized)
+    } catch (error) {
+      toast.error("담당자 옵션 삭제 저장 실패")
     }
   }
 
@@ -1316,7 +1333,7 @@ export default function StrategyWorkManagementPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-50 border-b border-border bg-card/95 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-full items-center justify-between px-4 py-3 lg:px-10">
+        <div className="mx-auto flex max-w-full flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between lg:px-10">
           <div className="flex items-center gap-3">
             <div className="flex h-10 items-center">
               <Image
@@ -1332,7 +1349,7 @@ export default function StrategyWorkManagementPage() {
               <h1 className="text-base font-bold text-card-foreground leading-tight">{"전략사업부 업무관리"}</h1>
             </div>
           </div>
-          <div className="relative flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="relative flex w-full flex-wrap items-center gap-2 text-xs text-muted-foreground lg:w-auto lg:flex-nowrap">
             <div className="hidden items-center rounded-md border border-border bg-background px-3 py-1.5 text-[11px] text-foreground shadow-sm lg:flex">
               {user.email || "로그인 사용자"}
             </div>
@@ -1386,7 +1403,7 @@ export default function StrategyWorkManagementPage() {
                 관리자
               </Link>
             )}
-            <div className="mr-4 flex overflow-hidden rounded-md border border-border bg-background shadow-sm">
+            <div className="flex overflow-hidden rounded-md border border-border bg-background shadow-sm lg:mr-4">
               <button
                 onClick={() => setViewMode("gantt")}
                 className={cn(
@@ -1424,7 +1441,7 @@ export default function StrategyWorkManagementPage() {
                 {"카드"}
               </button>
             </div>
-            <div className="flex items-center gap-1.5 font-medium">
+            <div className="hidden items-center gap-1.5 font-medium md:flex">
               <CalendarDays className="h-4 w-4" />
               <span>{formattedDate}</span>
             </div>
@@ -1461,7 +1478,7 @@ export default function StrategyWorkManagementPage() {
               로그아웃
             </Button>
             {isHistoryOpen && (
-              <div className="absolute right-0 top-10 z-[70] w-[360px] rounded-lg border border-border bg-card p-3 shadow-lg">
+              <div className="absolute left-0 top-10 z-[70] w-full max-w-[360px] rounded-lg border border-border bg-card p-3 shadow-lg lg:left-auto lg:right-0">
                 {historyEntries.length === 0 ? (
                   <p className="text-xs text-muted-foreground">아직 저장된 내 변경 이력이 없습니다.</p>
                 ) : (
@@ -1504,7 +1521,7 @@ export default function StrategyWorkManagementPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_900px]">
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,900px)]">
               <StatusSummary counts={counts} />
               <FilterBar
                 searchQuery={searchQuery}
@@ -1563,8 +1580,10 @@ export default function StrategyWorkManagementPage() {
                 onReorderTask={handleReorderTask}
                 persistedCollapsedProjectIds={ganttCollapsedProjectIds}
                 persistedCollapsedTaskIds={ganttCollapsedTaskIds}
+                persistedHiddenOwnerOptions={hiddenOwnerOptions}
                 isCollapseStateReady={isGanttCollapseStateReady}
                 onPersistCollapseState={handlePersistGanttCollapseState}
+                onPersistHiddenOwnerOptions={handlePersistHiddenOwnerOptions}
               />
             ) : (
               <ProjectCardView
