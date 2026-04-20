@@ -43,6 +43,7 @@ import { toast } from "sonner"
 
 export default function StrategyWorkManagementPage() {
   const { user, loading: authLoading, isAdmin, pagePermissions } = useAuth()
+  const canEdit = isAdmin || pagePermissions.strategyWorkManagementEdit
   const [projectList, setProjectList] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
@@ -1445,28 +1446,32 @@ export default function StrategyWorkManagementPage() {
               <CalendarDays className="h-4 w-4" />
               <span>{formattedDate}</span>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="ml-2 h-8 gap-1.5 px-2 text-[11px]"
-              onClick={handleRollbackLatest}
-              disabled={isRollingBack || historyEntries.length === 0}
-              title={historyEntries.length === 0 ? "롤백할 이력이 없습니다." : "내 가장 최근 변경을 되돌립니다."}
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              내 최근 롤백
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 px-2 text-[11px]"
-              onClick={() => setIsHistoryOpen((prev) => !prev)}
-            >
-              <History className="h-3.5 w-3.5" />
-              내 변경 이력
-              {isHistoryOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-            </Button>
+            {canEdit && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-2 h-8 gap-1.5 px-2 text-[11px]"
+                onClick={handleRollbackLatest}
+                disabled={isRollingBack || historyEntries.length === 0}
+                title={historyEntries.length === 0 ? "롤백할 이력이 없습니다." : "내 가장 최근 변경을 되돌립니다."}
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                내 최근 롤백
+              </Button>
+            )}
+            {canEdit && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 px-2 text-[11px]"
+                onClick={() => setIsHistoryOpen((prev) => !prev)}
+              >
+                <History className="h-3.5 w-3.5" />
+                내 변경 이력
+                {isHistoryOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              </Button>
+            )}
             <Button
               type="button"
               variant="outline"
@@ -1552,6 +1557,7 @@ export default function StrategyWorkManagementPage() {
                 personFilter={personFilter}
                 defaultTaskDepartment="전략기획"
                 searchQuery={deferredSearchQuery}
+                canEdit={canEdit}
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
                 onDeleteTask={handleDeleteTask}
@@ -1567,6 +1573,7 @@ export default function StrategyWorkManagementPage() {
                 defaultTaskDepartment="전략기획"
                 defaultTaskPerson={defaultTaskPerson}
                 searchQuery={deferredSearchQuery}
+                canEdit={canEdit}
                 onAddProject={handleAddProject}
                 onEditProject={handleEditProject}
                 onAddTask={handleAddTask}

@@ -44,6 +44,7 @@ interface GanttViewProps {
   defaultTaskDepartment?: string
   defaultTaskPerson?: string
   searchQuery: string
+  canEdit?: boolean
   onAddProject: (project: Project) => void
   onEditProject: (project: Project) => void
   onAddTask: (task: Task) => void
@@ -251,6 +252,7 @@ export function GanttView({
   defaultTaskDepartment = "전략기획",
   defaultTaskPerson = "",
   searchQuery,
+  canEdit = true,
   onAddProject,
   onEditProject,
   onAddTask,
@@ -1518,15 +1520,17 @@ export function GanttView({
                     <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
                       Project & Task Details
                     </span>
-                    <AddProjectDialog
-                      onAddProject={onAddProject}
-                      trigger={
-                        <Button size="sm" className="h-7 gap-1.5 px-2 text-[11px]">
-                          <Plus className="h-3.5 w-3.5" />
-                          새 프로젝트
-                        </Button>
-                      }
-                    />
+                    {canEdit && (
+                      <AddProjectDialog
+                        onAddProject={onAddProject}
+                        trigger={
+                          <Button size="sm" className="h-7 gap-1.5 px-2 text-[11px]">
+                            <Plus className="h-3.5 w-3.5" />
+                            새 프로젝트
+                          </Button>
+                        }
+                      />
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5">
                     {hiddenProjectCount > 0 && (
@@ -1675,7 +1679,7 @@ export function GanttView({
                       </div>
                     </DialogContent>
                   </Dialog>
-                  {selectedTaskCount > 0 && (
+                  {canEdit && selectedTaskCount > 0 && (
                     <>
                       <Button
                         variant="outline"
@@ -1733,15 +1737,17 @@ export function GanttView({
                     {isAllExpanded ? <ChevronsUp className="h-3.5 w-3.5" /> : <ChevronsDown className="h-3.5 w-3.5" />}
                     {isAllExpanded ? "전체 접기" : "전체 펼치기"}
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 gap-1.5 px-2 text-[11px]"
-                    onClick={() => setIsDetailColumnsOpen((prev) => !prev)}
-                  >
-                    <PanelRight className="h-3.5 w-3.5" />
-                    {showDetailColumns ? "상세 숨기기" : "상세 보기"}
-                  </Button>
+                  {canEdit && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 gap-1.5 px-2 text-[11px]"
+                      onClick={() => setIsDetailColumnsOpen((prev) => !prev)}
+                    >
+                      <PanelRight className="h-3.5 w-3.5" />
+                      {showDetailColumns ? "상세 숨기기" : "상세 보기"}
+                    </Button>
+                  )}
                   </div>
                 </div>
               </div>
@@ -1876,22 +1882,33 @@ export function GanttView({
                       </button>
                       <ProjectTypeBadge type={project.type} />
                       <div className="flex min-w-0 items-center gap-2">
-                        <EditProjectDialog
-                          project={project}
-                          onEditProject={onEditProject}
-                          trigger={
-                            <button
-                              type="button"
-                              className={cn(
-                                "truncate rounded-md px-2 py-0.5 text-xs font-bold transition-opacity hover:opacity-90",
-                                PROJECT_NAME_BADGE_BG_CLASS,
-                              )}
-                              title="프로젝트 수정"
-                            >
-                              {project.name}
-                            </button>
-                          }
-                        />
+                        {canEdit ? (
+                          <EditProjectDialog
+                            project={project}
+                            onEditProject={onEditProject}
+                            trigger={
+                              <button
+                                type="button"
+                                className={cn(
+                                  "truncate rounded-md px-2 py-0.5 text-xs font-bold transition-opacity hover:opacity-90",
+                                  PROJECT_NAME_BADGE_BG_CLASS,
+                                )}
+                                title="프로젝트 수정"
+                              >
+                                {project.name}
+                              </button>
+                            }
+                          />
+                        ) : (
+                          <span
+                            className={cn(
+                              "truncate rounded-md px-2 py-0.5 text-xs font-bold",
+                              PROJECT_NAME_BADGE_BG_CLASS,
+                            )}
+                          >
+                            {project.name}
+                          </span>
+                        )}
                         <Button
                           type="button"
                           variant="ghost"
@@ -1922,22 +1939,24 @@ export function GanttView({
                       </div>
                       <div className="min-w-0 flex-1" />
                       <div className="ml-auto flex shrink-0 items-center gap-1">
-                        <AddTaskDialog
-                          projectId={project.id}
-                          defaultPerson={defaultTaskPerson}
-                          defaultDepartment={defaultTaskDepartment}
-                          onAddTask={handleAddProjectLevelTask}
-                          trigger={
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-6 shrink-0 px-2 text-[10px]"
-                            >
-                              업무 추가
-                            </Button>
-                          }
-                        />
+                        {canEdit && (
+                          <AddTaskDialog
+                            projectId={project.id}
+                            defaultPerson={defaultTaskPerson}
+                            defaultDepartment={defaultTaskDepartment}
+                            onAddTask={handleAddProjectLevelTask}
+                            trigger={
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-6 shrink-0 px-2 text-[10px]"
+                              >
+                                업무 추가
+                              </Button>
+                            }
+                          />
+                        )}
                         <Button
                           type="button"
                           variant="ghost"
@@ -2054,32 +2073,36 @@ export function GanttView({
                               style={{ width: leftPanelWidth }}
                             >
                               <div className="flex items-center gap-1.5 w-full min-w-0">
-                                <label className="flex h-5 w-5 shrink-0 items-center justify-center">
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedTaskIds.has(task.id)}
-                                    onChange={(e) => toggleTaskSelection(task.id, e.target.checked)}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="h-3.5 w-3.5 cursor-pointer rounded border-border"
-                                    aria-label="업무 선택"
-                                  />
-                                </label>
+                                {canEdit && (
+                                  <label className="flex h-5 w-5 shrink-0 items-center justify-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedTaskIds.has(task.id)}
+                                      onChange={(e) => toggleTaskSelection(task.id, e.target.checked)}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="h-3.5 w-3.5 cursor-pointer rounded border-border"
+                                      aria-label="업무 선택"
+                                    />
+                                  </label>
+                                )}
                                 <div style={{ width: displayDepth * 12 }} className="shrink-0" />
-                                <button
-                                  type="button"
-                                  draggable
-                                  onDragStart={(e) => {
-                                    e.dataTransfer.effectAllowed = "move"
-                                    e.dataTransfer.setData("text/plain", task.id)
-                                    setDraggedTaskId(task.id)
-                                  }}
-                                  onDragEnd={clearDragState}
-                                  className="flex h-5 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:bg-accent hover:text-foreground cursor-grab active:cursor-grabbing"
-                                  aria-label="업무 순서 드래그 이동"
-                                  title="드래그로 순서 변경"
-                                >
-                                  <GripVertical className="h-3.5 w-3.5" />
-                                </button>
+                                {canEdit && (
+                                  <button
+                                    type="button"
+                                    draggable
+                                    onDragStart={(e) => {
+                                      e.dataTransfer.effectAllowed = "move"
+                                      e.dataTransfer.setData("text/plain", task.id)
+                                      setDraggedTaskId(task.id)
+                                    }}
+                                    onDragEnd={clearDragState}
+                                    className="flex h-5 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:bg-accent hover:text-foreground cursor-grab active:cursor-grabbing"
+                                    aria-label="업무 순서 드래그 이동"
+                                    title="드래그로 순서 변경"
+                                  >
+                                    <GripVertical className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
 
                                 {task.hasChildren ? (
                                   <button
@@ -2117,161 +2140,236 @@ export function GanttView({
                                         </span>
                                       </>
                                     )}
-                                    <EditTaskDialog
-                                      task={task}
-                                      onEditTask={onEditTask}
-                                      defaultDepartment={defaultTaskDepartment}
-                                      openOnDoubleClick
-                              trigger={
-                                        <button
-                                          type="button"
-                                          className="min-w-0 flex-1 text-left text-xs font-bold transition-colors hover:text-primary"
-                                        >
-                                          <span className="flex min-w-0 items-center gap-1.5">
-                                            <span
-                                              className={cn(
-                                                "truncate",
-                                                task.category === "중요" ? "text-red-600" : "text-foreground",
-                                              )}
-                                              title={formatTaskHoverDetails(task)}
-                                            >
-                                              {depthPrefix}
-                                              {task.task}
-                                            </span>
-                                            {formatTaskDateRange(task) && (
-                                              <span className="shrink-0 text-[10px] font-normal text-muted-foreground/80">
-                                                {formatTaskDateRange(task)}
-                                              </span>
-                                            )}
-                                            {hasMemo && (
+                                    {canEdit ? (
+                                      <EditTaskDialog
+                                        task={task}
+                                        onEditTask={onEditTask}
+                                        defaultDepartment={defaultTaskDepartment}
+                                        openOnDoubleClick
+                                        trigger={
+                                          <button
+                                            type="button"
+                                            className="min-w-0 flex-1 text-left text-xs font-bold transition-colors hover:text-primary"
+                                          >
+                                            <span className="flex min-w-0 items-center gap-1.5">
                                               <span
-                                                className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-yellow-300 bg-yellow-100 text-yellow-700 shadow-[inset_0_-1px_0_rgba(245,158,11,0.35)]"
-                                                title={`메모: ${task.memo}`}
+                                                className={cn(
+                                                  "truncate",
+                                                  task.category === "중요" ? "text-red-600" : "text-foreground",
+                                                )}
+                                                title={formatTaskHoverDetails(task)}
                                               >
-                                                <span className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[5px] border-t-[5px] border-l-transparent border-t-yellow-300" />
-                                                <StickyNote className="h-2.5 w-2.5" />
+                                                {depthPrefix}
+                                                {task.task}
                                               </span>
-                                            )}
+                                              {formatTaskDateRange(task) && (
+                                                <span className="shrink-0 text-[10px] font-normal text-muted-foreground/80">
+                                                  {formatTaskDateRange(task)}
+                                                </span>
+                                              )}
+                                              {hasMemo && (
+                                                <span
+                                                  className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-yellow-300 bg-yellow-100 text-yellow-700 shadow-[inset_0_-1px_0_rgba(245,158,11,0.35)]"
+                                                  title={`메모: ${task.memo}`}
+                                                >
+                                                  <span className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[5px] border-t-[5px] border-l-transparent border-t-yellow-300" />
+                                                  <StickyNote className="h-2.5 w-2.5" />
+                                                </span>
+                                              )}
+                                            </span>
+                                          </button>
+                                        }
+                                      />
+                                    ) : (
+                                      <span className="min-w-0 flex-1 text-xs font-bold">
+                                        <span className="flex min-w-0 items-center gap-1.5">
+                                          <span
+                                            className={cn("truncate", task.category === "중요" ? "text-red-600" : "text-foreground")}
+                                            title={formatTaskHoverDetails(task)}
+                                          >
+                                            {depthPrefix}
+                                            {task.task}
                                           </span>
-                                        </button>
-                                      }
-                                    />
+                                          {formatTaskDateRange(task) && (
+                                            <span className="shrink-0 text-[10px] font-normal text-muted-foreground/80">
+                                              {formatTaskDateRange(task)}
+                                            </span>
+                                          )}
+                                          {hasMemo && (
+                                            <span
+                                              className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-yellow-300 bg-yellow-100 text-yellow-700 shadow-[inset_0_-1px_0_rgba(245,158,11,0.35)]"
+                                              title={`메모: ${task.memo}`}
+                                            >
+                                              <span className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[5px] border-t-[5px] border-l-transparent border-t-yellow-300" />
+                                              <StickyNote className="h-2.5 w-2.5" />
+                                            </span>
+                                          )}
+                                        </span>
+                                      </span>
+                                    )}
                                   </div>
                                 ) : (
                                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                                    <EditTaskDialog
-                                      task={task}
-                                      onEditTask={onEditTask}
-                                      defaultDepartment={defaultTaskDepartment}
-                                      openOnDoubleClick
-                                      trigger={
-                                        <button className="min-w-0 flex-1 text-left text-xs font-normal transition-colors hover:text-primary">
-                                          <span className="flex min-w-0 items-center gap-1.5">
-                                            <span
-                                              className={cn(
-                                                "truncate",
-                                                task.category === "중요"
-                                                  ? "text-red-600"
-                                                  : task.status === "완료"
-                                                    ? "text-muted-foreground/50"
-                                                    : "text-foreground",
-                                              )}
-                                              title={formatTaskHoverDetails(task)}
-                                            >
-                                              {depthPrefix}
-                                              {task.task}
-                                            </span>
-                                            {formatTaskDateRange(task) && (
-                                              <span className="shrink-0 text-[10px] text-muted-foreground/80">
-                                                {formatTaskDateRange(task)}
-                                              </span>
-                                            )}
-                                            {hasMemo && (
+                                    {canEdit ? (
+                                      <EditTaskDialog
+                                        task={task}
+                                        onEditTask={onEditTask}
+                                        defaultDepartment={defaultTaskDepartment}
+                                        openOnDoubleClick
+                                        trigger={
+                                          <button className="min-w-0 flex-1 text-left text-xs font-normal transition-colors hover:text-primary">
+                                            <span className="flex min-w-0 items-center gap-1.5">
                                               <span
-                                                className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-amber-300 bg-amber-100 text-amber-700 shadow-[inset_0_-1px_0_rgba(245,158,11,0.35)]"
-                                                title={`메모: ${task.memo}`}
+                                                className={cn(
+                                                  "truncate",
+                                                  task.category === "중요"
+                                                    ? "text-red-600"
+                                                    : task.status === "완료"
+                                                      ? "text-muted-foreground/50"
+                                                      : "text-foreground",
+                                                )}
+                                                title={formatTaskHoverDetails(task)}
                                               >
-                                                <span className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[5px] border-t-[5px] border-l-transparent border-t-amber-300" />
-                                                <StickyNote className="h-2.5 w-2.5" />
+                                                {depthPrefix}
+                                                {task.task}
                                               </span>
-                                            )}
-                                          </span>
-                                        </button>
-                                      }
-                                    />
-                                    <div className="w-[66px] shrink-0">
-                                      <StatusInlineSelect
-                                        value={task.status}
-                                        onChange={(value) => updateTaskInline(task, { status: value })}
+                                              {formatTaskDateRange(task) && (
+                                                <span className="shrink-0 text-[10px] text-muted-foreground/80">
+                                                  {formatTaskDateRange(task)}
+                                                </span>
+                                              )}
+                                              {hasMemo && (
+                                                <span
+                                                  className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-amber-300 bg-amber-100 text-amber-700 shadow-[inset_0_-1px_0_rgba(245,158,11,0.35)]"
+                                                  title={`메모: ${task.memo}`}
+                                                >
+                                                  <span className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[5px] border-t-[5px] border-l-transparent border-t-amber-300" />
+                                                  <StickyNote className="h-2.5 w-2.5" />
+                                                </span>
+                                              )}
+                                            </span>
+                                          </button>
+                                        }
                                       />
-                                    </div>
+                                    ) : (
+                                      <span className="min-w-0 flex-1 text-xs font-normal">
+                                        <span className="flex min-w-0 items-center gap-1.5">
+                                          <span
+                                            className={cn(
+                                              "truncate",
+                                              task.category === "중요"
+                                                ? "text-red-600"
+                                                : task.status === "완료"
+                                                  ? "text-muted-foreground/50"
+                                                  : "text-foreground",
+                                            )}
+                                            title={formatTaskHoverDetails(task)}
+                                          >
+                                            {depthPrefix}
+                                            {task.task}
+                                          </span>
+                                          {formatTaskDateRange(task) && (
+                                            <span className="shrink-0 text-[10px] text-muted-foreground/80">
+                                              {formatTaskDateRange(task)}
+                                            </span>
+                                          )}
+                                          {hasMemo && (
+                                            <span
+                                              className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-amber-300 bg-amber-100 text-amber-700 shadow-[inset_0_-1px_0_rgba(245,158,11,0.35)]"
+                                              title={`메모: ${task.memo}`}
+                                            >
+                                              <span className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[5px] border-t-[5px] border-l-transparent border-t-amber-300" />
+                                              <StickyNote className="h-2.5 w-2.5" />
+                                            </span>
+                                          )}
+                                        </span>
+                                      </span>
+                                    )}
+                                    {canEdit && (
+                                      <div className="w-[66px] shrink-0">
+                                        <StatusInlineSelect
+                                          value={task.status}
+                                          onChange={(value) => updateTaskInline(task, { status: value })}
+                                        />
+                                      </div>
+                                    )}
                                   </div>
                                 )}
 
-                                <AddTaskDialog
-                                  projectId={task.projectId}
-                                  parentId={task.id}
-                                  defaultPerson={defaultTaskPerson || task.person}
-                                  defaultDepartment={defaultTaskDepartment}
-                                  onAddTask={handleAddNestedSubTask}
-                                  trigger={
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
-                                    >
-                                      <Plus className="h-3 w-3" />
-                                    </Button>
-                                  }
-                                />
-
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="ml-0.5 h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
-                                  onClick={() => {
-                                    if (confirm("Delete this task?")) {
-                                      setSelectedTaskIds((prev) => {
-                                        if (!prev.has(task.id)) return prev
-                                        const next = new Set(prev)
-                                        next.delete(task.id)
-                                        return next
-                                      })
-                                      onDeleteTask(task.id, task.projectId)
+                                {canEdit && (
+                                  <AddTaskDialog
+                                    projectId={task.projectId}
+                                    parentId={task.id}
+                                    defaultPerson={defaultTaskPerson || task.person}
+                                    defaultDepartment={defaultTaskDepartment}
+                                    onAddTask={handleAddNestedSubTask}
+                                    trigger={
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
+                                      >
+                                        <Plus className="h-3 w-3" />
+                                      </Button>
                                     }
-                                  }}
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
-                                  onClick={() => onMoveTask(task.projectId, task.id, "up")}
-                                >
-                                  <ArrowUp className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
-                                  onClick={() => onMoveTask(task.projectId, task.id, "down")}
-                                >
-                                  <ArrowDown className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 shrink-0"
-                                  onClick={() => toggleTaskHidden(task)}
-                                  title={hiddenTaskIds.has(task.id) ? "업무 숨김 해제" : "업무 숨기기"}
-                                >
-                                  {hiddenTaskIds.has(task.id) ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                                </Button>
+                                  />
+                                )}
+
+                                {canEdit && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="ml-0.5 h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
+                                    onClick={() => {
+                                      if (confirm("Delete this task?")) {
+                                        setSelectedTaskIds((prev) => {
+                                          if (!prev.has(task.id)) return prev
+                                          const next = new Set(prev)
+                                          next.delete(task.id)
+                                          return next
+                                        })
+                                        onDeleteTask(task.id, task.projectId)
+                                      }
+                                    }}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                )}
+                                {canEdit && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
+                                    onClick={() => onMoveTask(task.projectId, task.id, "up")}
+                                  >
+                                    <ArrowUp className="h-3 w-3" />
+                                  </Button>
+                                )}
+                                {canEdit && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0 opacity-0 group-hover/task:opacity-100"
+                                    onClick={() => onMoveTask(task.projectId, task.id, "down")}
+                                  >
+                                    <ArrowDown className="h-3 w-3" />
+                                  </Button>
+                                )}
+                                {canEdit && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0"
+                                    onClick={() => toggleTaskHidden(task)}
+                                    title={hiddenTaskIds.has(task.id) ? "업무 숨김 해제" : "업무 숨기기"}
+                                  >
+                                    {hiddenTaskIds.has(task.id) ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                                  </Button>
+                                )}
                               </div>
                             </div>
 
@@ -2363,25 +2461,30 @@ export function GanttView({
                                         : `${task.task} (${task.startDate} ~ ${task.endDate})`
                                     }
                                     className={cn(
-                                      "absolute top-1/2 -translate-y-1/2 rounded-md h-6 shadow-sm transition-all select-none cursor-grab active:cursor-grabbing",
+                                      "absolute top-1/2 -translate-y-1/2 rounded-md h-6 shadow-sm transition-all select-none",
+                                      canEdit ? "cursor-grab active:cursor-grabbing" : "cursor-default",
                                       barStyle.barClass,
                                       dragInfo?.taskId === task.id
                                         ? "opacity-100 scale-y-110 z-10 shadow-md ring-2 ring-white/50"
                                         : "opacity-90 hover:opacity-100",
                                     )}
                                     style={{ left: bar.left + 2, width: barRenderWidth }}
-                                    onMouseDown={(e) => handleMouseDown(e, task, "move")}
+                                    onMouseDown={canEdit ? (e) => handleMouseDown(e, task, "move") : undefined}
                                   >
-                                    <div
-                                      className="absolute left-0 top-0 bottom-0 cursor-w-resize hover:bg-black/10 rounded-l-md z-10"
-                                      style={{ width: resizeHandleWidth }}
-                                      onMouseDown={(e) => handleMouseDown(e, task, "resize-left")}
-                                    />
-                                    <div
-                                      className="absolute right-0 top-0 bottom-0 cursor-e-resize hover:bg-black/10 rounded-r-md z-10"
-                                      style={{ width: resizeHandleWidth }}
-                                      onMouseDown={(e) => handleMouseDown(e, task, "resize-right")}
-                                    />
+                                    {canEdit && (
+                                      <div
+                                        className="absolute left-0 top-0 bottom-0 cursor-w-resize hover:bg-black/10 rounded-l-md z-10"
+                                        style={{ width: resizeHandleWidth }}
+                                        onMouseDown={(e) => handleMouseDown(e, task, "resize-left")}
+                                      />
+                                    )}
+                                    {canEdit && (
+                                      <div
+                                        className="absolute right-0 top-0 bottom-0 cursor-e-resize hover:bg-black/10 rounded-r-md z-10"
+                                        style={{ width: resizeHandleWidth }}
+                                        onMouseDown={(e) => handleMouseDown(e, task, "resize-right")}
+                                      />
+                                    )}
                                     <div
                                       className={cn(
                                         "px-3 text-[10px] font-bold truncate h-full flex items-center pointer-events-none",

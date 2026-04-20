@@ -20,6 +20,7 @@ interface ProjectListProps {
   personFilter: string
   defaultTaskDepartment?: string
   searchQuery: string
+  canEdit?: boolean
   onAddTask: (task: Task) => void
   onEditTask: (task: Task) => void
   onDeleteTask: (taskId: string, projectId: string) => void
@@ -34,6 +35,7 @@ export function ProjectList({
   personFilter,
   defaultTaskDepartment = "전략기획",
   searchQuery,
+  canEdit = true,
   onAddTask,
   onEditTask,
   onDeleteTask,
@@ -188,18 +190,20 @@ export function ProjectList({
                     {completedCount}/{totalCount}
                   </span>
                 </div>
-                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  <AddTaskDialog projectId={project.id} onAddTask={onAddTask} />
-                  <EditProjectDialog project={project} onEditProject={onEditProject} />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                    onClick={() => onDeleteProject(project.id)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
+                {canEdit && (
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <AddTaskDialog projectId={project.id} onAddTask={onAddTask} />
+                    <EditProjectDialog project={project} onEditProject={onEditProject} />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      onClick={() => onDeleteProject(project.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -252,6 +256,7 @@ export function ProjectList({
                           task={task}
                           depth={0}
                           defaultTaskDepartment={defaultTaskDepartment}
+                          canEdit={canEdit}
                           onEditTask={onEditTask}
                           onDeleteTask={onDeleteTask}
                           onAddTask={onAddTask}
@@ -273,6 +278,7 @@ function RecursiveTaskRow({
   task,
   depth,
   defaultTaskDepartment = "전략기획",
+  canEdit = true,
   onEditTask,
   onDeleteTask,
   onAddTask,
@@ -280,6 +286,7 @@ function RecursiveTaskRow({
   task: Task
   depth: number
   defaultTaskDepartment?: string
+  canEdit?: boolean
   onEditTask: (task: Task) => void
   onDeleteTask: (taskId: string, projectId: string) => void
   onAddTask: (task: Task) => void
@@ -312,10 +319,10 @@ function RecursiveTaskRow({
               {task.task}
             </span>
 
-            {depth < 3 && (
-              <AddTaskDialog 
-                projectId={task.projectId} 
-                parentId={task.id} 
+            {canEdit && depth < 3 && (
+              <AddTaskDialog
+                projectId={task.projectId}
+                parentId={task.id}
                 onAddTask={onAddTask}
                 trigger={
                   <Button variant="ghost" size="icon" className="ml-1 h-6 w-6 text-muted-foreground hover:text-primary">
@@ -341,21 +348,23 @@ function RecursiveTaskRow({
           <span className="text-[10px] tabular-nums text-muted-foreground">{task.manDays > 0 ? `${task.manDays}일` : "-"}</span>
         </td>
         <td className="px-2 py-2.5 text-center">
-          <div className="flex items-center justify-center gap-1">
-            <EditTaskDialog task={task} onEditTask={onEditTask} defaultDepartment={defaultTaskDepartment} />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 text-muted-foreground hover:text-destructive"
-              onClick={() => {
-                if (confirm("이 업무(하위 업무 포함)를 삭제하시겠습니까?")) {
-                  onDeleteTask(task.id, task.projectId)
-                }
-              }}
-            >
-              <Trash2 className="h-3 w-3" />
-            </Button>
-          </div>
+          {canEdit && (
+            <div className="flex items-center justify-center gap-1">
+              <EditTaskDialog task={task} onEditTask={onEditTask} defaultDepartment={defaultTaskDepartment} />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                onClick={() => {
+                  if (confirm("이 업무(하위 업무 포함)를 삭제하시겠습니까?")) {
+                    onDeleteTask(task.id, task.projectId)
+                  }
+                }}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </div>
+          )}
         </td>
       </tr>
       {isExpanded && hasSubTasks && (
@@ -365,6 +374,7 @@ function RecursiveTaskRow({
             task={subTask}
             depth={depth + 1}
             defaultTaskDepartment={defaultTaskDepartment}
+            canEdit={canEdit}
             onEditTask={onEditTask}
             onDeleteTask={onDeleteTask}
             onAddTask={onAddTask}

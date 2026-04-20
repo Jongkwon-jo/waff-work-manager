@@ -43,6 +43,14 @@ export type GanttCollapseState = {
 }
 export const DEPARTMENT_PERSON_GROUPS = ["ICT", "FA", "전략기획", "기타"] as const
 export type DepartmentPersonGroup = (typeof DEPARTMENT_PERSON_GROUPS)[number]
+
+export const MBTI_TYPES = [
+  "INTJ", "INTP", "ENTJ", "ENTP",
+  "INFJ", "INFP", "ENFJ", "ENFP",
+  "ISTJ", "ISFJ", "ESTJ", "ESFJ",
+  "ISTP", "ISFP", "ESTP", "ESFP",
+] as const
+export type MbtiType = (typeof MBTI_TYPES)[number]
 export type MyPageTaskPriority = "high" | "medium" | "low"
 export type MyPageTaskPreference = {
   checked: boolean
@@ -69,6 +77,7 @@ export type UserProfile = {
   myPageTaskPreferences?: Record<string, MyPageTaskPreference>
   myPagePersonalTasks?: MyPagePersonalTask[]
   department?: DepartmentPersonGroup
+  mbti?: MbtiType
 }
 
 export type DepartmentPersonSettings = Record<DepartmentPersonGroup, string[]>
@@ -686,6 +695,7 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
             hiddenOwnerOptions?: unknown
             myPageTaskPreferences?: unknown
             myPagePersonalTasks?: unknown
+            mbti?: unknown
           }
           return {
             email: normalizeEmail(toStringOrEmpty(raw?.email)),
@@ -702,6 +712,7 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
               : [],
             myPageTaskPreferences: normalizeMyPageTaskPreferences(raw?.myPageTaskPreferences),
             myPagePersonalTasks: normalizeMyPagePersonalTasks(raw?.myPagePersonalTasks),
+            mbti: (MBTI_TYPES as readonly string[]).includes(raw?.mbti as string) ? (raw.mbti as MbtiType) : undefined,
           } satisfies UserProfile
         })
         .filter((profile) => Boolean(profile.email))
@@ -801,6 +812,21 @@ export async function saveUserDepartment(email: string, department?: DepartmentP
     {
       email: normalizedEmail,
       department: department || null,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export async function saveUserMbti(email: string, mbti?: MbtiType): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  await setDoc(
+    doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
+    {
+      email: normalizedEmail,
+      mbti: mbti || null,
       updatedAt: serverTimestamp(),
     },
     { merge: true },

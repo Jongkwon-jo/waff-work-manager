@@ -66,10 +66,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setPagePermissions({
         myPage: userPermissions.myPage && userDepartmentPermissions.myPage,
         strategyWorkManagement: userPermissions.strategyWorkManagement && userDepartmentPermissions.strategyWorkManagement,
+        strategyWorkManagementEdit: userPermissions.strategyWorkManagementEdit && userDepartmentPermissions.strategyWorkManagementEdit,
         strategyWeeklyWork: userPermissions.strategyWeeklyWork && userDepartmentPermissions.strategyWeeklyWork,
         faWorkManagement: userPermissions.faWorkManagement && userDepartmentPermissions.faWorkManagement,
+        faWorkManagementEdit: userPermissions.faWorkManagementEdit && userDepartmentPermissions.faWorkManagementEdit,
         faWeeklyWork: userPermissions.faWeeklyWork && userDepartmentPermissions.faWeeklyWork,
         gptTest: userPermissions.gptTest && userDepartmentPermissions.gptTest,
+        mbtiPage: userPermissions.mbtiPage && userDepartmentPermissions.mbtiPage,
       })
       setPermissionLoading(false)
     }
