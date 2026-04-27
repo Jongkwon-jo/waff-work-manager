@@ -104,6 +104,7 @@ const LEFT_PANEL_MAX_WIDTH = 820
 const DETAIL_PANEL_MIN_WIDTH = 700
 const DETAIL_PANEL_MAX_WIDTH = 1100
 const COMPACT_VIEWPORT_BREAKPOINT = 1024
+const MOBILE_VIEWPORT_BREAKPOINT = 640
 const HEADER_APPROX_HEIGHT = 110
 const PROJECT_ROW_HEIGHT = 36
 const TASK_ROW_HEIGHT = 36
@@ -342,6 +343,7 @@ export function GanttView({
   const pendingPersistCollapseStateSignatureRef = useRef<string | null>(null)
   const hasHydratedCollapseStateRef = useRef(false)
   const isCompactViewport = viewportWidth < COMPACT_VIEWPORT_BREAKPOINT
+  const isMobileViewport = viewportWidth < MOBILE_VIEWPORT_BREAKPOINT
 
   const allProjectIds = useMemo(() => projects.map((project) => project.id), [projects])
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
@@ -1580,6 +1582,35 @@ export function GanttView({
     }
   }, [dragInfo, allDays, dayIndexByMonthDay, onEditTask, taskById])
 
+  if (isMobileViewport) {
+    return (
+      <MobileGanttView
+        filteredProjects={filteredProjects}
+        allDays={allDays}
+        dayIndexByMonthDay={dayIndexByMonthDay}
+        collapsedProjectIds={collapsedProjectIds}
+        collapsedTaskIds={collapsedTaskIds}
+        toggleProjectCollapse={toggleProjectCollapse}
+        toggleTaskCollapse={toggleTaskCollapse}
+        displayMonthLabel={displayMonthLabel}
+        displayMonthDate={displayMonthDate}
+        setDisplayMonthDate={setDisplayMonthDate}
+        handleDisplayMonthMove={handleDisplayMonthMove}
+        canEdit={canEdit}
+        onAddProject={onAddProject}
+        onEditProject={onEditProject}
+        onEditTask={onEditTask}
+        onDeleteTask={onDeleteTask}
+        defaultTaskDepartment={defaultTaskDepartment}
+        defaultTaskPerson={defaultTaskPerson}
+        handleAddProjectLevelTask={handleAddProjectLevelTask}
+        handleAddNestedSubTask={handleAddNestedSubTask}
+        updateTaskInline={updateTaskInline}
+        buildTaskWithAutoManDays={buildTaskWithAutoManDays}
+      />
+    )
+  }
+
   return (
     <div className="flex h-[calc(100dvh-200px)] min-h-[520px] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
       <div
@@ -2637,6 +2668,443 @@ export function GanttView({
           background: #94a3b8;
         }
       `}</style>
+    </div>
+  )
+}
+
+interface MobileGanttViewProps {
+  filteredProjects: FilteredProject[]
+  allDays: Array<{
+    year: number
+    month: number
+    day: number
+    label: string
+    dow: string
+    isWeekend: boolean
+    isToday: boolean
+  }>
+  dayIndexByMonthDay: Map<string, number>
+  collapsedProjectIds: Set<string>
+  collapsedTaskIds: Set<string>
+  toggleProjectCollapse: (id: string) => void
+  toggleTaskCollapse: (id: string) => void
+  displayMonthLabel: string
+  displayMonthDate: Date
+  setDisplayMonthDate: (date: Date) => void
+  handleDisplayMonthMove: (offset: number) => void
+  canEdit: boolean
+  onAddProject: (project: Project) => void
+  onEditProject: (project: Project) => void
+  onEditTask: (task: Task) => void
+  onDeleteTask: (taskId: string, projectId: string) => void
+  defaultTaskDepartment: string
+  defaultTaskPerson: string
+  handleAddProjectLevelTask: (task: Task) => void
+  handleAddNestedSubTask: (task: Task) => void
+  updateTaskInline: (task: Task, updates: Partial<Task>) => void
+  buildTaskWithAutoManDays: (task: Task, updates: Partial<Task>) => Task
+}
+
+function MobileGanttView({
+  filteredProjects,
+  allDays,
+  dayIndexByMonthDay,
+  collapsedProjectIds,
+  collapsedTaskIds,
+  toggleProjectCollapse,
+  toggleTaskCollapse,
+  displayMonthLabel,
+  displayMonthDate,
+  setDisplayMonthDate,
+  handleDisplayMonthMove,
+  canEdit,
+  onAddProject,
+  onEditProject,
+  onEditTask,
+  onDeleteTask,
+  defaultTaskDepartment,
+  defaultTaskPerson,
+  handleAddProjectLevelTask,
+  handleAddNestedSubTask,
+  updateTaskInline,
+  buildTaskWithAutoManDays,
+}: MobileGanttViewProps) {
+  const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+  const totalDays = allDays.length
+  const todayIdx = allDays.findIndex((d) => d.isToday)
+  const todayPct = totalDays > 0 && todayIdx >= 0 ? (todayIdx / totalDays) * 100 : null
+
+  const getMiniBarPosition = useCallback(
+    (startStr: string, endStr: string) => {
+      const start = parseDate(startStr)
+      const end = parseDate(endStr)
+      if (!start || !end || totalDays === 0) return null
+      const startIdx = dayIndexByMonthDay.get(`${start.month}-${start.day}`) ?? -1
+      const endIdx = dayIndexByMonthDay.get(`${end.month}-${end.day}`) ?? -1
+      if (startIdx === -1 || endIdx === -1) return null
+      return {
+        leftPct: (startIdx / totalDays) * 100,
+        widthPct: Math.max(0.5, ((endIdx - startIdx + 1) / totalDays) * 100),
+      }
+    },
+    [dayIndexByMonthDay, totalDays],
+  )
+
+  const isTaskContainsToday = useCallback(
+    (task: Task) => {
+      if (todayIdx === -1) return false
+      const start = parseDate(task.startDate)
+      const end = parseDate(task.endDate)
+      if (!start || !end) return false
+      const startIdx = dayIndexByMonthDay.get(`${start.month}-${start.day}`) ?? -1
+      const endIdx = dayIndexByMonthDay.get(`${end.month}-${end.day}`) ?? -1
+      if (startIdx === -1 || endIdx === -1) return false
+      return todayIdx >= startIdx && todayIdx <= endIdx
+    },
+    [todayIdx, dayIndexByMonthDay],
+  )
+
+  const scrollToToday = useCallback(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    const todayTask = container.querySelector('[data-contains-today="true"]') as HTMLElement | null
+    if (todayTask) todayTask.scrollIntoView({ behavior: "smooth", block: "center" })
+  }, [])
+
+  const hasTodayTask = filteredProjects.some(
+    (project) =>
+      !collapsedProjectIds.has(project.id) && project.tasks.some((task) => isTaskContainsToday(task)),
+  )
+
+  const firstDay = allDays[0]
+  const lastDay = allDays[allDays.length - 1]
+
+  return (
+    <div className="flex h-[calc(100dvh-200px)] min-h-[400px] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      {/* 헤더 */}
+      <div className="shrink-0 border-b border-border bg-card px-3 py-2.5 shadow-sm">
+        <div className="flex items-center justify-between gap-2">
+          {/* 월 이동 */}
+          <div className="flex items-center gap-0.5 rounded-md border border-border bg-background/90 px-1 py-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => handleDisplayMonthMove(-1)}
+              aria-label="이전 월"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </Button>
+            <Popover open={isMonthPickerOpen} onOpenChange={setIsMonthPickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-6 min-w-[108px] justify-center px-2 text-[11px] font-semibold"
+                >
+                  {displayMonthLabel}
+                  <ChevronDown className="ml-0.5 h-3 w-3" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  month={displayMonthDate}
+                  onMonthChange={(month) =>
+                    setDisplayMonthDate(new Date(month.getFullYear(), month.getMonth(), 1))
+                  }
+                  onSelect={(date) => {
+                    if (!date) return
+                    setDisplayMonthDate(new Date(date.getFullYear(), date.getMonth(), 1))
+                    setIsMonthPickerOpen(false)
+                  }}
+                  captionLayout="dropdown"
+                  locale={ko}
+                  formatters={{
+                    formatCaption: (month) => `${month.getFullYear()}년 ${month.getMonth() + 1}월`,
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => handleDisplayMonthMove(1)}
+              aria-label="다음 월"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {hasTodayTask && (
+              <Button variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={scrollToToday}>
+                오늘로
+              </Button>
+            )}
+            {canEdit && (
+              <AddProjectDialog
+                onAddProject={onAddProject}
+                trigger={
+                  <Button size="sm" className="h-7 gap-1 px-2 text-[11px]">
+                    <Plus className="h-3.5 w-3.5" />
+                    프로젝트
+                  </Button>
+                }
+              />
+            )}
+          </div>
+        </div>
+
+        {/* 미니 타임라인 범위 표시 */}
+        <div className="relative mt-2 h-1.5 w-full overflow-hidden rounded-full bg-border/25">
+          {todayPct !== null && (
+            <div
+              className="absolute bottom-0 top-0 w-0.5 z-10 bg-yellow-400"
+              style={{ left: `${todayPct}%` }}
+            />
+          )}
+        </div>
+        <div className="mt-0.5 flex select-none justify-between text-[9px] text-muted-foreground/50">
+          <span>{firstDay ? `${firstDay.month + 1}월` : ""}</span>
+          {todayPct !== null && <span className="font-semibold text-yellow-500">오늘</span>}
+          <span>{lastDay ? `${lastDay.month + 1}월` : ""}</span>
+        </div>
+      </div>
+
+      {/* 스크롤 가능한 태스크 목록 */}
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
+        {filteredProjects.length === 0 ? (
+          <div className="flex h-full items-center justify-center py-12 text-sm text-muted-foreground">
+            표시할 프로젝트가 없습니다
+          </div>
+        ) : (
+          filteredProjects.map((project) => {
+            const isProjectCollapsed = collapsedProjectIds.has(project.id)
+
+            return (
+              <div key={project.id}>
+                {/* 프로젝트 헤더 (sticky) */}
+                <div
+                  className={cn(
+                    "sticky top-0 z-10 flex items-center gap-2 border-b border-border/30 px-3 py-2",
+                    PROJECT_HEADER_ROW_BG_CLASS,
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleProjectCollapse(project.id)}
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-white hover:bg-white/15"
+                    aria-label={isProjectCollapsed ? "프로젝트 펼치기" : "프로젝트 접기"}
+                  >
+                    {isProjectCollapsed ? (
+                      <ChevronRight className="h-3.5 w-3.5 text-white" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5 text-white" />
+                    )}
+                  </button>
+
+                  <ProjectTypeBadge type={project.type} />
+
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                    {canEdit ? (
+                      <EditProjectDialog
+                        project={project}
+                        onEditProject={onEditProject}
+                        trigger={
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 truncate text-left text-xs font-bold text-white hover:opacity-80"
+                          >
+                            {project.name}
+                          </button>
+                        }
+                      />
+                    ) : (
+                      <span className="min-w-0 flex-1 truncate text-xs font-bold text-white">
+                        {project.name}
+                      </span>
+                    )}
+                    <span className="shrink-0 text-[10px] text-white/60">{project.tasks.length}개</span>
+                  </div>
+
+                  {canEdit && (
+                    <AddTaskDialog
+                      projectId={project.id}
+                      defaultPerson={defaultTaskPerson}
+                      defaultDepartment={defaultTaskDepartment}
+                      onAddTask={handleAddProjectLevelTask}
+                      trigger={
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-6 shrink-0 border-white/30 bg-white/10 px-2 text-[10px] text-white hover:bg-white/20 hover:text-white"
+                        >
+                          + 업무
+                        </Button>
+                      }
+                    />
+                  )}
+                </div>
+
+                {/* 태스크 목록 */}
+                {!isProjectCollapsed &&
+                  project.tasks.map((task) => {
+                    const displayDepth = Math.min(3, Math.max(0, Math.floor(task.depth)))
+                    const depthRowBgClass = getDepthRowBgClass(displayDepth)
+                    const barStyle = getStatusBarStyle(task.status)
+                    const miniBar = getMiniBarPosition(task.startDate, task.endDate)
+                    const hasMemo = Boolean(task.memo?.trim())
+                    const isTaskCollapsed = collapsedTaskIds.has(task.id)
+                    const containsToday = isTaskContainsToday(task)
+                    const dateRange = formatTaskDateRange(task)
+
+                    return (
+                      <div
+                        key={task.id}
+                        data-contains-today={containsToday ? "true" : undefined}
+                        className={cn(
+                          "border-b border-border/25 px-3 py-2.5",
+                          depthRowBgClass,
+                          containsToday && "ring-1 ring-inset ring-yellow-300/50",
+                        )}
+                      >
+                        {/* 태스크명 행 */}
+                        <div className="flex items-center gap-1.5">
+                          <div style={{ width: displayDepth * 12 }} className="shrink-0" />
+
+                          {task.hasChildren ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleTaskCollapse(task.id)}
+                              className="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-accent"
+                              aria-label={isTaskCollapsed ? "하위 업무 펼치기" : "하위 업무 접기"}
+                            >
+                              {isTaskCollapsed ? (
+                                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                              ) : (
+                                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                              )}
+                            </button>
+                          ) : (
+                            <span className="h-5 w-5 shrink-0" />
+                          )}
+
+                          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                            {canEdit ? (
+                              <EditTaskDialog
+                                task={task}
+                                onEditTask={onEditTask}
+                                defaultDepartment={defaultTaskDepartment}
+                                trigger={
+                                  <button
+                                    type="button"
+                                    className={cn(
+                                      "min-w-0 flex-1 truncate text-left text-xs",
+                                      task.hasChildren ? "font-semibold" : "font-normal",
+                                      task.category === "중요"
+                                        ? "text-red-600"
+                                        : task.status === "완료"
+                                          ? "text-muted-foreground/50 line-through"
+                                          : "text-foreground",
+                                    )}
+                                  >
+                                    {task.task}
+                                  </button>
+                                }
+                              />
+                            ) : (
+                              <span
+                                className={cn(
+                                  "min-w-0 flex-1 truncate text-xs",
+                                  task.hasChildren ? "font-semibold" : "font-normal",
+                                  task.category === "중요"
+                                    ? "text-red-600"
+                                    : task.status === "완료"
+                                      ? "text-muted-foreground/50 line-through"
+                                      : "text-foreground",
+                                )}
+                              >
+                                {task.task}
+                              </span>
+                            )}
+
+                            {hasMemo && (
+                              <span
+                                className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-yellow-300 bg-yellow-100 text-yellow-700"
+                                title={`메모: ${task.memo}`}
+                              >
+                                <span className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[4px] border-t-[4px] border-l-transparent border-t-yellow-400" />
+                                <StickyNote className="h-2.5 w-2.5" />
+                              </span>
+                            )}
+                          </div>
+
+                          {/* 상태 뱃지 */}
+                          {canEdit ? (
+                            <div className="shrink-0">
+                              <StatusInlineSelect
+                                value={task.status}
+                                onChange={(value) => updateTaskInline(task, { status: value })}
+                              />
+                            </div>
+                          ) : (
+                            <span
+                              className={cn(
+                                "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold",
+                                barStyle.barClass,
+                                barStyle.textClass,
+                              )}
+                            >
+                              {task.status}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 메타 행: 기간 + 담당자 + 공수 */}
+                        {(dateRange || task.person) && (
+                          <div
+                            className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground"
+                            style={{ paddingLeft: `${displayDepth * 12 + 26}px` }}
+                          >
+                            {dateRange && <span>{dateRange}</span>}
+                            {task.person && <span>· {task.person}</span>}
+                            {Number.isFinite(task.manDays) && task.manDays > 0 && (
+                              <span className="text-muted-foreground/50">{task.manDays}일</span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 미니 간트 바 */}
+                        {miniBar && !task.hasChildren && (
+                          <div className="relative mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border/20">
+                            {todayPct !== null && (
+                              <div
+                                className="absolute bottom-0 top-0 z-10 w-px bg-yellow-400/80"
+                                style={{ left: `${todayPct}%` }}
+                              />
+                            )}
+                            <div
+                              className={cn("absolute bottom-0 top-0 rounded-full opacity-80", barStyle.barClass)}
+                              style={{ left: `${miniBar.leftPct}%`, width: `${miniBar.widthPct}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+              </div>
+            )
+          })
+        )}
+      </div>
     </div>
   )
 }
