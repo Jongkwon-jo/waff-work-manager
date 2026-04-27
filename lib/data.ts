@@ -1,4 +1,4 @@
-﻿export type TaskStatus = "완료" | "진행" | "대기" | "보류" | "미정"
+﻿export type TaskStatus = "완료" | "진행" | "예정" | "보류" | "미정"
 export type TaskCategory = "일반" | "중요" | "정기" | "상시"
 
 export interface Task {
@@ -50,7 +50,7 @@ export function getStatusCounts() {
     total: tasks.length,
     "완료": tasks.filter((t) => t.status === "완료").length,
     "진행": tasks.filter((t) => t.status === "진행").length,
-    "대기": tasks.filter((t) => t.status === "대기").length,
+    "예정": tasks.filter((t) => t.status === "예정").length,
     "보류": tasks.filter((t) => t.status === "보류").length,
     "미정": tasks.filter((t) => t.status === "미정").length,
   }

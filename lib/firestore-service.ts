@@ -32,6 +32,7 @@ const SETTINGS_COLLECTION = "settings"
 const DASHBOARD_PREFERENCES_DOC = "dashboard_preferences"
 const DEPARTMENT_PERSON_SETTINGS_DOC = "department_person_settings"
 const DEPARTMENT_PAGE_PERMISSIONS_DOC = "department_page_permissions"
+const GLOBAL_SCHEDULES_DOC = "global_schedules"
 const USER_PROFILES_COLLECTION = "user_profiles"
 const GANTT_COLLAPSE_STATE_FIELD = "ganttCollapseState"
 const USER_PAGE_PERMISSIONS_COLLECTION = "user_page_permissions"
@@ -89,6 +90,16 @@ export type UserPagePermissionEntry = {
 }
 
 export type DepartmentPagePermissions = Record<DepartmentPersonGroup, UserPagePermissions>
+export type GlobalScheduleType = "holiday" | "annual_leave"
+export type GlobalSchedule = {
+  id: string
+  title: string
+  type: GlobalScheduleType
+  startDate: string
+  endDate: string
+  createdAt?: Date
+  updatedAt?: Date
+}
 
 type HistoryEntityType = "project" | "task" | "batch" | "project_bundle"
 type HistoryActionType = "create" | "update" | "delete" | "batch_update" | "project_delete"
@@ -284,6 +295,65 @@ export function resolveDepartmentPersonGroup(department: string): DepartmentPers
   return "기타"
 }
 
+function normalizeIsoDate(value: unknown): string {
+  if (typeof value !== "string") return ""
+  const text = value.trim()
+  const matched = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!matched) return ""
+  return `${matched[1]}-${matched[2]}-${matched[3]}`
+}
+
+function normalizeGlobalScheduleType(value: unknown): GlobalScheduleType {
+  const text = toStringOrEmpty(value)
+  return text === "annual_leave" ? "annual_leave" : "holiday"
+}
+
+function normalizeGlobalSchedule(raw: unknown, index: number): GlobalSchedule | null {
+  if (!raw || typeof raw !== "object") return null
+  const candidate = raw as Record<string, unknown>
+  const startDate = normalizeIsoDate(candidate.startDate)
+  const endDate = normalizeIsoDate(candidate.endDate)
+  if (!startDate || !endDate) return null
+  const title = toStringOrEmpty(candidate.title) || (normalizeGlobalScheduleType(candidate.type) === "holiday" ? "공휴일" : "전체 연차")
+  const id = toStringOrEmpty(candidate.id) || `schedule-${index + 1}`
+  const createdAtRaw = candidate.createdAt as { toDate?: () => Date } | undefined
+  const updatedAtRaw = candidate.updatedAt as { toDate?: () => Date } | undefined
+  return {
+    id,
+    title,
+    type: normalizeGlobalScheduleType(candidate.type),
+    startDate,
+    endDate,
+    createdAt: createdAtRaw?.toDate?.() || undefined,
+    updatedAt: updatedAtRaw?.toDate?.() || undefined,
+  }
+}
+
+function normalizeGlobalSchedules(raw: unknown): GlobalSchedule[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  const normalized = raw
+    .map((item, index) => normalizeGlobalSchedule(item, index))
+    .filter((item): item is GlobalSchedule => Boolean(item))
+    .filter((item) => {
+      if (seen.has(item.id)) return false
+      seen.add(item.id)
+      return true
+    })
+    .sort((a, b) => {
+      if (a.startDate !== b.startDate) return a.startDate.localeCompare(b.startDate)
+      if (a.endDate !== b.endDate) return a.endDate.localeCompare(b.endDate)
+      return a.title.localeCompare(b.title, "ko")
+    })
+  return normalized
+}
+
+function normalizeTaskStatus(status: string): Task["status"] {
+  const normalized = status.trim()
+  if (normalized === "대기") return "예정"
+  return (normalized as Task["status"]) || "미정"
+}
+
 function normalizeTask(raw: any): Task {
   const parentId =
     toOptionalString(raw?.parentId) ??
@@ -303,7 +373,7 @@ function normalizeTask(raw: any): Task {
     memo: toOptionalString(raw?.memo) ?? toOptionalString(raw?.note) ?? toOptionalString(raw?.notes),
     person: toStringOrEmpty(raw?.person),
     department: toStringOrEmpty(raw?.department),
-    status: (toStringOrEmpty(raw?.status) as Task["status"]) || "미정",
+    status: normalizeTaskStatus(toStringOrEmpty(raw?.status)),
     category: (toStringOrEmpty(raw?.category) as Task["category"]) || "일반",
     startDate: toStringOrEmpty(raw?.startDate) || toStringOrEmpty(raw?.start_date) || todayLabel(),
     endDate: toStringOrEmpty(raw?.endDate) || toStringOrEmpty(raw?.end_date) || todayLabel(),
@@ -661,6 +731,41 @@ export async function saveDepartmentPersonSettings(settings: DepartmentPersonSet
     settingsRef,
     {
       ...normalizeDepartmentPersonSettings(settings),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export function subscribeGlobalSchedules(callback: (schedules: GlobalSchedule[]) => void) {
+  const schedulesRef = doc(db, SETTINGS_COLLECTION, GLOBAL_SCHEDULES_DOC)
+  return onSnapshot(
+    schedulesRef,
+    (snapshot) => {
+      const raw = snapshot.data() as { items?: unknown } | undefined
+      callback(normalizeGlobalSchedules(raw?.items))
+    },
+    (error) => {
+      console.error("Global schedules snapshot error:", error)
+      callback([])
+    },
+  )
+}
+
+export async function saveGlobalSchedules(schedules: GlobalSchedule[]): Promise<void> {
+  const schedulesRef = doc(db, SETTINGS_COLLECTION, GLOBAL_SCHEDULES_DOC)
+  const normalized = normalizeGlobalSchedules(schedules).map((item) => ({
+    id: item.id,
+    title: item.title,
+    type: item.type,
+    startDate: item.startDate,
+    endDate: item.endDate,
+  }))
+
+  await setDoc(
+    schedulesRef,
+    {
+      items: normalized,
       updatedAt: serverTimestamp(),
     },
     { merge: true },

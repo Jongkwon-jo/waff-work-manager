@@ -18,12 +18,13 @@ interface FilterBarProps {
   onSortByChange: (sortBy: ProjectSortType) => void
   departments: string[]
   persons: string[]
+  compact?: boolean
 }
 
 const statusOptions: { value: TaskStatus | "all"; label: string }[] = [
   { value: "all", label: "전체 상태" },
   { value: "진행", label: "진행" },
-  { value: "대기", label: "대기" },
+  { value: "예정", label: "예정" },
   { value: "보류", label: "보류" },
   { value: "미정", label: "미정" },
   { value: "완료", label: "완료" },
@@ -49,6 +50,7 @@ export function FilterBar({
   onSortByChange,
   departments,
   persons,
+  compact = false,
 }: FilterBarProps) {
   const hasActiveFilters =
     statusFilter !== "all" || departmentFilter !== "all" || personFilter !== "all" || searchQuery !== ""
@@ -61,8 +63,8 @@ export function FilterBar({
   }
 
   return (
-    <div className="h-full rounded-lg border border-border bg-card p-3 shadow-sm">
-      <div className="flex h-full flex-col gap-2 lg:flex-row lg:items-center">
+    <div className={compact ? "h-full rounded-lg border border-border bg-card p-2 shadow-sm" : "h-full rounded-lg border border-border bg-card p-3 shadow-sm"}>
+      <div className={compact ? "flex h-full flex-col gap-1.5 lg:flex-row lg:items-center" : "flex h-full flex-col gap-2 lg:flex-row lg:items-center"}>
         <div className="flex shrink-0 items-center gap-2">
           <Filter className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-medium text-card-foreground">필터 및 정렬</span>
@@ -77,7 +79,7 @@ export function FilterBar({
           )}
         </div>
 
-        <div className="relative w-full min-w-0 lg:min-w-[260px] lg:flex-1">
+        <div className={compact ? "relative w-full min-w-0 lg:min-w-[220px] lg:flex-1" : "relative w-full min-w-0 lg:min-w-[260px] lg:flex-1"}>
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
@@ -88,8 +90,8 @@ export function FilterBar({
           />
         </div>
 
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          <div className="flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-2.5">
+        <div className={compact ? "flex items-center gap-1.5 overflow-x-auto pb-1" : "flex items-center gap-2 overflow-x-auto pb-1"}>
+          <div className={compact ? "flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-2" : "flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-2.5"}>
             <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
             <select
               value={sortBy}
@@ -107,7 +109,7 @@ export function FilterBar({
           <select
             value={statusFilter}
             onChange={(e) => onStatusChange(e.target.value as TaskStatus | "all")}
-            className="h-9 shrink-0 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            className={compact ? "h-9 shrink-0 rounded-md border border-input bg-background px-2.5 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring" : "h-9 shrink-0 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"}
           >
             {statusOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -119,7 +121,7 @@ export function FilterBar({
           <select
             value={departmentFilter}
             onChange={(e) => onDepartmentChange(e.target.value)}
-            className="h-9 shrink-0 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            className={compact ? "h-9 shrink-0 rounded-md border border-input bg-background px-2.5 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring" : "h-9 shrink-0 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"}
           >
             <option value="all">전체 부서</option>
             {departments.map((dept) => (
@@ -132,7 +134,7 @@ export function FilterBar({
           <select
             value={personFilter}
             onChange={(e) => onPersonChange(e.target.value)}
-            className="h-9 shrink-0 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            className={compact ? "h-9 shrink-0 rounded-md border border-input bg-background px-2.5 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring" : "h-9 shrink-0 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"}
           >
             <option value="all">전체 담당자</option>
             {persons.map((person) => (

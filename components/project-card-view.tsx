@@ -147,7 +147,7 @@ function ProjectCard({
 }) {
   const completedCount = project.tasks.filter((t) => t.status === "완료").length
   const inProgressCount = project.tasks.filter((t) => t.status === "진행").length
-  const waitingCount = project.tasks.filter((t) => t.status === "대기").length
+  const waitingCount = project.tasks.filter((t) => t.status === "예정").length
   const holdCount = project.tasks.filter((t) => t.status === "보류").length
   const undecidedCount = project.tasks.filter((t) => t.status === "미정").length
   const totalCount = project.tasks.length
@@ -232,7 +232,7 @@ function ProjectCard({
           {waitingCount > 0 && (
             <StatusCount
               icon={<Clock className="h-3 w-3 text-amber-500" />}
-              label="대기"
+              label="예정"
               count={waitingCount}
               color="text-amber-600"
             />
@@ -353,7 +353,7 @@ function ProjectCard({
                             ? "bg-emerald-500"
                             : task.status === "진행"
                               ? "bg-blue-500"
-                              : task.status === "대기"
+                              : task.status === "예정"
                                 ? "bg-amber-500"
                                 : task.status === "보류"
                                   ? "bg-slate-400"

@@ -137,6 +137,12 @@ function todayLabel(): string {
   return `${mm}월 ${dd}일`
 }
 
+function normalizeTaskStatus(status: string): Task["status"] {
+  const normalized = status.trim()
+  if (normalized === "대기") return "예정"
+  return (normalized as Task["status"]) || "미정"
+}
+
 function normalizeTask(raw: any): Task {
   const parentId =
     toOptionalString(raw?.parentId) ??
@@ -156,7 +162,7 @@ function normalizeTask(raw: any): Task {
     memo: toOptionalString(raw?.memo) ?? toOptionalString(raw?.note) ?? toOptionalString(raw?.notes),
     person: toStringOrEmpty(raw?.person),
     department: toStringOrEmpty(raw?.department),
-    status: (toStringOrEmpty(raw?.status) as Task["status"]) || "미정",
+    status: normalizeTaskStatus(toStringOrEmpty(raw?.status)),
     category: (toStringOrEmpty(raw?.category) as Task["category"]) || "일반",
     startDate: toStringOrEmpty(raw?.startDate) || toStringOrEmpty(raw?.start_date) || todayLabel(),
     endDate: toStringOrEmpty(raw?.endDate) || toStringOrEmpty(raw?.end_date) || todayLabel(),

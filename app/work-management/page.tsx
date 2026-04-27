@@ -20,6 +20,7 @@ import {
   subscribeDashboardSortBy,
   saveGanttCollapseState,
   subscribeGanttCollapseState,
+  subscribeGlobalSchedules,
   addHistoryEntry,
   fetchHistoryEntries,
   rollbackHistoryEntry,
@@ -27,6 +28,7 @@ import {
   subscribeCurrentUserProfile,
   saveUserHiddenOwnerOptions,
   type ChangeHistoryEntry,
+  type GlobalSchedule,
 } from "@/lib/firestore-service"
 import { auth } from "@/lib/firebase"
 import { useAuth } from "@/components/auth/auth-provider"
@@ -61,6 +63,7 @@ export default function StrategyWorkManagementPage() {
   const [isGanttCollapseStateReady, setIsGanttCollapseStateReady] = useState(false)
   const [defaultTaskPerson, setDefaultTaskPerson] = useState("")
   const [hiddenOwnerOptions, setHiddenOwnerOptions] = useState<string[]>([])
+  const [globalSchedules, setGlobalSchedules] = useState<GlobalSchedule[]>([])
   const [operationInProgress, setOperationInProgress] = useState<"copy" | "delete" | null>(null)
   const deferredSearchQuery = useDeferredValue(searchQuery)
 
@@ -76,6 +79,15 @@ export default function StrategyWorkManagementPage() {
       setProjectList(data)
       setLoading(false)
     })
+    return () => unsubscribe()
+  }, [user])
+
+  useEffect(() => {
+    if (!user) {
+      setGlobalSchedules([])
+      return
+    }
+    const unsubscribe = subscribeGlobalSchedules(setGlobalSchedules)
     return () => unsubscribe()
   }, [user])
 
@@ -1300,7 +1312,7 @@ export default function StrategyWorkManagementPage() {
       total: allTasksFlat.length,
       "완료": allTasksFlat.filter((t) => t.status === "완료").length,
       "진행": allTasksFlat.filter((t) => t.status === "진행").length,
-      "대기": allTasksFlat.filter((t) => t.status === "대기").length,
+      "예정": allTasksFlat.filter((t) => t.status === "예정").length,
       "보류": allTasksFlat.filter((t) => t.status === "보류").length,
       "미정": allTasksFlat.filter((t) => t.status === "미정").length,
     }
@@ -1526,8 +1538,8 @@ export default function StrategyWorkManagementPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,900px)]">
-              <StatusSummary counts={counts} />
+            <div className={viewMode === "gantt" ? "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,760px)]" : "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,900px)]"}>
+              <StatusSummary counts={counts} showDescriptions={viewMode === "gantt"} />
               <FilterBar
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
@@ -1541,6 +1553,7 @@ export default function StrategyWorkManagementPage() {
                 onSortByChange={handleSortByChange}
                 departments={departments}
                 persons={persons}
+                compact={viewMode === "gantt"}
               />
             </div>
             {projectList.length === 0 ? (
@@ -1567,6 +1580,7 @@ export default function StrategyWorkManagementPage() {
             ) : viewMode === "gantt" ? (
               <GanttView
                 projects={sortedProjects}
+                globalSchedules={globalSchedules}
                 statusFilter={statusFilter}
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}

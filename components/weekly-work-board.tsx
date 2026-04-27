@@ -10,7 +10,9 @@ import { auth } from "@/lib/firebase"
 import { useAuth } from "@/components/auth/auth-provider"
 import {
   DEFAULT_DEPARTMENT_PERSON_SETTINGS,
+  subscribeGlobalSchedules,
   subscribeDepartmentPersonSettings,
+  type GlobalSchedule,
   type DepartmentPersonGroup,
   type DepartmentPersonSettings,
 } from "@/lib/firestore-service"
@@ -51,6 +53,14 @@ type WeekDay = {
   dayOfWeek: number
 }
 
+type WeeklyGlobalScheduleItem = {
+  id: string
+  title: string
+  type: GlobalSchedule["type"]
+  startDate: Date
+  endDate: Date
+}
+
 function flattenLeafTasks(tasks: Task[]): Task[] {
   return tasks.flatMap((task) => {
     const children = task.subTasks || []
@@ -65,6 +75,17 @@ function parseTaskDate(value?: string) {
   if (!matched) return undefined
   const year = new Date().getFullYear()
   return new Date(year, Number(matched[1]) - 1, Number(matched[2]))
+}
+
+function parseIsoDate(value?: string) {
+  if (!value) return undefined
+  const matched = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!matched) return undefined
+  return new Date(Number(matched[1]), Number(matched[2]) - 1, Number(matched[3]))
+}
+
+function toDayKey(date: Date) {
+  return format(date, "yyyy-MM-dd")
 }
 
 function splitPersons(value?: string) {
@@ -131,6 +152,7 @@ export function WeeklyWorkBoard({
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedPerson, setSelectedPerson] = useState("all")
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [globalSchedules, setGlobalSchedules] = useState<GlobalSchedule[]>([])
   const [departmentPersonSettings, setDepartmentPersonSettings] = useState<DepartmentPersonSettings>(
     DEFAULT_DEPARTMENT_PERSON_SETTINGS,
   )
@@ -142,6 +164,11 @@ export function WeeklyWorkBoard({
 
   useEffect(() => {
     const unsubscribe = subscribeDepartmentPersonSettings(setDepartmentPersonSettings)
+    return () => unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = subscribeGlobalSchedules(setGlobalSchedules)
     return () => unsubscribe()
   }, [])
 
@@ -221,6 +248,45 @@ export function WeeklyWorkBoard({
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const selectedProject = selectedProjectId ? projectById.get(selectedProjectId) || null : null
 
+  const weeklyGlobalSchedules = useMemo<WeeklyGlobalScheduleItem[]>(() => {
+    return globalSchedules
+      .map((item) => {
+        const start = parseIsoDate(item.startDate)
+        const end = parseIsoDate(item.endDate)
+        if (!start || !end) return null
+        const from = start <= end ? start : end
+        const to = start <= end ? end : start
+        return {
+          id: item.id,
+          title: item.title,
+          type: item.type,
+          startDate: from,
+          endDate: to,
+        } satisfies WeeklyGlobalScheduleItem
+      })
+      .filter((item): item is WeeklyGlobalScheduleItem => Boolean(item))
+      .filter((item) => item.startDate <= weekEnd && item.endDate >= weekStart)
+      .sort((a, b) => {
+        const byStart = a.startDate.getTime() - b.startDate.getTime()
+        if (byStart !== 0) return byStart
+        return a.title.localeCompare(b.title, "ko")
+      })
+  }, [globalSchedules, weekEnd, weekStart])
+
+  const weeklyGlobalScheduleDayKeys = useMemo(() => {
+    const keys = new Set<string>()
+    weeklyGlobalSchedules.forEach((item) => {
+      const cursor = new Date(item.startDate.getFullYear(), item.startDate.getMonth(), item.startDate.getDate())
+      let guard = 0
+      while (cursor <= item.endDate && guard < 31) {
+        keys.add(toDayKey(cursor))
+        cursor.setDate(cursor.getDate() + 1)
+        guard += 1
+      }
+    })
+    return keys
+  }, [weeklyGlobalSchedules])
+
   const tasksByPerson = useMemo(
     () =>
       Array.from(
@@ -296,6 +362,35 @@ export function WeeklyWorkBoard({
           </div>
         </header>
 
+        {weeklyGlobalSchedules.length > 0 && (
+          <Card className="border-slate-200/80 bg-white/90">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base text-slate-900">공통 일정</CardTitle>
+              <CardDescription>관리자에서 등록한 공휴일 / 전체 연차 일정입니다.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2 pt-0">
+              {weeklyGlobalSchedules.map((item) => (
+                <div key={item.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-2">
+                  <Badge
+                    variant="outline"
+                    className={
+                      item.type === "holiday"
+                        ? "border-rose-200 bg-rose-50 text-rose-700"
+                        : "border-sky-200 bg-sky-50 text-sky-700"
+                    }
+                  >
+                    {item.type === "holiday" ? "공휴일" : "전체 연차"}
+                  </Badge>
+                  <span className="text-sm font-semibold text-slate-900">{item.title}</span>
+                  <span className="text-xs text-slate-600">
+                    {format(item.startDate, "M월 d일", { locale: ko })} - {format(item.endDate, "M월 d일", { locale: ko })}
+                  </span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
         {visibleTasks.length === 0 ? (
           <Card className="border-dashed">
             <CardHeader>
@@ -308,7 +403,12 @@ export function WeeklyWorkBoard({
             <div className="grid grid-cols-[320px_repeat(7,minmax(90px,1fr))] border-b border-slate-200/90">
               <div className="px-4 py-3 text-sm font-semibold text-slate-700">업무 정보</div>
               {weekDays.map((day) => (
-                <div key={day.date.toISOString()} className={`border-l border-slate-200/80 px-2 py-3 text-center ${tone.dayHeader}`}>
+                <div
+                  key={day.date.toISOString()}
+                  className={`border-l border-slate-200/80 px-2 py-3 text-center ${tone.dayHeader} ${
+                    weeklyGlobalScheduleDayKeys.has(toDayKey(day.date)) ? "bg-rose-100/60" : ""
+                  }`}
+                >
                   <div
                     className={`mt-0.5 text-[11px] font-bold ${
                       day.isToday
@@ -382,7 +482,9 @@ export function WeeklyWorkBoard({
                             <div
                               key={`${item.projectId}-${item.task.id}-${item.person}-${day.date.toISOString()}`}
                               className={`relative min-h-[64px] border-l border-slate-200/80 ${
-                                day.isToday
+                                weeklyGlobalScheduleDayKeys.has(toDayKey(day.date))
+                                  ? "bg-rose-100/55"
+                                  : day.isToday
                                   ? "bg-yellow-50/80"
                                   : day.dayOfWeek === 6
                                     ? "bg-blue-50/60"

@@ -332,7 +332,7 @@ export function EditTaskDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="대기">대기</SelectItem>
+                  <SelectItem value="예정">예정</SelectItem>
                   <SelectItem value="진행">진행</SelectItem>
                   <SelectItem value="완료">완료</SelectItem>
                   <SelectItem value="보류">보류</SelectItem>

@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 const statusConfig: Record<TaskStatus, { bg: string; text: string; dot: string }> = {
   "완료": { bg: "bg-slate-600", text: "text-slate-50", dot: "bg-slate-50" },
   "진행": { bg: "bg-blue-500", text: "text-blue-50", dot: "bg-blue-50" },
-  "대기": { bg: "bg-gray-200", text: "text-gray-700", dot: "bg-gray-700" },
+  "예정": { bg: "bg-gray-200", text: "text-gray-700", dot: "bg-gray-700" },
   "보류": { bg: "bg-yellow-200", text: "text-yellow-800", dot: "bg-yellow-800" },
   "미정": { bg: "bg-rose-50", text: "text-rose-600", dot: "bg-rose-600" },
 }

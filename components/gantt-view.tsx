@@ -35,9 +35,11 @@ import {
 import { cn } from "@/lib/utils"
 import { calculateManDaysBetweenDates } from "@/lib/man-days"
 import { ko } from "date-fns/locale"
+import type { GlobalSchedule } from "@/lib/firestore-service"
 
 interface GanttViewProps {
   projects: Project[]
+  globalSchedules?: GlobalSchedule[]
   statusFilter: TaskStatus | "all"
   departmentFilter: string
   personFilter: string
@@ -101,6 +103,7 @@ const LEFT_PANEL_MIN_WIDTH = 380
 const LEFT_PANEL_MAX_WIDTH = 820
 const DETAIL_PANEL_MIN_WIDTH = 700
 const DETAIL_PANEL_MAX_WIDTH = 1100
+const COMPACT_VIEWPORT_BREAKPOINT = 1024
 const HEADER_APPROX_HEIGHT = 110
 const PROJECT_ROW_HEIGHT = 36
 const TASK_ROW_HEIGHT = 36
@@ -129,6 +132,19 @@ function parseDateToDate(dateStr: string): Date | undefined {
   if (!parsed) return undefined
   const year = new Date().getFullYear()
   return new Date(year, parsed.month, parsed.day)
+}
+
+function parseIsoDate(value: string): Date | undefined {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return undefined
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+}
+
+function formatDateKey(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
 }
 
 function formatDateKorean(date: Date) {
@@ -184,7 +200,7 @@ function getStatusBarStyle(status: string): { barClass: string; textClass: strin
   if (normalized === "진행" || normalized.includes("progress")) {
     return { barClass: "bg-blue-500", textClass: "text-blue-50" }
   }
-  if (normalized === "대기" || normalized.includes("wait")) {
+  if (normalized === "예정" || normalized.includes("wait")) {
     return { barClass: "bg-gray-400", textClass: "text-gray-50" }
   }
   if (normalized === "보류" || normalized.includes("hold")) {
@@ -246,6 +262,7 @@ function flattenTasksForExport(tasks: Task[], depth = 0): FlattenedTask[] {
 
 export function GanttView({
   projects,
+  globalSchedules = [],
   statusFilter,
   departmentFilter,
   personFilter,
@@ -273,6 +290,7 @@ export function GanttView({
 }: GanttViewProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const timelineScrollRef = useRef<HTMLDivElement>(null)
+  const stickyHeaderRef = useRef<HTMLDivElement>(null)
   const scrollRafRef = useRef<number | null>(null)
   const pendingScrollTopRef = useRef(0)
   const touchStartXRef = useRef<number | null>(null)
@@ -316,9 +334,14 @@ export function GanttView({
   const [dragOverProjectHeaderId, setDragOverProjectHeaderId] = useState<string | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set())
   const [removedOwnerOptions, setRemovedOwnerOptions] = useState<Set<string>>(new Set())
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === "undefined" ? 1280 : window.innerWidth,
+  )
+  const [stickyBodyTop, setStickyBodyTop] = useState(70)
   const lastCollapseStateSignatureRef = useRef("")
   const pendingPersistCollapseStateSignatureRef = useRef<string | null>(null)
   const hasHydratedCollapseStateRef = useRef(false)
+  const isCompactViewport = viewportWidth < COMPACT_VIEWPORT_BREAKPOINT
 
   const allProjectIds = useMemo(() => projects.map((project) => project.id), [projects])
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
@@ -808,9 +831,11 @@ export function GanttView({
       }),
     ]
     const maxLeftTextWidth = Math.max(...leftTexts.map((text) => getMeasuredTextWidth(text, font)), 200)
+    const leftPanelMinWidth = isCompactViewport ? 240 : LEFT_PANEL_MIN_WIDTH
+    const leftPanelMaxWidth = isCompactViewport ? 360 : LEFT_PANEL_MAX_WIDTH
     const computedLeftPanelWidth = Math.min(
-      LEFT_PANEL_MAX_WIDTH,
-      Math.max(LEFT_PANEL_MIN_WIDTH, Math.ceil(maxLeftTextWidth + 240)),
+      leftPanelMaxWidth,
+      Math.max(leftPanelMinWidth, Math.ceil(maxLeftTextWidth + (isCompactViewport ? 150 : 240))),
     )
 
     const maxCategoryTextWidth = Math.max(
@@ -844,17 +869,19 @@ export function GanttView({
       }).map((text) => getMeasuredTextWidth(text, font)),
     )
 
-    const categoryColumnWidth = Math.max(68, Math.min(96, Math.ceil(maxCategoryTextWidth + 24)))
-    const departmentColumnWidth = Math.max(96, Math.min(210, Math.ceil(maxDepartmentTextWidth + 24)))
-    const ownerColumnWidth = Math.max(170, Math.min(340, Math.ceil(maxOwnerTextWidth + 14)))
-    const startColumnWidth = Math.max(110, Math.ceil(getMeasuredTextWidth("12월 30일", font) + 48))
-    const endColumnWidth = Math.max(110, Math.ceil(getMeasuredTextWidth("12월 30일", font) + 48))
+    const categoryColumnWidth = Math.max(68, Math.min(isCompactViewport ? 84 : 96, Math.ceil(maxCategoryTextWidth + 24)))
+    const departmentColumnWidth = Math.max(96, Math.min(isCompactViewport ? 170 : 210, Math.ceil(maxDepartmentTextWidth + 24)))
+    const ownerColumnWidth = Math.max(130, Math.min(isCompactViewport ? 220 : 340, Math.ceil(maxOwnerTextWidth + 14)))
+    const startColumnWidth = Math.max(96, Math.ceil(getMeasuredTextWidth("12월 30일", font) + 48))
+    const endColumnWidth = Math.max(96, Math.ceil(getMeasuredTextWidth("12월 30일", font) + 48))
     const manDayColumnWidth = Math.max(40, Math.ceil(getMeasuredTextWidth("99.5", font) + 28))
 
+    const detailPanelMinWidth = isCompactViewport ? 520 : DETAIL_PANEL_MIN_WIDTH
+    const detailPanelMaxWidth = isCompactViewport ? 780 : DETAIL_PANEL_MAX_WIDTH
     const computedDetailPanelWidth = Math.min(
-      DETAIL_PANEL_MAX_WIDTH,
+      detailPanelMaxWidth,
       Math.max(
-        DETAIL_PANEL_MIN_WIDTH,
+        detailPanelMinWidth,
         categoryColumnWidth +
           departmentColumnWidth +
           ownerColumnWidth +
@@ -870,7 +897,7 @@ export function GanttView({
       detailPanelWidth: computedDetailPanelWidth,
       detailGridTemplate: `${categoryColumnWidth}px ${departmentColumnWidth}px ${ownerColumnWidth}px ${startColumnWidth}px ${endColumnWidth}px ${manDayColumnWidth}px`,
     }
-  }, [projects, departmentOptions, visibleOwnerOptions])
+  }, [projects, departmentOptions, visibleOwnerOptions, isCompactViewport])
 
   const allDays = useMemo(() => {
     const today = new Date()
@@ -902,6 +929,28 @@ export function GanttView({
     }
     return days
   }, [months])
+
+  const globalSchedulesByDay = useMemo(() => {
+    const map = new Map<string, GlobalSchedule[]>()
+    globalSchedules.forEach((schedule) => {
+      const start = parseIsoDate(schedule.startDate)
+      const end = parseIsoDate(schedule.endDate)
+      if (!start || !end) return
+      const from = start <= end ? start : end
+      const to = start <= end ? end : start
+      const cursor = new Date(from.getFullYear(), from.getMonth(), from.getDate())
+      let guard = 0
+      while (cursor <= to && guard < 730) {
+        const key = formatDateKey(cursor)
+        const list = map.get(key)
+        if (list) list.push(schedule)
+        else map.set(key, [schedule])
+        cursor.setDate(cursor.getDate() + 1)
+        guard += 1
+      }
+    })
+    return map
+  }, [globalSchedules])
 
   const dayIndexByMonthDay = useMemo(() => {
     const map = new Map<string, number>()
@@ -1205,7 +1254,7 @@ export function GanttView({
   }
 
   const timelineWidth = allDays.length * CELL_WIDTH
-  const showDetailColumns = isDetailColumnsOpen
+  const showDetailColumns = !isCompactViewport && isDetailColumnsOpen
   const isAllExpanded = collapsedProjectIds.size === 0 && collapsedTaskIds.size === 0
 
   const syncTimelineScrollLeft = useCallback((nextScrollLeft: number) => {
@@ -1302,22 +1351,55 @@ export function GanttView({
     const updateViewportHeight = () => {
       setViewportHeight((prev) => (prev === container.clientHeight ? prev : container.clientHeight))
     }
+    const updateViewportWidth = () => {
+      const nextWidth = window.innerWidth
+      setViewportWidth((prev) => (prev === nextWidth ? prev : nextWidth))
+    }
 
     pendingScrollTopRef.current = container.scrollTop
     setScrollTop(container.scrollTop)
     updateViewportHeight()
+    updateViewportWidth()
 
     container.addEventListener("scroll", onScroll, { passive: true })
     window.addEventListener("resize", updateViewportHeight)
+    window.addEventListener("resize", updateViewportWidth)
     return () => {
       container.removeEventListener("scroll", onScroll)
       window.removeEventListener("resize", updateViewportHeight)
+      window.removeEventListener("resize", updateViewportWidth)
       if (scrollRafRef.current !== null) {
         window.cancelAnimationFrame(scrollRafRef.current)
         scrollRafRef.current = null
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (!isCompactViewport) return
+    setIsDetailColumnsOpen(false)
+  }, [isCompactViewport])
+
+  useEffect(() => {
+    const stickyHeader = stickyHeaderRef.current
+    if (!stickyHeader) return
+
+    const updateStickyBodyTop = () => {
+      const nextTop = stickyHeader.offsetHeight || 70
+      setStickyBodyTop((prev) => (prev === nextTop ? prev : nextTop))
+    }
+
+    updateStickyBodyTop()
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateStickyBodyTop)
+      return () => window.removeEventListener("resize", updateStickyBodyTop)
+    }
+
+    const observer = new ResizeObserver(updateStickyBodyTop)
+    observer.observe(stickyHeader)
+    return () => observer.disconnect()
+  }, [showDetailColumns, isCompactViewport])
 
   const virtualizedBody = useMemo(() => {
     const overscanPx = VIRTUAL_OVERSCAN_ROWS * TASK_ROW_HEIGHT
@@ -1509,7 +1591,7 @@ export function GanttView({
         onTouchCancel={handleTouchScrollEnd}
       >
         <div className="relative min-w-fit flex flex-col isolate">
-          <div className="sticky top-0 z-40 flex bg-card border-b border-border shadow-sm">
+          <div ref={stickyHeaderRef} className="sticky top-0 z-40 flex bg-card border-b border-border shadow-sm">
             <div
               className="sticky left-0 z-[80] shrink-0 border-r border-border bg-card px-4 py-2.5 flex items-stretch overflow-visible"
               style={{ width: leftPanelWidth }}
@@ -1737,7 +1819,7 @@ export function GanttView({
                     {isAllExpanded ? <ChevronsUp className="h-3.5 w-3.5" /> : <ChevronsDown className="h-3.5 w-3.5" />}
                     {isAllExpanded ? "전체 접기" : "전체 펼치기"}
                   </Button>
-                  {canEdit && (
+                  {canEdit && !isCompactViewport && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1799,9 +1881,18 @@ export function GanttView({
                     <div
                       key={i}
                       style={{ width: CELL_WIDTH }}
+                      title={(() => {
+                        const dayKey = `${d.year}-${String(d.month + 1).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`
+                        const schedules = globalSchedulesByDay.get(dayKey) || []
+                        return schedules.map((item) => item.title).join(", ")
+                      })()}
                       className={cn(
                         "shrink-0 border-r border-border/40 py-1.5 text-center",
                         d.isWeekend && "bg-muted/50",
+                        (() => {
+                          const dayKey = `${d.year}-${String(d.month + 1).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`
+                          return globalSchedulesByDay.has(dayKey)
+                        })() && "bg-rose-100/70",
                         d.isToday && "bg-yellow-100",
                       )}
                     >
@@ -1835,11 +1926,12 @@ export function GanttView({
                     return (
                   <div
                     className={cn(
-                      "sticky top-[70px] z-30 flex min-h-9 border-b border-border",
+                      "sticky z-30 flex min-h-9 border-b border-border",
                       PROJECT_HEADER_ROW_BG_CLASS,
                       isProjectHidden && "opacity-70",
                       dragOverProjectHeaderId === project.id && "ring-2 ring-blue-400/70 ring-inset",
                     )}
+                    style={{ top: stickyBodyTop }}
                     onDragOver={(e) => {
                       if (!canDropOnProjectHeader(project.id)) return
                       e.preventDefault()
@@ -2446,6 +2538,10 @@ export function GanttView({
                                     style={{ left: i * CELL_WIDTH, width: CELL_WIDTH }}
                                   >
                                     {d.isWeekend && <div className="absolute inset-0 bg-muted/35" />}
+                                    {(() => {
+                                      const dayKey = `${d.year}-${String(d.month + 1).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`
+                                      return globalSchedulesByDay.has(dayKey)
+                                    })() && <div className="absolute inset-0 bg-rose-100/55" />}
                                     {d.isToday && (
                                       <div className="absolute inset-0 bg-yellow-400/10 ring-1 ring-yellow-400/30 z-10" />
                                     )}
@@ -2623,7 +2719,7 @@ function StatusInlineSelect({
       ? "bg-slate-700 text-slate-100"
       : value === "진행"
         ? "bg-blue-100 text-blue-700"
-        : value === "대기"
+        : value === "예정"
           ? "bg-gray-100 text-gray-700"
           : value === "보류"
             ? "bg-yellow-100 text-yellow-800"
@@ -2641,7 +2737,7 @@ function StatusInlineSelect({
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="진행">진행</SelectItem>
-        <SelectItem value="대기">대기</SelectItem>
+        <SelectItem value="예정">예정</SelectItem>
         <SelectItem value="보류">보류</SelectItem>
         <SelectItem value="미정">미정</SelectItem>
         <SelectItem value="완료">완료</SelectItem>
@@ -2864,5 +2960,3 @@ function OwnerMultiSelect({
     </Popover>
   )
 }
-
-

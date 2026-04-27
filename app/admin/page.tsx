@@ -19,6 +19,7 @@ import {
   MBTI_TYPES,
   saveDepartmentPagePermissions,
   saveDepartmentPersonSettings,
+  saveGlobalSchedules,
   saveUserDepartment,
   saveUserMbti,
   saveUserPagePermissions,
@@ -26,7 +27,9 @@ import {
   subscribeAllUserPagePermissions,
   subscribeDepartmentPagePermissions,
   subscribeDepartmentPersonSettings,
+  subscribeGlobalSchedules,
   subscribeUserProfiles,
+  type GlobalSchedule,
   type DepartmentPagePermissions,
   type DepartmentPersonGroup,
   type DepartmentPersonSettings,
@@ -47,6 +50,7 @@ type DraftAliasMap = Record<string, string>
 type DraftUserDepartmentMap = Record<string, DepartmentPersonGroup | "none">
 type DraftUserMbtiMap = Record<string, MbtiType | "none">
 type DraftDepartmentPersonMap = Record<DepartmentPersonGroup, string>
+type DraftGlobalSchedule = Pick<GlobalSchedule, "id" | "title" | "type" | "startDate" | "endDate">
 
 const PAGE_PERMISSION_SHORT_LABELS: Record<string, string> = {
   myPage: "마이\n페이지",
@@ -89,6 +93,8 @@ export default function AdminPage() {
   const [savingAll, setSavingAll] = useState(false)
   const [savingDepartmentPersons, setSavingDepartmentPersons] = useState(false)
   const [savingDepartmentPermissions, setSavingDepartmentPermissions] = useState(false)
+  const [draftGlobalSchedules, setDraftGlobalSchedules] = useState<DraftGlobalSchedule[]>([])
+  const [savingGlobalSchedules, setSavingGlobalSchedules] = useState(false)
 
   useEffect(() => {
     if (!isAdmin) return
@@ -97,12 +103,24 @@ export default function AdminPage() {
     const unsubscribePermissions = subscribeAllUserPagePermissions(setPermissionEntries)
     const unsubscribeDepartmentPersons = subscribeDepartmentPersonSettings(setDepartmentPersonSettings)
     const unsubscribeDepartmentPagePermissions = subscribeDepartmentPagePermissions(setDepartmentPagePermissions)
+    const unsubscribeGlobalSchedules = subscribeGlobalSchedules((schedules) => {
+      setDraftGlobalSchedules(
+        schedules.map((item) => ({
+          id: item.id,
+          title: item.title,
+          type: item.type,
+          startDate: item.startDate,
+          endDate: item.endDate,
+        })),
+      )
+    })
 
     return () => {
       unsubscribeProfiles()
       unsubscribePermissions()
       unsubscribeDepartmentPersons()
       unsubscribeDepartmentPagePermissions()
+      unsubscribeGlobalSchedules()
     }
   }, [isAdmin])
 
@@ -297,6 +315,58 @@ export default function AdminPage() {
     }
   }
 
+  const addGlobalScheduleRow = () => {
+    const nextId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `schedule-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+    setDraftGlobalSchedules((prev) => [
+      ...prev,
+      {
+        id: nextId,
+        title: "",
+        type: "holiday",
+        startDate: "",
+        endDate: "",
+      },
+    ])
+  }
+
+  const removeGlobalScheduleRow = (id: string) => {
+    setDraftGlobalSchedules((prev) => prev.filter((item) => item.id !== id))
+  }
+
+  const updateGlobalScheduleRow = (id: string, updates: Partial<DraftGlobalSchedule>) => {
+    setDraftGlobalSchedules((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...updates } : item)),
+    )
+  }
+
+  const handleSaveGlobalSchedules = async () => {
+    const normalized = draftGlobalSchedules
+      .map((item) => ({
+        ...item,
+        title: item.title.trim(),
+        startDate: item.startDate.trim(),
+        endDate: item.endDate.trim(),
+      }))
+      .filter((item) => item.startDate && item.endDate)
+      .map((item) => ({
+        ...item,
+        title: item.title || (item.type === "holiday" ? "공휴일" : "전체 연차"),
+      }))
+
+    setSavingGlobalSchedules(true)
+    try {
+      await saveGlobalSchedules(normalized)
+      toast.success("공휴일/전체 연차 일정이 저장되었습니다.")
+    } catch {
+      toast.error("공휴일/전체 연차 일정 저장에 실패했습니다.")
+    } finally {
+      setSavingGlobalSchedules(false)
+    }
+  }
+
   return (
     <main className="min-h-screen bg-background px-4 py-8 lg:px-10">
       <div className="mx-auto max-w-[1700px] space-y-6">
@@ -391,6 +461,66 @@ export default function AdminPage() {
               >
                 <Save className="h-4 w-4" />
                 {savingDepartmentPermissions ? "저장 중..." : "부서 권한 저장"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">공휴일 / 전체 연차 일정</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-2">
+              {draftGlobalSchedules.length === 0 ? (
+                <p className="text-sm text-muted-foreground">등록된 일정이 없습니다. 아래 버튼으로 추가해 주세요.</p>
+              ) : (
+                draftGlobalSchedules.map((item) => (
+                  <div key={item.id} className="grid gap-2 rounded-md border border-border p-2 md:grid-cols-[130px_minmax(0,1fr)_140px_140px_72px]">
+                    <Select
+                      value={item.type}
+                      onValueChange={(value) =>
+                        updateGlobalScheduleRow(item.id, { type: value as DraftGlobalSchedule["type"] })
+                      }
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="holiday">공휴일</SelectItem>
+                        <SelectItem value="annual_leave">전체 연차</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      value={item.title}
+                      onChange={(event) => updateGlobalScheduleRow(item.id, { title: event.target.value })}
+                      placeholder="예: 설날 연휴 / 전사 연차"
+                    />
+                    <Input
+                      type="date"
+                      value={item.startDate}
+                      onChange={(event) => updateGlobalScheduleRow(item.id, { startDate: event.target.value })}
+                    />
+                    <Input
+                      type="date"
+                      value={item.endDate}
+                      onChange={(event) => updateGlobalScheduleRow(item.id, { endDate: event.target.value })}
+                    />
+                    <Button type="button" variant="outline" onClick={() => removeGlobalScheduleRow(item.id)}>
+                      삭제
+                    </Button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="outline" onClick={addGlobalScheduleRow}>
+                일정 추가
+              </Button>
+              <Button type="button" onClick={() => void handleSaveGlobalSchedules()} disabled={savingGlobalSchedules}>
+                <Save className="h-4 w-4" />
+                {savingGlobalSchedules ? "저장중..." : "일정 저장"}
               </Button>
             </div>
           </CardContent>

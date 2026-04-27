@@ -59,7 +59,7 @@ export function AddTaskDialog({
   const [category, setCategory] = useState<TaskCategory>("일반")
   const [department, setDepartment] = useState(defaultDepartment)
   const [personList, setPersonList] = useState<string[]>(parseListValue(defaultPerson))
-  const [status, setStatus] = useState<TaskStatus>("대기")
+  const [status, setStatus] = useState<TaskStatus>("예정")
   const [manDays, setManDays] = useState("0")
   const [includeWeekends, setIncludeWeekends] = useState(false)
   const [startDate, setStartDate] = useState<Date | undefined>(new Date())
@@ -145,7 +145,7 @@ export function AddTaskDialog({
           ? [departmentPersonSettings[defaultGroup][0]]
           : [],
     )
-    setStatus("대기")
+    setStatus("예정")
     setManDays("0")
     setIncludeWeekends(false)
     setStartDate(new Date())
@@ -319,7 +319,7 @@ export function AddTaskDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="대기">대기</SelectItem>
+                  <SelectItem value="예정">예정</SelectItem>
                   <SelectItem value="진행">진행</SelectItem>
                   <SelectItem value="완료">완료</SelectItem>
                   <SelectItem value="보류">보류</SelectItem>
