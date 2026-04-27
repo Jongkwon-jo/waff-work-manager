@@ -1348,7 +1348,7 @@ export default function FaWorkManagementPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className={viewMode === "gantt" ? "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,760px)]" : "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,900px)]"}>
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
               <StatusSummary counts={counts} showDescriptions={viewMode === "gantt"} />
               <FilterBar
                 searchQuery={searchQuery}
