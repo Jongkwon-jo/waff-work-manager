@@ -2705,6 +2705,8 @@ interface MobileGanttViewProps {
   buildTaskWithAutoManDays: (task: Task, updates: Partial<Task>) => Task
 }
 
+const STATUS_ORDER = ["완료", "진행", "예정", "보류"] as const
+
 function MobileGanttView({
   filteredProjects,
   allDays,
@@ -2730,7 +2732,15 @@ function MobileGanttView({
   buildTaskWithAutoManDays,
 }: MobileGanttViewProps) {
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false)
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+  // 필터로 선택된 프로젝트가 사라지면 목록으로 복귀
+  useEffect(() => {
+    if (selectedProjectId && !filteredProjects.find((p) => p.id === selectedProjectId)) {
+      setSelectedProjectId(null)
+    }
+  }, [filteredProjects, selectedProjectId])
 
   const totalDays = allDays.length
   const todayIdx = allDays.findIndex((d) => d.isToday)
@@ -2766,264 +2776,279 @@ function MobileGanttView({
     [todayIdx, dayIndexByMonthDay],
   )
 
+  // 프로젝트 전체 기간 (태스크 중 가장 이른 시작 ~ 가장 늦은 종료)
+  const getProjectSpan = useCallback(
+    (project: FilteredProject) => {
+      let minIdx = Infinity
+      let maxIdx = -Infinity
+      let minDate = ""
+      let maxDate = ""
+      for (const task of project.tasks) {
+        for (const d of [task.startDate, task.endDate]) {
+          if (!d) continue
+          const parsed = parseDate(d)
+          if (!parsed) continue
+          const idx = dayIndexByMonthDay.get(`${parsed.month}-${parsed.day}`) ?? -1
+          if (idx === -1) continue
+          if (idx < minIdx) { minIdx = idx; minDate = d }
+          if (idx > maxIdx) { maxIdx = idx; maxDate = d }
+        }
+      }
+      if (minIdx === Infinity || !minDate || !maxDate) return null
+      return {
+        startDate: minDate,
+        endDate: maxDate,
+        leftPct: (minIdx / totalDays) * 100,
+        widthPct: Math.max(0.5, ((maxIdx - minIdx + 1) / totalDays) * 100),
+      }
+    },
+    [dayIndexByMonthDay, totalDays],
+  )
+
+  // 프로젝트 내 상태별 태스크 수 (STATUS_ORDER 순)
+  const getStatusCounts = useCallback((project: FilteredProject) => {
+    const raw = new Map<string, number>()
+    for (const task of project.tasks) {
+      raw.set(task.status, (raw.get(task.status) ?? 0) + 1)
+    }
+    const ordered: Array<[string, number]> = []
+    for (const s of STATUS_ORDER) {
+      const count = raw.get(s)
+      if (count) ordered.push([s, count])
+    }
+    for (const [s, count] of raw.entries()) {
+      if (!STATUS_ORDER.includes(s as (typeof STATUS_ORDER)[number])) ordered.push([s, count])
+    }
+    return ordered
+  }, [])
+
   const scrollToToday = useCallback(() => {
     const container = scrollContainerRef.current
     if (!container) return
-    const todayTask = container.querySelector('[data-contains-today="true"]') as HTMLElement | null
-    if (todayTask) todayTask.scrollIntoView({ behavior: "smooth", block: "center" })
+    const el = container.querySelector('[data-contains-today="true"]') as HTMLElement | null
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" })
   }, [])
 
-  const hasTodayTask = filteredProjects.some(
-    (project) =>
-      !collapsedProjectIds.has(project.id) && project.tasks.some((task) => isTaskContainsToday(task)),
-  )
+  const navigateTo = (projectId: string | null) => {
+    setSelectedProjectId(projectId)
+    // 뷰 전환 시 스크롤 위치 초기화 (rAF로 DOM 업데이트 이후 실행)
+    requestAnimationFrame(() => scrollContainerRef.current?.scrollTo(0, 0))
+  }
+
+  const selectedProject = selectedProjectId
+    ? filteredProjects.find((p) => p.id === selectedProjectId) ?? null
+    : null
+
+  const hasTodayTask = selectedProject !== null
+    && selectedProject.tasks.some((task) => isTaskContainsToday(task))
 
   const firstDay = allDays[0]
   const lastDay = allDays[allDays.length - 1]
 
+  // ── 공통: 미니 타임라인 스트립 ──────────────────────────────────────
+  const MiniTimeline = ({ highlightSpan }: { highlightSpan?: { leftPct: number; widthPct: number } | null }) => (
+    <div className="px-3 pb-2 pt-1">
+      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-border/25">
+        {highlightSpan && (
+          <div
+            className="absolute bottom-0 top-0 rounded-full bg-blue-400/35"
+            style={{ left: `${highlightSpan.leftPct}%`, width: `${highlightSpan.widthPct}%` }}
+          />
+        )}
+        {todayPct !== null && (
+          <div
+            className="absolute bottom-0 top-0 z-10 w-0.5 bg-yellow-400"
+            style={{ left: `${todayPct}%` }}
+          />
+        )}
+      </div>
+      <div className="mt-0.5 flex select-none justify-between text-[9px] text-muted-foreground/50">
+        <span>{firstDay ? `${firstDay.month + 1}월` : ""}</span>
+        {todayPct !== null && <span className="font-semibold text-yellow-500">오늘</span>}
+        <span>{lastDay ? `${lastDay.month + 1}월` : ""}</span>
+      </div>
+    </div>
+  )
+
+  // ── 공통: 월 이동 네비게이터 ─────────────────────────────────────────
+  const MonthNav = () => (
+    <div className="flex items-center gap-0.5 rounded-md border border-border bg-background/90 px-1 py-0.5">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-6 w-6"
+        onClick={() => handleDisplayMonthMove(-1)}
+        aria-label="이전 월"
+      >
+        <ChevronLeft className="h-3.5 w-3.5" />
+      </Button>
+      <Popover open={isMonthPickerOpen} onOpenChange={setIsMonthPickerOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-6 min-w-[108px] justify-center px-2 text-[11px] font-semibold"
+          >
+            {displayMonthLabel}
+            <ChevronDown className="ml-0.5 h-3 w-3" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="start">
+          <Calendar
+            mode="single"
+            month={displayMonthDate}
+            onMonthChange={(month) => setDisplayMonthDate(new Date(month.getFullYear(), month.getMonth(), 1))}
+            onSelect={(date) => {
+              if (!date) return
+              setDisplayMonthDate(new Date(date.getFullYear(), date.getMonth(), 1))
+              setIsMonthPickerOpen(false)
+            }}
+            captionLayout="dropdown"
+            locale={ko}
+            formatters={{ formatCaption: (month) => `${month.getFullYear()}년 ${month.getMonth() + 1}월` }}
+            initialFocus
+          />
+        </PopoverContent>
+      </Popover>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-6 w-6"
+        onClick={() => handleDisplayMonthMove(1)}
+        aria-label="다음 월"
+      >
+        <ChevronRight className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  )
+
   return (
     <div className="flex h-[calc(100dvh-200px)] min-h-[400px] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-      {/* 헤더 */}
-      <div className="shrink-0 border-b border-border bg-card px-3 py-2.5 shadow-sm">
-        <div className="flex items-center justify-between gap-2">
-          {/* 월 이동 */}
-          <div className="flex items-center gap-0.5 rounded-md border border-border bg-background/90 px-1 py-0.5">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={() => handleDisplayMonthMove(-1)}
-              aria-label="이전 월"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </Button>
-            <Popover open={isMonthPickerOpen} onOpenChange={setIsMonthPickerOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="h-6 min-w-[108px] justify-center px-2 text-[11px] font-semibold"
-                >
-                  {displayMonthLabel}
-                  <ChevronDown className="ml-0.5 h-3 w-3" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  month={displayMonthDate}
-                  onMonthChange={(month) =>
-                    setDisplayMonthDate(new Date(month.getFullYear(), month.getMonth(), 1))
-                  }
-                  onSelect={(date) => {
-                    if (!date) return
-                    setDisplayMonthDate(new Date(date.getFullYear(), date.getMonth(), 1))
-                    setIsMonthPickerOpen(false)
-                  }}
-                  captionLayout="dropdown"
-                  locale={ko}
-                  formatters={{
-                    formatCaption: (month) => `${month.getFullYear()}년 ${month.getMonth() + 1}월`,
-                  }}
-                  initialFocus
-                />
-              </PopoverContent>
-            </Popover>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={() => handleDisplayMonthMove(1)}
-              aria-label="다음 월"
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </Button>
-          </div>
 
-          <div className="flex items-center gap-1.5">
-            {hasTodayTask && (
-              <Button variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={scrollToToday}>
-                오늘로
-              </Button>
-            )}
-            {canEdit && (
-              <AddProjectDialog
-                onAddProject={onAddProject}
-                trigger={
-                  <Button size="sm" className="h-7 gap-1 px-2 text-[11px]">
-                    <Plus className="h-3.5 w-3.5" />
-                    프로젝트
+      {selectedProject ? (
+        /* ═══════════════════════════════════════════
+           상세 뷰: 선택된 프로젝트의 업무 목록
+           ═══════════════════════════════════════════ */
+        <>
+          {/* 상세 헤더 */}
+          <div className="shrink-0 border-b border-border bg-card shadow-sm">
+            <div className="flex items-center gap-2 px-3 py-2.5">
+              <button
+                type="button"
+                onClick={() => navigateTo(null)}
+                className="flex shrink-0 items-center gap-0.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                목록
+              </button>
+
+              <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+                <ProjectTypeBadge type={selectedProject.type} />
+                <span className="min-w-0 flex-1 truncate text-sm font-bold leading-tight">
+                  {selectedProject.name}
+                </span>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1.5">
+                {hasTodayTask && (
+                  <Button variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={scrollToToday}>
+                    오늘로
                   </Button>
-                }
-              />
-            )}
+                )}
+                {canEdit && (
+                  <AddTaskDialog
+                    projectId={selectedProject.id}
+                    defaultPerson={defaultTaskPerson}
+                    defaultDepartment={defaultTaskDepartment}
+                    onAddTask={handleAddProjectLevelTask}
+                    trigger={
+                      <Button size="sm" className="h-7 gap-1 px-2 text-[11px]">
+                        <Plus className="h-3.5 w-3.5" />
+                        업무 추가
+                      </Button>
+                    }
+                  />
+                )}
+              </div>
+            </div>
+            <MiniTimeline highlightSpan={getProjectSpan(selectedProject)} />
           </div>
-        </div>
 
-        {/* 미니 타임라인 범위 표시 */}
-        <div className="relative mt-2 h-1.5 w-full overflow-hidden rounded-full bg-border/25">
-          {todayPct !== null && (
-            <div
-              className="absolute bottom-0 top-0 w-0.5 z-10 bg-yellow-400"
-              style={{ left: `${todayPct}%` }}
-            />
-          )}
-        </div>
-        <div className="mt-0.5 flex select-none justify-between text-[9px] text-muted-foreground/50">
-          <span>{firstDay ? `${firstDay.month + 1}월` : ""}</span>
-          {todayPct !== null && <span className="font-semibold text-yellow-500">오늘</span>}
-          <span>{lastDay ? `${lastDay.month + 1}월` : ""}</span>
-        </div>
-      </div>
+          {/* 업무 목록 */}
+          <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
+            {selectedProject.tasks.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
+                <span className="text-sm">등록된 업무가 없습니다</span>
+                {canEdit && (
+                  <AddTaskDialog
+                    projectId={selectedProject.id}
+                    defaultPerson={defaultTaskPerson}
+                    defaultDepartment={defaultTaskDepartment}
+                    onAddTask={handleAddProjectLevelTask}
+                    trigger={
+                      <Button size="sm" className="gap-1.5">
+                        <Plus className="h-3.5 w-3.5" />
+                        첫 업무 추가
+                      </Button>
+                    }
+                  />
+                )}
+              </div>
+            ) : (
+              selectedProject.tasks.map((task) => {
+                const displayDepth = Math.min(3, Math.max(0, Math.floor(task.depth)))
+                const depthRowBgClass = getDepthRowBgClass(displayDepth)
+                const barStyle = getStatusBarStyle(task.status)
+                const miniBar = getMiniBarPosition(task.startDate, task.endDate)
+                const hasMemo = Boolean(task.memo?.trim())
+                const isTaskCollapsed = collapsedTaskIds.has(task.id)
+                const containsToday = isTaskContainsToday(task)
+                const dateRange = formatTaskDateRange(task)
 
-      {/* 스크롤 가능한 태스크 목록 */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
-        {filteredProjects.length === 0 ? (
-          <div className="flex h-full items-center justify-center py-12 text-sm text-muted-foreground">
-            표시할 프로젝트가 없습니다
-          </div>
-        ) : (
-          filteredProjects.map((project) => {
-            const isProjectCollapsed = collapsedProjectIds.has(project.id)
-
-            return (
-              <div key={project.id}>
-                {/* 프로젝트 헤더 (sticky) */}
-                <div
-                  className={cn(
-                    "sticky top-0 z-10 flex items-center gap-2 border-b border-border/30 px-3 py-2",
-                    PROJECT_HEADER_ROW_BG_CLASS,
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => toggleProjectCollapse(project.id)}
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-white hover:bg-white/15"
-                    aria-label={isProjectCollapsed ? "프로젝트 펼치기" : "프로젝트 접기"}
+                return (
+                  <div
+                    key={task.id}
+                    data-contains-today={containsToday ? "true" : undefined}
+                    className={cn(
+                      "border-b border-border/25 px-3 py-2.5",
+                      depthRowBgClass,
+                      containsToday && "ring-1 ring-inset ring-yellow-300/50",
+                    )}
                   >
-                    {isProjectCollapsed ? (
-                      <ChevronRight className="h-3.5 w-3.5 text-white" />
-                    ) : (
-                      <ChevronDown className="h-3.5 w-3.5 text-white" />
-                    )}
-                  </button>
+                    {/* 태스크명 행 */}
+                    <div className="flex items-center gap-1.5">
+                      <div style={{ width: displayDepth * 12 }} className="shrink-0" />
 
-                  <ProjectTypeBadge type={project.type} />
-
-                  <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                    {canEdit ? (
-                      <EditProjectDialog
-                        project={project}
-                        onEditProject={onEditProject}
-                        trigger={
-                          <button
-                            type="button"
-                            className="min-w-0 flex-1 truncate text-left text-xs font-bold text-white hover:opacity-80"
-                          >
-                            {project.name}
-                          </button>
-                        }
-                      />
-                    ) : (
-                      <span className="min-w-0 flex-1 truncate text-xs font-bold text-white">
-                        {project.name}
-                      </span>
-                    )}
-                    <span className="shrink-0 text-[10px] text-white/60">{project.tasks.length}개</span>
-                  </div>
-
-                  {canEdit && (
-                    <AddTaskDialog
-                      projectId={project.id}
-                      defaultPerson={defaultTaskPerson}
-                      defaultDepartment={defaultTaskDepartment}
-                      onAddTask={handleAddProjectLevelTask}
-                      trigger={
-                        <Button
+                      {task.hasChildren ? (
+                        <button
                           type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-6 shrink-0 border-white/30 bg-white/10 px-2 text-[10px] text-white hover:bg-white/20 hover:text-white"
+                          onClick={() => toggleTaskCollapse(task.id)}
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-accent"
+                          aria-label={isTaskCollapsed ? "하위 업무 펼치기" : "하위 업무 접기"}
                         >
-                          + 업무
-                        </Button>
-                      }
-                    />
-                  )}
-                </div>
-
-                {/* 태스크 목록 */}
-                {!isProjectCollapsed &&
-                  project.tasks.map((task) => {
-                    const displayDepth = Math.min(3, Math.max(0, Math.floor(task.depth)))
-                    const depthRowBgClass = getDepthRowBgClass(displayDepth)
-                    const barStyle = getStatusBarStyle(task.status)
-                    const miniBar = getMiniBarPosition(task.startDate, task.endDate)
-                    const hasMemo = Boolean(task.memo?.trim())
-                    const isTaskCollapsed = collapsedTaskIds.has(task.id)
-                    const containsToday = isTaskContainsToday(task)
-                    const dateRange = formatTaskDateRange(task)
-
-                    return (
-                      <div
-                        key={task.id}
-                        data-contains-today={containsToday ? "true" : undefined}
-                        className={cn(
-                          "border-b border-border/25 px-3 py-2.5",
-                          depthRowBgClass,
-                          containsToday && "ring-1 ring-inset ring-yellow-300/50",
-                        )}
-                      >
-                        {/* 태스크명 행 */}
-                        <div className="flex items-center gap-1.5">
-                          <div style={{ width: displayDepth * 12 }} className="shrink-0" />
-
-                          {task.hasChildren ? (
-                            <button
-                              type="button"
-                              onClick={() => toggleTaskCollapse(task.id)}
-                              className="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-accent"
-                              aria-label={isTaskCollapsed ? "하위 업무 펼치기" : "하위 업무 접기"}
-                            >
-                              {isTaskCollapsed ? (
-                                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                              ) : (
-                                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                              )}
-                            </button>
+                          {isTaskCollapsed ? (
+                            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                           ) : (
-                            <span className="h-5 w-5 shrink-0" />
+                            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                           )}
+                        </button>
+                      ) : (
+                        <span className="h-5 w-5 shrink-0" />
+                      )}
 
-                          <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                            {canEdit ? (
-                              <EditTaskDialog
-                                task={task}
-                                onEditTask={onEditTask}
-                                defaultDepartment={defaultTaskDepartment}
-                                trigger={
-                                  <button
-                                    type="button"
-                                    className={cn(
-                                      "min-w-0 flex-1 truncate text-left text-xs",
-                                      task.hasChildren ? "font-semibold" : "font-normal",
-                                      task.category === "중요"
-                                        ? "text-red-600"
-                                        : task.status === "완료"
-                                          ? "text-muted-foreground/50 line-through"
-                                          : "text-foreground",
-                                    )}
-                                  >
-                                    {task.task}
-                                  </button>
-                                }
-                              />
-                            ) : (
-                              <span
+                      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                        {canEdit ? (
+                          <EditTaskDialog
+                            task={task}
+                            onEditTask={onEditTask}
+                            defaultDepartment={defaultTaskDepartment}
+                            trigger={
+                              <button
+                                type="button"
                                 className={cn(
-                                  "min-w-0 flex-1 truncate text-xs",
+                                  "min-w-0 flex-1 truncate text-left text-xs",
                                   task.hasChildren ? "font-semibold" : "font-normal",
                                   task.category === "중요"
                                     ? "text-red-600"
@@ -3033,78 +3058,209 @@ function MobileGanttView({
                                 )}
                               >
                                 {task.task}
-                              </span>
+                              </button>
+                            }
+                          />
+                        ) : (
+                          <span
+                            className={cn(
+                              "min-w-0 flex-1 truncate text-xs",
+                              task.hasChildren ? "font-semibold" : "font-normal",
+                              task.category === "중요"
+                                ? "text-red-600"
+                                : task.status === "완료"
+                                  ? "text-muted-foreground/50 line-through"
+                                  : "text-foreground",
                             )}
+                          >
+                            {task.task}
+                          </span>
+                        )}
 
-                            {hasMemo && (
-                              <span
-                                className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-yellow-300 bg-yellow-100 text-yellow-700"
-                                title={`메모: ${task.memo}`}
-                              >
-                                <span className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[4px] border-t-[4px] border-l-transparent border-t-yellow-400" />
-                                <StickyNote className="h-2.5 w-2.5" />
-                              </span>
-                            )}
-                          </div>
+                        {hasMemo && (
+                          <span
+                            className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-yellow-300 bg-yellow-100 text-yellow-700"
+                            title={`메모: ${task.memo}`}
+                          >
+                            <span className="pointer-events-none absolute right-0 top-0 h-0 w-0 border-l-[4px] border-t-[4px] border-l-transparent border-t-yellow-400" />
+                            <StickyNote className="h-2.5 w-2.5" />
+                          </span>
+                        )}
+                      </div>
 
-                          {/* 상태 뱃지 */}
-                          {canEdit ? (
-                            <div className="shrink-0">
-                              <StatusInlineSelect
-                                value={task.status}
-                                onChange={(value) => updateTaskInline(task, { status: value })}
-                              />
-                            </div>
-                          ) : (
+                      {/* 상태 뱃지 */}
+                      {canEdit ? (
+                        <div className="shrink-0">
+                          <StatusInlineSelect
+                            value={task.status}
+                            onChange={(value) => updateTaskInline(task, { status: value })}
+                          />
+                        </div>
+                      ) : (
+                        <span
+                          className={cn(
+                            "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold",
+                            barStyle.barClass,
+                            barStyle.textClass,
+                          )}
+                        >
+                          {task.status}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* 메타 행: 기간 + 담당자 + 공수 */}
+                    {(dateRange || task.person) && (
+                      <div
+                        className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground"
+                        style={{ paddingLeft: `${displayDepth * 12 + 26}px` }}
+                      >
+                        {dateRange && <span>{dateRange}</span>}
+                        {task.person && <span>· {task.person}</span>}
+                        {Number.isFinite(task.manDays) && task.manDays > 0 && (
+                          <span className="text-muted-foreground/50">{task.manDays}일</span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 미니 간트 바 */}
+                    {miniBar && !task.hasChildren && (
+                      <div className="relative mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border/20">
+                        {todayPct !== null && (
+                          <div
+                            className="absolute bottom-0 top-0 z-10 w-px bg-yellow-400/80"
+                            style={{ left: `${todayPct}%` }}
+                          />
+                        )}
+                        <div
+                          className={cn("absolute bottom-0 top-0 rounded-full opacity-80", barStyle.barClass)}
+                          style={{ left: `${miniBar.leftPct}%`, width: `${miniBar.widthPct}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </>
+      ) : (
+        /* ═══════════════════════════════════════════
+           목록 뷰: 프로젝트 카드 리스트
+           ═══════════════════════════════════════════ */
+        <>
+          {/* 목록 헤더 */}
+          <div className="shrink-0 border-b border-border bg-card shadow-sm">
+            <div className="flex items-center justify-between gap-2 px-3 pt-2.5">
+              <MonthNav />
+              {canEdit && (
+                <AddProjectDialog
+                  onAddProject={onAddProject}
+                  trigger={
+                    <Button size="sm" className="h-7 gap-1 px-2 text-[11px]">
+                      <Plus className="h-3.5 w-3.5" />
+                      프로젝트
+                    </Button>
+                  }
+                />
+              )}
+            </div>
+            <MiniTimeline />
+          </div>
+
+          {/* 프로젝트 카드 목록 */}
+          <div className="flex-1 overflow-y-auto p-3">
+            {filteredProjects.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                표시할 프로젝트가 없습니다
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {filteredProjects.map((project) => {
+                  const span = getProjectSpan(project)
+                  const statusCounts = getStatusCounts(project)
+                  const doneCount = project.tasks.filter((t) => t.status === "완료").length
+                  const progressPct =
+                    project.tasks.length > 0 ? Math.round((doneCount / project.tasks.length) * 100) : 0
+
+                  return (
+                    <button
+                      key={project.id}
+                      type="button"
+                      onClick={() => navigateTo(project.id)}
+                      className="w-full rounded-xl border border-border bg-background px-4 py-3 text-left shadow-sm transition-colors hover:bg-accent/5 active:bg-accent/10"
+                    >
+                      {/* 헤더: 타입 뱃지 + 프로젝트명 + 화살표 */}
+                      <div className="flex items-center gap-2">
+                        <ProjectTypeBadge type={project.type} />
+                        <span className="min-w-0 flex-1 truncate text-sm font-bold leading-tight">
+                          {project.name}
+                        </span>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40" />
+                      </div>
+
+                      {/* 상태별 뱃지 + 업무 수 */}
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        {statusCounts.map(([status, count]) => {
+                          const style = getStatusBarStyle(status)
+                          return (
                             <span
+                              key={status}
                               className={cn(
-                                "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold",
-                                barStyle.barClass,
-                                barStyle.textClass,
+                                "rounded-full px-2 py-0.5 text-[9px] font-bold",
+                                style.barClass,
+                                style.textClass,
                               )}
                             >
-                              {task.status}
+                              {status} {count}
+                            </span>
+                          )
+                        })}
+                        {project.tasks.length === 0 && (
+                          <span className="text-[10px] text-muted-foreground/50">업무 없음</span>
+                        )}
+                        <span className="ml-auto text-[10px] text-muted-foreground/60">
+                          {project.tasks.length}개 업무
+                        </span>
+                      </div>
+
+                      {/* 기간 + 진행률 */}
+                      {span && (
+                        <div className="mt-1.5 flex items-center justify-between">
+                          <span className="text-[10px] text-muted-foreground/70">
+                            {span.startDate} ~ {span.endDate}
+                          </span>
+                          {project.tasks.length > 0 && (
+                            <span className="text-[10px] font-semibold text-muted-foreground/70">
+                              {progressPct}% 완료
                             </span>
                           )}
                         </div>
+                      )}
 
-                        {/* 메타 행: 기간 + 담당자 + 공수 */}
-                        {(dateRange || task.person) && (
-                          <div
-                            className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground"
-                            style={{ paddingLeft: `${displayDepth * 12 + 26}px` }}
-                          >
-                            {dateRange && <span>{dateRange}</span>}
-                            {task.person && <span>· {task.person}</span>}
-                            {Number.isFinite(task.manDays) && task.manDays > 0 && (
-                              <span className="text-muted-foreground/50">{task.manDays}일</span>
-                            )}
-                          </div>
-                        )}
-
-                        {/* 미니 간트 바 */}
-                        {miniBar && !task.hasChildren && (
-                          <div className="relative mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border/20">
-                            {todayPct !== null && (
-                              <div
-                                className="absolute bottom-0 top-0 z-10 w-px bg-yellow-400/80"
-                                style={{ left: `${todayPct}%` }}
-                              />
-                            )}
+                      {/* 미니 간트 바 (프로젝트 전체 기간) */}
+                      {span && (
+                        <div className="relative mt-2 h-2 w-full overflow-hidden rounded-full bg-border/20">
+                          {todayPct !== null && (
                             <div
-                              className={cn("absolute bottom-0 top-0 rounded-full opacity-80", barStyle.barClass)}
-                              style={{ left: `${miniBar.leftPct}%`, width: `${miniBar.widthPct}%` }}
+                              className="absolute bottom-0 top-0 z-10 w-px bg-yellow-400/80"
+                              style={{ left: `${todayPct}%` }}
                             />
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
+                          )}
+                          <div
+                            className="absolute bottom-0 top-0 rounded-full bg-blue-500/50"
+                            style={{ left: `${span.leftPct}%`, width: `${span.widthPct}%` }}
+                          />
+                        </div>
+                      )}
+                    </button>
+                  )
+                })}
               </div>
-            )
-          })
-        )}
-      </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }
