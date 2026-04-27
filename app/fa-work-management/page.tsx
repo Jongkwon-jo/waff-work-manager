@@ -1226,7 +1226,7 @@ export default function FaWorkManagementPage() {
                 관리자
               </Link>
             )}
-            <div className="flex overflow-hidden rounded-md border border-border bg-background shadow-sm lg:mr-4">
+            <div className="hidden sm:flex overflow-hidden rounded-md border border-border bg-background shadow-sm lg:mr-4">
               <button
                 onClick={() => setViewMode("gantt")}
                 className={cn(
