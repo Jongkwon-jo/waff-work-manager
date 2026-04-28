@@ -76,12 +76,12 @@ export function StatusSummary({ counts, showDescriptions = false }: StatusSummar
         {items.map((item) => (
           <div
             key={item.key}
-            className="flex min-w-[48px] flex-1 overflow-hidden rounded-md border border-border bg-card"
+            className="flex min-w-[40px] flex-1 overflow-hidden rounded-md border border-border bg-card sm:min-w-[48px]"
           >
             <div className={`w-1 shrink-0 ${item.strip}`} />
-            <div className="min-w-0 px-1.5 py-1">
-              <p className={`text-xs font-semibold leading-none ${item.labelColor}`}>{item.label}</p>
-              <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{item.description}</p>
+            <div className="min-w-0 px-1 py-0.5 sm:px-1.5 sm:py-1">
+              <p className={`text-[9px] font-semibold leading-none sm:text-xs ${item.labelColor}`}>{item.label}</p>
+              <p className="mt-0.5 text-[8px] leading-tight text-muted-foreground sm:text-[10px]">{item.description}</p>
             </div>
           </div>
         ))}
@@ -98,9 +98,9 @@ export function StatusSummary({ counts, showDescriptions = false }: StatusSummar
           className="flex overflow-hidden rounded-md border border-border bg-card"
         >
           <div className={`w-1 shrink-0 ${item.strip}`} />
-          <div className="flex flex-1 flex-col items-center justify-center px-1.5 py-1">
-            <p className="text-xs text-muted-foreground">{item.label}</p>
-            <p className={`text-lg font-bold leading-tight ${item.numColor}`}>
+          <div className="flex flex-1 flex-col items-center justify-center px-1 py-0.5 sm:px-1.5 sm:py-1">
+            <p className="text-[9px] text-muted-foreground sm:text-xs">{item.label}</p>
+            <p className={`text-sm font-bold leading-tight sm:text-lg ${item.numColor}`}>
               {counts[item.key]}
             </p>
           </div>
