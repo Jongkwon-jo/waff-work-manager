@@ -80,8 +80,8 @@ export function StatusSummary({ counts, showDescriptions = false }: StatusSummar
           >
             <div className={`w-0.5 shrink-0 ${item.strip}`} />
             <div className="min-w-0 px-1 py-0.5">
-              <p className={`text-[9px] font-semibold leading-none ${item.labelColor}`}>{item.label}</p>
-              <p className="mt-0.5 text-[8px] leading-tight text-muted-foreground">{item.description}</p>
+              <p className={`text-[10px] font-semibold leading-none ${item.labelColor}`}>{item.label}</p>
+              <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground">{item.description}</p>
             </div>
           </div>
         ))}
@@ -99,8 +99,8 @@ export function StatusSummary({ counts, showDescriptions = false }: StatusSummar
         >
           <div className={`w-0.5 shrink-0 ${item.strip}`} />
           <div className="flex flex-1 flex-col items-center justify-center px-1 py-1">
-            <p className="text-[9px] text-muted-foreground">{item.label}</p>
-            <p className={`text-sm font-bold leading-tight ${item.numColor}`}>
+            <p className="text-[10px] text-muted-foreground">{item.label}</p>
+            <p className={`text-base font-bold leading-tight ${item.numColor}`}>
               {counts[item.key]}
             </p>
           </div>
