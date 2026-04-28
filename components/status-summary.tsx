@@ -72,16 +72,16 @@ export function StatusSummary({ counts, showDescriptions = false }: StatusSummar
   if (showDescriptions) {
     // 간트뷰: 왼쪽 컬러 스트립 + label + description, 컴팩트 크기
     return (
-      <div className="flex h-full gap-1 overflow-x-auto pb-0.5">
+      <div className="flex h-full gap-0.5 overflow-x-auto pb-0.5">
         {items.map((item) => (
           <div
             key={item.key}
-            className="flex min-w-[62px] flex-1 overflow-hidden rounded-md border border-border bg-card"
+            className="flex min-w-[48px] flex-1 overflow-hidden rounded-md border border-border bg-card"
           >
-            <div className={`w-1 shrink-0 ${item.strip}`} />
-            <div className="min-w-0 px-1.5 py-1">
-              <p className={`text-[10px] font-semibold leading-none ${item.labelColor}`}>{item.label}</p>
-              <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground">{item.description}</p>
+            <div className={`w-0.5 shrink-0 ${item.strip}`} />
+            <div className="min-w-0 px-1 py-0.5">
+              <p className={`text-[9px] font-semibold leading-none ${item.labelColor}`}>{item.label}</p>
+              <p className="mt-0.5 text-[8px] leading-tight text-muted-foreground">{item.description}</p>
             </div>
           </div>
         ))}
@@ -91,16 +91,16 @@ export function StatusSummary({ counts, showDescriptions = false }: StatusSummar
 
   // 목록/카드 뷰: 컬러 스트립 + label + 숫자
   return (
-    <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
+    <div className="grid grid-cols-3 gap-1 sm:grid-cols-6">
       {items.map((item) => (
         <div
           key={item.key}
-          className="flex overflow-hidden rounded-lg border border-border bg-card"
+          className="flex overflow-hidden rounded-md border border-border bg-card"
         >
-          <div className={`w-1 shrink-0 ${item.strip}`} />
-          <div className="flex flex-1 flex-col items-center justify-center px-1 py-1.5">
-            <p className="text-[10px] text-muted-foreground">{item.label}</p>
-            <p className={`text-base font-bold leading-tight ${item.numColor}`}>
+          <div className={`w-0.5 shrink-0 ${item.strip}`} />
+          <div className="flex flex-1 flex-col items-center justify-center px-1 py-1">
+            <p className="text-[9px] text-muted-foreground">{item.label}</p>
+            <p className={`text-sm font-bold leading-tight ${item.numColor}`}>
               {counts[item.key]}
             </p>
           </div>

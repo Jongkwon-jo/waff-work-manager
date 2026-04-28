@@ -90,7 +90,7 @@ export function FilterBar({
           />
         </div>
 
-        <div className={compact ? "flex items-center gap-1.5 overflow-x-auto pb-1" : "flex items-center gap-2 overflow-x-auto pb-1"}>
+        <div className={compact ? "flex flex-wrap items-center gap-1.5" : "flex flex-wrap items-center gap-2"}>
           <div className={compact ? "flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-2" : "flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-2.5"}>
             <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
             <select
