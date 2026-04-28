@@ -43,10 +43,12 @@ import { ProjectCardView } from "@/components/project-card-view"
 import { CalendarDays, Building2, Home, List, BarChart3, LayoutGrid, RotateCcw, History, ChevronDown, ChevronRight, Sparkles, LogOut, ShieldCheck, UserRoundSearch } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { toast } from "sonner"
 
 export default function FaWorkManagementPage() {
   const { user, loading: authLoading, isAdmin, pagePermissions } = useAuth()
+  const isMobile = useIsMobile()
   const canEdit = isAdmin || pagePermissions.faWorkManagementEdit
   const [projectList, setProjectList] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
@@ -1130,6 +1132,7 @@ export default function FaWorkManagementPage() {
 
   const today = new Date()
   const formattedDate = `${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일`
+  const shouldHideMobileGanttControls = isMobile && viewMode === "gantt"
 
   const handleLogout = async () => {
     try {
@@ -1226,7 +1229,12 @@ export default function FaWorkManagementPage() {
                 관리자
               </Link>
             )}
-            <div className="hidden sm:flex overflow-hidden rounded-md border border-border bg-background shadow-sm lg:mr-4">
+            <div
+              className={cn(
+                "flex overflow-hidden rounded-md border border-border bg-background shadow-sm lg:mr-4",
+                shouldHideMobileGanttControls && "hidden",
+              )}
+            >
               <button
                 onClick={() => setViewMode("gantt")}
                 className={cn(
@@ -1340,33 +1348,58 @@ export default function FaWorkManagementPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-full px-4 py-6 lg:px-10">
+      <main
+        className={cn(
+          "mx-auto max-w-full px-4 py-6 lg:px-10",
+          viewMode === "gantt" && "px-2 sm:px-3 lg:px-6",
+          viewMode === "gantt" && "py-4",
+          shouldHideMobileGanttControls && "py-3",
+        )}
+      >
         {loading ? (
           <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
             <p className="text-sm text-muted-foreground">데이터를 불러오는 중...</p>
           </div>
         ) : (
-          <div className="space-y-4">
-            <div className="grid gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
-              <StatusSummary counts={counts} showDescriptions={viewMode === "gantt"} />
-              <div className="hidden sm:block">
-              <FilterBar
-                searchQuery={searchQuery}
-                onSearchChange={setSearchQuery}
-                statusFilter={statusFilter}
-                onStatusChange={setStatusFilter}
-                departmentFilter={departmentFilter}
-                onDepartmentChange={setDepartmentFilter}
-                personFilter={personFilter}
-                onPersonChange={setPersonFilter}
-                sortBy={sortBy}
-                onSortByChange={handleSortByChange}
-                departments={departments}
-                persons={persons}
-                compact={viewMode === "gantt"}
-              />
+          <div
+            className={cn(
+              "space-y-4",
+              viewMode === "gantt" && "space-y-2",
+              shouldHideMobileGanttControls && "space-y-1.5",
+            )}
+          >
+            <div
+              className={
+                viewMode === "gantt"
+                  ? shouldHideMobileGanttControls
+                    ? "grid gap-2"
+                    : "grid items-start gap-2 xl:grid-cols-[minmax(420px,max-content)_minmax(0,1fr)]"
+                  : "grid items-start gap-3 xl:grid-cols-[minmax(460px,max-content)_minmax(0,1fr)]"
+              }
+            >
+              <div className="min-w-0">
+                <StatusSummary counts={counts} showDescriptions={viewMode === "gantt"} />
               </div>
+              {!shouldHideMobileGanttControls && (
+                <div className="min-w-0">
+                  <FilterBar
+                    searchQuery={searchQuery}
+                    onSearchChange={setSearchQuery}
+                    statusFilter={statusFilter}
+                    onStatusChange={setStatusFilter}
+                    departmentFilter={departmentFilter}
+                    onDepartmentChange={setDepartmentFilter}
+                    personFilter={personFilter}
+                    onPersonChange={setPersonFilter}
+                    sortBy={sortBy}
+                    onSortByChange={handleSortByChange}
+                    departments={departments}
+                    persons={persons}
+                    compact={viewMode === "gantt"}
+                  />
+                </div>
+              )}
             </div>
             {projectList.length === 0 ? (
               <div className="flex h-[40vh] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 text-center p-8">

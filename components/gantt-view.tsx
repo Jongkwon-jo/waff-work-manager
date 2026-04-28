@@ -1612,7 +1612,7 @@ export function GanttView({
   }
 
   return (
-    <div className="flex h-[calc(100dvh-200px)] min-h-[520px] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+    <div className="flex h-[calc(100dvh-160px)] min-h-[560px] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
       <div
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar touch-pan-y"
@@ -2847,7 +2847,7 @@ function MobileGanttView({
 
   // ── 공통: 미니 타임라인 스트립 ──────────────────────────────────────
   const MiniTimeline = ({ highlightSpan }: { highlightSpan?: { leftPct: number; widthPct: number } | null }) => (
-    <div className="px-3 pb-2 pt-1">
+    <div className="px-3 pb-1.5 pt-0.5">
       <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-border/25">
         {highlightSpan && (
           <div
@@ -2925,7 +2925,7 @@ function MobileGanttView({
   )
 
   return (
-    <div className="flex h-[calc(100dvh-200px)] min-h-[400px] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+    <div className="flex h-[calc(100dvh-160px)] min-h-[440px] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
 
       {selectedProject ? (
         /* ═══════════════════════════════════════════
@@ -2934,7 +2934,7 @@ function MobileGanttView({
         <>
           {/* 상세 헤더 */}
           <div className="shrink-0 border-b border-border bg-card shadow-sm">
-            <div className="flex items-center gap-2 px-3 py-2.5">
+            <div className="flex items-center gap-2 px-3 py-2">
               <button
                 type="button"
                 onClick={() => navigateTo(null)}
@@ -2979,7 +2979,7 @@ function MobileGanttView({
           {/* 업무 목록 */}
           <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
             {selectedProject.tasks.length === 0 ? (
-              <div className="flex h-full flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
+              <div className="flex h-full flex-col items-center justify-center gap-3 py-10 text-muted-foreground">
                 <span className="text-sm">등록된 업무가 없습니다</span>
                 {canEdit && (
                   <AddTaskDialog
@@ -3012,7 +3012,7 @@ function MobileGanttView({
                     key={task.id}
                     data-contains-today={containsToday ? "true" : undefined}
                     className={cn(
-                      "border-b border-border/25 px-3 py-2.5",
+                      "border-b border-border/25 px-3 py-2",
                       depthRowBgClass,
                       containsToday && "ring-1 ring-inset ring-yellow-300/50",
                     )}
@@ -3151,7 +3151,7 @@ function MobileGanttView({
         <>
           {/* 목록 헤더 */}
           <div className="shrink-0 border-b border-border bg-card shadow-sm">
-            <div className="flex items-center justify-between gap-2 px-3 pt-2.5">
+            <div className="flex items-center justify-between gap-2 px-3 pt-2">
               <MonthNav />
               {canEdit && (
                 <AddProjectDialog
@@ -3169,7 +3169,7 @@ function MobileGanttView({
           </div>
 
           {/* 프로젝트 카드 목록 */}
-          <div className="flex-1 overflow-y-auto p-3">
+          <div className="flex-1 overflow-y-auto px-3 py-2">
             {filteredProjects.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 표시할 프로젝트가 없습니다
@@ -3188,7 +3188,7 @@ function MobileGanttView({
                       key={project.id}
                       type="button"
                       onClick={() => navigateTo(project.id)}
-                      className="w-full rounded-xl border border-border bg-background px-4 py-3 text-left shadow-sm transition-colors hover:bg-accent/5 active:bg-accent/10"
+                      className="w-full rounded-xl border border-border bg-background px-4 py-2.5 text-left shadow-sm transition-colors hover:bg-accent/5 active:bg-accent/10"
                     >
                       {/* 헤더: 타입 뱃지 + 프로젝트명 + 화살표 */}
                       <div className="flex items-center gap-2">
