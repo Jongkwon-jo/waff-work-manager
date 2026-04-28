@@ -1226,7 +1226,7 @@ export default function FaWorkManagementPage() {
                 관리자
               </Link>
             )}
-            <div className="flex overflow-hidden rounded-md border border-border bg-background shadow-sm lg:mr-4">
+            <div className="hidden sm:flex overflow-hidden rounded-md border border-border bg-background shadow-sm lg:mr-4">
               <button
                 onClick={() => setViewMode("gantt")}
                 className={cn(
@@ -1348,8 +1348,9 @@ export default function FaWorkManagementPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className={viewMode === "gantt" ? "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,760px)]" : "grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,900px)]"}>
+            <div className="grid gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
               <StatusSummary counts={counts} showDescriptions={viewMode === "gantt"} />
+              <div className="hidden sm:block">
               <FilterBar
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
@@ -1365,6 +1366,7 @@ export default function FaWorkManagementPage() {
                 persons={persons}
                 compact={viewMode === "gantt"}
               />
+              </div>
             </div>
             {projectList.length === 0 ? (
               <div className="flex h-[40vh] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 text-center p-8">
