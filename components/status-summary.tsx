@@ -72,16 +72,16 @@ export function StatusSummary({ counts, showDescriptions = false }: StatusSummar
   if (showDescriptions) {
     // 간트뷰: 왼쪽 컬러 스트립 + label + description, 컴팩트 크기
     return (
-      <div className="flex h-full gap-0.5">
+      <div className="flex items-stretch gap-1">
         {items.map((item) => (
           <div
             key={item.key}
-            className="flex shrink-0 overflow-hidden rounded-md border border-border bg-card"
+            className="flex min-h-[54px] min-w-[82px] shrink-0 overflow-hidden rounded-md border border-border bg-card sm:min-w-[96px]"
           >
             <div className={`w-1 shrink-0 ${item.strip}`} />
-            <div className="px-1.5 py-0.5 sm:px-2 sm:py-1">
-              <p className={`text-[9px] font-semibold leading-none sm:text-xs ${item.labelColor}`}>{item.label}</p>
-              <p className="mt-0.5 text-[8px] leading-tight text-muted-foreground sm:text-[10px]">{item.description}</p>
+            <div className="flex h-full flex-col justify-center px-2 py-1 sm:px-2.5 sm:py-1.5">
+              <p className={`text-[10px] font-semibold leading-none sm:text-xs ${item.labelColor}`}>{item.label}</p>
+              <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground sm:text-[10px]">{item.description}</p>
             </div>
           </div>
         ))}
@@ -91,14 +91,14 @@ export function StatusSummary({ counts, showDescriptions = false }: StatusSummar
 
   // 목록/카드 뷰: 컬러 스트립 + label + 숫자
   return (
-    <div className="flex w-fit gap-1">
+    <div className="flex w-fit items-stretch gap-1">
       {items.map((item) => (
         <div
           key={item.key}
-          className="flex overflow-hidden rounded-md border border-border bg-card"
+          className="flex min-h-[54px] overflow-hidden rounded-md border border-border bg-card"
         >
           <div className={`w-1 shrink-0 ${item.strip}`} />
-          <div className="flex flex-col items-center justify-center px-1.5 py-0.5 sm:px-2 sm:py-1">
+          <div className="flex h-full flex-col items-center justify-center px-1.5 py-0.5 sm:px-2 sm:py-1">
             <p className="text-[9px] text-muted-foreground sm:text-xs">{item.label}</p>
             <p className={`text-sm font-bold leading-tight sm:text-lg ${item.numColor}`}>
               {counts[item.key]}
