@@ -41,7 +41,7 @@ export function AddTaskDialog({
   projectId,
   parentId,
   defaultPerson = "",
-  defaultDepartment = "전략기획",
+  defaultDepartment = "전략",
   onAddTask,
   trigger,
 }: AddTaskDialogProps) {
@@ -208,7 +208,7 @@ export function AddTaskDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="전략기획">전략기획</SelectItem>
+                  <SelectItem value="전략">전략</SelectItem>
                       <SelectItem value="ICT">ICT</SelectItem>
                       <SelectItem value="FA">FA</SelectItem>
                       <SelectItem value="기타">기타</SelectItem>

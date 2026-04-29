@@ -70,5 +70,5 @@ export function getPersonList(): string[] {
 }
 
 export function getDepartmentList(): string[] {
-  return ["전략기획", "ICT", "FA", "기타"]
+  return ["전략", "ICT", "FA", "기타"]
 }
