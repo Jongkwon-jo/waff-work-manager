@@ -1603,7 +1603,7 @@ export default function StrategyWorkManagementPage() {
                 statusFilter={statusFilter}
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
-                defaultTaskDepartment="전략기획"
+              defaultTaskDepartment="전략"
                 searchQuery={deferredSearchQuery}
                 canEdit={canEdit}
                 onAddTask={handleAddTask}
@@ -1619,7 +1619,7 @@ export default function StrategyWorkManagementPage() {
                 statusFilter={statusFilter}
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
-                defaultTaskDepartment="전략기획"
+                defaultTaskDepartment="전략"
                 defaultTaskPerson={defaultTaskPerson}
                 searchQuery={deferredSearchQuery}
                 canEdit={canEdit}

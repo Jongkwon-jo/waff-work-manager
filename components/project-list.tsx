@@ -33,7 +33,7 @@ export function ProjectList({
   statusFilter,
   departmentFilter,
   personFilter,
-  defaultTaskDepartment = "전략기획",
+  defaultTaskDepartment = "전략",
   searchQuery,
   canEdit = true,
   onAddTask,
@@ -277,7 +277,7 @@ export function ProjectList({
 function RecursiveTaskRow({
   task,
   depth,
-  defaultTaskDepartment = "전략기획",
+  defaultTaskDepartment = "전략",
   canEdit = true,
   onEditTask,
   onDeleteTask,

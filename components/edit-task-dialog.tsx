@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Pencil, CalendarIcon, Check, ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -35,6 +35,7 @@ interface EditTaskDialogProps {
   defaultDepartment?: string
   openOnDoubleClick?: boolean
   trigger?: React.ReactNode
+  onOpenChange?: (open: boolean) => void
 }
 
 function parseKoreanDate(value: string): Date | undefined {
@@ -65,9 +66,10 @@ function parseKoreanDate(value: string): Date | undefined {
 export function EditTaskDialog({
   task,
   onEditTask,
-  defaultDepartment = "전략기획",
+  defaultDepartment = "전략",
   openOnDoubleClick = false,
   trigger,
+  onOpenChange,
 }: EditTaskDialogProps) {
   const parseListValue = (value: string): string[] =>
     value
@@ -90,6 +92,12 @@ export function EditTaskDialog({
   const [startDate, setStartDate] = useState<Date | undefined>()
   const [endDate, setEndDate] = useState<Date | undefined>()
   const [departmentPersonSettings, setDepartmentPersonSettings] = useState(DEFAULT_DEPARTMENT_PERSON_SETTINGS)
+  const initializedForCurrentOpenRef = useRef(false)
+
+  const handleDialogOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    onOpenChange?.(nextOpen)
+  }
 
   useEffect(() => {
     const unsubscribe = subscribeDepartmentPersonSettings(setDepartmentPersonSettings)
@@ -106,7 +114,11 @@ export function EditTaskDialog({
   )
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      initializedForCurrentOpenRef.current = false
+      return
+    }
+    if (initializedForCurrentOpenRef.current) return
 
     setTaskName(task.task)
     setCategory(task.category)
@@ -118,6 +130,7 @@ export function EditTaskDialog({
     setIncludeWeekends(false)
     setStartDate(parseKoreanDate(task.startDate))
     setEndDate(parseKoreanDate(task.endDate))
+    initializedForCurrentOpenRef.current = true
   }, [defaultDepartment, open, task])
 
   const formatDate = (date: Date | undefined) => {
@@ -175,7 +188,7 @@ export function EditTaskDialog({
   )
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       {openOnDoubleClick ? (
         <div onDoubleClick={() => setOpen(true)}>
           {triggerNode}
@@ -220,7 +233,7 @@ export function EditTaskDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="전략기획">전략기획</SelectItem>
+                  <SelectItem value="전략">전략</SelectItem>
                     <SelectItem value="ICT">ICT</SelectItem>
                     <SelectItem value="FA">FA</SelectItem>
                     <SelectItem value="기타">기타</SelectItem>

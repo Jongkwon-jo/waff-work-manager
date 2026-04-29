@@ -267,7 +267,7 @@ export function GanttView({
   statusFilter,
   departmentFilter,
   personFilter,
-  defaultTaskDepartment = "전략기획",
+  defaultTaskDepartment = "전략",
   defaultTaskPerson = "",
   searchQuery,
   canEdit = true,
@@ -338,12 +338,33 @@ export function GanttView({
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window === "undefined" ? 1280 : window.innerWidth,
   )
+  const [layoutFrozenViewportWidth, setLayoutFrozenViewportWidth] = useState<number | null>(null)
+  const [activeEditDialogTaskId, setActiveEditDialogTaskId] = useState<string | null>(null)
   const [stickyBodyTop, setStickyBodyTop] = useState(70)
   const lastCollapseStateSignatureRef = useRef("")
   const pendingPersistCollapseStateSignatureRef = useRef<string | null>(null)
   const hasHydratedCollapseStateRef = useRef(false)
-  const isCompactViewport = viewportWidth < COMPACT_VIEWPORT_BREAKPOINT
-  const isMobileViewport = viewportWidth < MOBILE_VIEWPORT_BREAKPOINT
+  const effectiveViewportWidth = layoutFrozenViewportWidth ?? viewportWidth
+  const isCompactViewport = effectiveViewportWidth < COMPACT_VIEWPORT_BREAKPOINT
+  const isMobileViewport = effectiveViewportWidth < MOBILE_VIEWPORT_BREAKPOINT
+
+  const handleEditDialogOpenChange = useCallback(
+    (taskId: string, open: boolean) => {
+      setActiveEditDialogTaskId((prev) => {
+        if (open) return taskId
+        return prev === taskId ? null : prev
+      })
+      if (open) {
+        setLayoutFrozenViewportWidth((prev) => prev ?? viewportWidth)
+      }
+    },
+    [viewportWidth],
+  )
+
+  useEffect(() => {
+    if (activeEditDialogTaskId !== null) return
+    setLayoutFrozenViewportWidth(null)
+  }, [activeEditDialogTaskId])
 
   const allProjectIds = useMemo(() => projects.map((project) => project.id), [projects])
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
@@ -1601,6 +1622,7 @@ export function GanttView({
         onEditProject={onEditProject}
         onEditTask={onEditTask}
         onDeleteTask={onDeleteTask}
+        onEditDialogOpenChange={handleEditDialogOpenChange}
         defaultTaskDepartment={defaultTaskDepartment}
         defaultTaskPerson={defaultTaskPerson}
         handleAddProjectLevelTask={handleAddProjectLevelTask}
@@ -2268,6 +2290,7 @@ export function GanttView({
                                         task={task}
                                         onEditTask={onEditTask}
                                         defaultDepartment={defaultTaskDepartment}
+                                        onOpenChange={(open) => handleEditDialogOpenChange(task.id, open)}
                                         openOnDoubleClick
                                         trigger={
                                           <button
@@ -2338,6 +2361,7 @@ export function GanttView({
                                         task={task}
                                         onEditTask={onEditTask}
                                         defaultDepartment={defaultTaskDepartment}
+                                        onOpenChange={(open) => handleEditDialogOpenChange(task.id, open)}
                                         openOnDoubleClick
                                         trigger={
                                           <button className="min-w-0 flex-1 text-left text-xs font-normal transition-colors hover:text-primary">
@@ -2697,6 +2721,7 @@ interface MobileGanttViewProps {
   onEditProject: (project: Project) => void
   onEditTask: (task: Task) => void
   onDeleteTask: (taskId: string, projectId: string) => void
+  onEditDialogOpenChange: (taskId: string, open: boolean) => void
   defaultTaskDepartment: string
   defaultTaskPerson: string
   handleAddProjectLevelTask: (task: Task) => void
@@ -2724,6 +2749,7 @@ function MobileGanttView({
   onEditProject,
   onEditTask,
   onDeleteTask,
+  onEditDialogOpenChange,
   defaultTaskDepartment,
   defaultTaskPerson,
   handleAddProjectLevelTask,
@@ -3044,6 +3070,7 @@ function MobileGanttView({
                             task={task}
                             onEditTask={onEditTask}
                             defaultDepartment={defaultTaskDepartment}
+                            onOpenChange={(open) => onEditDialogOpenChange(task.id, open)}
                             trigger={
                               <button
                                 type="button"
