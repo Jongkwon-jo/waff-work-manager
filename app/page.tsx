@@ -84,6 +84,16 @@ export default function HomePage() {
       iconBg: "bg-white/60",
     },
     {
+      href: "/ict-work-management/weekly",
+      title: "ICT사업부 주간업무",
+      description: "ICT사업부의 이번 주 업무를 팀과 담당자 기준으로 확인합니다.",
+      icon: CalendarDays,
+      visible: isAdmin || pagePermissions.ictWeeklyWork,
+      tone: "from-cyan-50 via-sky-50/60 to-white",
+      iconColor: "text-cyan-500",
+      iconBg: "bg-white/60",
+    },
+    {
       href: "/gpt-test",
       title: "GPT 테스트",
       description: "벡터 스토어와 채팅 기록 기반으로 문서 질의를 테스트합니다.",

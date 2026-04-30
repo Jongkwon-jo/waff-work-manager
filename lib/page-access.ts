@@ -8,6 +8,7 @@ export const PAGE_PERMISSIONS = [
   { key: "faWorkManagement", label: "FA사업부 업무관리", path: "/fa-work-management" },
   { key: "faWorkManagementEdit", label: "FA사업부 업무관리 수정", path: "/fa-work-management" },
   { key: "faWeeklyWork", label: "FA사업부 주간업무", path: "/fa-work-management/weekly" },
+  { key: "ictWeeklyWork", label: "ICT사업부 주간업무", path: "/ict-work-management/weekly" },
   { key: "gptTest", label: "GPT 테스트", path: "/gpt-test" },
   { key: "mbtiPage", label: "MBTI", path: "/mbti" },
 ] as const
@@ -24,6 +25,7 @@ export const DEFAULT_PAGE_PERMISSIONS: UserPagePermissions = {
   faWorkManagement: true,
   faWorkManagementEdit: true,
   faWeeklyWork: true,
+  ictWeeklyWork: true,
   gptTest: true,
   mbtiPage: true,
 }
@@ -63,6 +65,8 @@ export function normalizePermissions(raw?: Partial<Record<string, unknown>>): Us
         : DEFAULT_PAGE_PERMISSIONS.faWorkManagementEdit,
     faWeeklyWork:
       typeof raw?.faWeeklyWork === "boolean" ? raw.faWeeklyWork : DEFAULT_PAGE_PERMISSIONS.faWeeklyWork,
+    ictWeeklyWork:
+      typeof raw?.ictWeeklyWork === "boolean" ? raw.ictWeeklyWork : DEFAULT_PAGE_PERMISSIONS.ictWeeklyWork,
     gptTest: typeof raw?.gptTest === "boolean" ? raw.gptTest : DEFAULT_PAGE_PERMISSIONS.gptTest,
     mbtiPage: typeof raw?.mbtiPage === "boolean" ? raw.mbtiPage : DEFAULT_PAGE_PERMISSIONS.mbtiPage,
   }
@@ -72,6 +76,7 @@ export function resolvePathToPermissionKey(pathname: string): PagePermissionKey 
   if (pathname.startsWith("/my-page")) return "myPage"
   if (pathname.startsWith("/work-management/weekly")) return "strategyWeeklyWork"
   if (pathname.startsWith("/work-management")) return "strategyWorkManagement"
+  if (pathname.startsWith("/ict-work-management/weekly")) return "ictWeeklyWork"
   if (pathname.startsWith("/fa-work-management/weekly")) return "faWeeklyWork"
   if (pathname.startsWith("/fa-work-management")) return "faWorkManagement"
   if (pathname.startsWith("/gpt-test")) return "gptTest"

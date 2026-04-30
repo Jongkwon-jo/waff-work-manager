@@ -71,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         faWorkManagement: userPermissions.faWorkManagement && userDepartmentPermissions.faWorkManagement,
         faWorkManagementEdit: userPermissions.faWorkManagementEdit && userDepartmentPermissions.faWorkManagementEdit,
         faWeeklyWork: userPermissions.faWeeklyWork && userDepartmentPermissions.faWeeklyWork,
+        ictWeeklyWork: userPermissions.ictWeeklyWork && userDepartmentPermissions.ictWeeklyWork,
         gptTest: userPermissions.gptTest && userDepartmentPermissions.gptTest,
         mbtiPage: userPermissions.mbtiPage && userDepartmentPermissions.mbtiPage,
       })
