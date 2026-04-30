@@ -60,6 +60,7 @@ const PAGE_PERMISSION_SHORT_LABELS: Record<string, string> = {
   faWorkManagement: "FA\n업무관리",
   faWorkManagementEdit: "FA\n업무수정",
   faWeeklyWork: "FA\n주간업무",
+  ictWeeklyWork: "ICT\n주간업무",
   gptTest: "GPT\n테스트",
   mbtiPage: "MBTI",
 }

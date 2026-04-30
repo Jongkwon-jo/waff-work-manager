@@ -11,7 +11,7 @@ export default function StrategyWeeklyPage() {
       homeHref="/"
       managementHref="/work-management"
       subscribeToData={subscribeToData}
-      allowedDepartmentGroups={["전략기획", "ICT", "기타"]}
+      allowedDepartmentGroups={["전략기획"]}
       tone={{
         pageBackground:
           "bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.12),_transparent_30%),linear-gradient(180deg,#f8fbff_0%,#f1f6ff_52%,#ffffff_100%)]",
