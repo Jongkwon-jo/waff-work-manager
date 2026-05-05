@@ -65,6 +65,7 @@ const PAGE_PERMISSION_SHORT_LABELS: Record<string, string> = {
   mbtiPage: "MBTI",
 }
 
+
 export default function AdminPage() {
   const { isAdmin } = useAuth()
   const [profiles, setProfiles] = useState<UserProfile[]>([])
@@ -289,13 +290,57 @@ export default function AdminPage() {
     setSavingDepartmentPersons(true)
 
     try {
-      await saveDepartmentPersonSettings({
+      const nextSettings: DepartmentPersonSettings = {
         ICT: draftDepartmentPersons.ICT.split(",").map((value) => value.trim()).filter(Boolean),
         FA: draftDepartmentPersons.FA.split(",").map((value) => value.trim()).filter(Boolean),
         전략기획: draftDepartmentPersons.전략기획.split(",").map((value) => value.trim()).filter(Boolean),
         기타: draftDepartmentPersons.기타.split(",").map((value) => value.trim()).filter(Boolean),
+      }
+
+      await saveDepartmentPersonSettings(nextSettings)
+
+      const aliasToProfile = new Map<string, UserProfile>()
+      profiles.forEach((profile) => {
+        ;(profile.taskAliases || []).forEach((alias) => {
+          const normalizedAlias = alias.trim()
+          if (!normalizedAlias) return
+          aliasToProfile.set(normalizedAlias, profile)
+        })
       })
-      toast.success("부서별 담당자 설정이 저장되었습니다.")
+
+      const matchedByEmail = new Map<string, DepartmentPersonGroup>()
+      const conflictedAliases: string[] = []
+      const unmatchedAliases: string[] = []
+
+      DEPARTMENT_PERSON_GROUPS.forEach((group) => {
+        nextSettings[group].forEach((alias) => {
+          const profile = aliasToProfile.get(alias)
+          if (!profile) {
+            unmatchedAliases.push(alias)
+            return
+          }
+
+          const prevGroup = matchedByEmail.get(profile.email)
+          if (prevGroup && prevGroup !== group) {
+            conflictedAliases.push(alias)
+            return
+          }
+          matchedByEmail.set(profile.email, group)
+        })
+      })
+
+      await Promise.all(
+        Array.from(matchedByEmail.entries()).map(([email, group]) => saveUserDepartment(email, group)),
+      )
+
+      toast.success(`부서별 담당자 설정이 저장되고 ${matchedByEmail.size}명의 소속 부서가 동기화되었습니다.`)
+
+      if (unmatchedAliases.length > 0) {
+        toast.info(`계정과 매칭되지 않은 이름 ${unmatchedAliases.length}건은 부서 동기화에서 제외되었습니다.`)
+      }
+      if (conflictedAliases.length > 0) {
+        toast.info(`여러 부서에 중복된 이름 ${conflictedAliases.length}건은 첫 매칭 부서만 적용되었습니다.`)
+      }
     } catch {
       toast.error("부서별 담당자 설정 저장에 실패했습니다.")
     } finally {
@@ -564,7 +609,7 @@ export default function AdminPage() {
                   className="shrink-0"
                 >
                   <Users className="h-4 w-4" />
-                  {savingAll ? "저장 중..." : `전체 ${rows.length}명 권한 저장`}
+                  {savingAll ? "저장 중..." : `${rows.length}명 권한 설정`}
                 </Button>
               )}
             </div>
