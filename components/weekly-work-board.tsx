@@ -26,11 +26,12 @@ import { CategoryBadge, ProjectTypeBadge, StatusBadge } from "@/components/statu
 import type { Project, Task } from "@/lib/data"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import { CalendarDays, ChevronLeft, ChevronRight, Home, LogOut, StickyNote, Users } from "lucide-react"
+import { CalendarDays, ChevronLeft, ChevronRight, Home, LogOut, Users } from "lucide-react"
 
 type WeeklyTaskItem = {
   projectId: string
   projectName: string
+  subProjectName: string
   projectType: string
   team: string
   person: string
@@ -66,6 +67,7 @@ type WeeklyGlobalScheduleItem = {
 type ProjectMemoDialogPayload = {
   person: string
   projectName: string
+  subProjectName: string
   memos: string[]
 }
 
@@ -84,11 +86,11 @@ function getWeeklyStatusBarClass(status: Task["status"]) {
   }
 }
 
-function flattenLeafTasks(tasks: Task[]): Task[] {
+function flattenLeafTasksWithAncestors(tasks: Task[], ancestors: Task[] = []): Array<{ task: Task; ancestors: Task[] }> {
   return tasks.flatMap((task) => {
     const children = task.subTasks || []
-    if (children.length === 0) return [task]
-    return flattenLeafTasks(children)
+    if (children.length === 0) return [{ task, ancestors }]
+    return flattenLeafTasksWithAncestors(children, [...ancestors, task])
   })
 }
 
@@ -246,15 +248,16 @@ export function WeeklyWorkBoard({
     return projects
       .filter((project) => !project.isHidden)
       .flatMap((project) =>
-        flattenLeafTasks(project.tasks)
-          .filter((task) => !task.isHidden)
-          .filter((task) => isTaskInCurrentWeek(task, weekStart, weekEnd))
-          .flatMap((task) =>
+        flattenLeafTasksWithAncestors(project.tasks)
+          .filter(({ task }) => !task.isHidden)
+          .filter(({ task }) => isTaskInCurrentWeek(task, weekStart, weekEnd))
+          .flatMap(({ task, ancestors }) =>
             splitPersons(task.person)
               .filter((person) => allowedPersonSet.has(person))
               .map((person) => ({
                 projectId: project.id,
                 projectName: project.name,
+                subProjectName: ancestors[0]?.task || "",
                 projectType: project.type,
                 team: task.department || "기타",
                 person,
@@ -295,18 +298,23 @@ export function WeeklyWorkBoard({
   )
 
   const groupedTasksByPersonProject = useMemo(() => {
-    const personMap = new Map<string, Map<string, { projectName: string; projectType: string; items: WeeklyTaskItem[] }>>()
+    const personMap = new Map<
+      string,
+      Map<string, { projectName: string; subProjectName: string; projectType: string; items: WeeklyTaskItem[] }>
+    >()
     visibleTasks.forEach((item) => {
       if (!personMap.has(item.person)) personMap.set(item.person, new Map())
       const projectMap = personMap.get(item.person)!
-      if (!projectMap.has(item.projectId)) {
-        projectMap.set(item.projectId, {
+      const projectKey = `${item.projectId}::${item.subProjectName || "_root"}`
+      if (!projectMap.has(projectKey)) {
+        projectMap.set(projectKey, {
           projectName: item.projectName,
+          subProjectName: item.subProjectName,
           projectType: item.projectType,
           items: [],
         })
       }
-      projectMap.get(item.projectId)!.items.push(item)
+      projectMap.get(projectKey)!.items.push(item)
     })
 
     return Array.from(personMap.entries())
@@ -317,13 +325,18 @@ export function WeeklyWorkBoard({
           .map(([projectId, project]) => ({
             projectId,
             projectName: project.projectName,
+            subProjectName: project.subProjectName,
             projectType: project.projectType,
             items: project.items.sort((a, b) => {
               if (a.startTime !== b.startTime) return a.startTime - b.startTime
               return a.task.task.localeCompare(b.task.task, "ko")
             }),
           }))
-          .sort((a, b) => a.projectName.localeCompare(b.projectName, "ko")),
+          .sort((a, b) => {
+            const byProject = a.projectName.localeCompare(b.projectName, "ko")
+            if (byProject !== 0) return byProject
+            return a.subProjectName.localeCompare(b.subProjectName, "ko")
+          }),
       }))
   }, [visibleTasks])
 
@@ -505,28 +518,32 @@ export function WeeklyWorkBoard({
                         new Set(project.items.map((item) => item.task.memo?.trim() || "").filter(Boolean)),
                       )
                       return (
-                        <div key={`mobile-${personGroup.person}-${project.projectId}`} className="rounded-xl border border-slate-200 bg-white p-2.5">
-                          <div className="flex items-center justify-between gap-2">
+                        <div key={`mobile-${personGroup.person}-${project.projectId}`} className="rounded-xl border border-slate-200 bg-white p-2">
+                          <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-start gap-1.5">
                                 <ProjectTypeBadge type={project.projectType} />
-                                <span className="truncate text-sm font-semibold text-slate-900">{project.projectName}</span>
+                                <div className="min-w-0">
+                                  <span className="block truncate text-[13px] font-semibold leading-4 text-slate-900">{project.projectName}</span>
+                                  {project.subProjectName && (
+                                    <div className="mt-0.5 truncate text-[10px] leading-4 text-slate-500">하위: {project.subProjectName}</div>
+                                  )}
+                                </div>
                               </div>
-                              <div className="mt-1 text-[11px] text-slate-500">{project.items.length}개 업무</div>
                             </div>
                             {projectMemos.length > 0 && (
                               <button
                                 type="button"
-                                className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-1 text-[10px] font-medium text-amber-700"
+                                className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700"
                                 onClick={() =>
                                   setSelectedProjectMemo({
                                     person: personGroup.person,
                                     projectName: project.projectName,
+                                    subProjectName: project.subProjectName,
                                     memos: projectMemos,
                                   })
                                 }
                               >
-                                <StickyNote className="h-3 w-3" />
                                 메모
                               </button>
                             )}
@@ -685,32 +702,40 @@ export function WeeklyWorkBoard({
                     const projectMemos = Array.from(
                       new Set(project.items.map((item) => item.task.memo?.trim() || "").filter(Boolean)),
                     )
-                    const rowHeight = Math.max(64, project.items.length * 30 + 12)
+                    const rowHeight = Math.max(48, project.items.length * 26 + 8)
                     return (
                       <div key={`${personGroup.person}-${project.projectId}`} className="grid grid-cols-[320px_repeat(7,minmax(90px,1fr))] items-stretch">
-                        <div className="flex px-4 py-1">
-                          <div className={`flex min-h-[64px] w-full flex-col justify-center rounded-xl border px-2 py-1.5 text-left ${tone.taskCard}`}>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <ProjectTypeBadge type={project.projectType} />
+                        <div className="flex px-3 py-0.5">
+                          <div className={`flex min-h-[48px] w-full flex-col justify-center rounded-xl border px-2 py-1 text-left ${tone.taskCard}`}>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="flex items-start gap-1.5">
+                                  <ProjectTypeBadge type={project.projectType} />
+                                  <div className="min-w-0">
+                                    <div className="truncate text-xs font-semibold leading-4 text-slate-900">{project.projectName}</div>
+                                    {project.subProjectName && (
+                                      <div className="mt-0.5 truncate text-[10px] leading-4 text-slate-500">하위: {project.subProjectName}</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
                               {projectMemos.length > 0 && (
                                 <button
                                   type="button"
-                                  className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
+                                  className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
                                   onClick={() =>
                                     setSelectedProjectMemo({
                                       person: personGroup.person,
                                       projectName: project.projectName,
+                                      subProjectName: project.subProjectName,
                                       memos: projectMemos,
                                     })
                                   }
                                 >
-                                  <StickyNote className="h-3 w-3" />
-                                  메모 {projectMemos.length}
+                                  메모
                                 </button>
                               )}
                             </div>
-                            <div className="mt-0.5 text-[13px] font-semibold text-slate-900">{project.projectName}</div>
-                            <div className="mt-0.5 text-[11px] text-slate-500">{project.items.length}개 업무</div>
                           </div>
                         </div>
 
@@ -738,7 +763,7 @@ export function WeeklyWorkBoard({
                               <div
                                 key={`${personGroup.person}-${project.projectId}-${item.task.id}`}
                                 className="pointer-events-none absolute left-0 right-0"
-                                style={{ top: `${8 + index * 30}px`, height: "24px" }}
+                                style={{ top: `${5 + index * 26}px`, height: "20px" }}
                               >
                                 <div
                                   className="pointer-events-none absolute"
@@ -749,7 +774,7 @@ export function WeeklyWorkBoard({
                                 >
                                   <button
                                     type="button"
-                                    className={`pointer-events-auto h-6 w-full rounded-md px-2 text-left text-[11px] font-semibold shadow-sm ${getWeeklyStatusBarClass(item.task.status)}`}
+                                    className={`pointer-events-auto h-5 w-full rounded-md px-2 text-left text-[10px] font-semibold shadow-sm ${getWeeklyStatusBarClass(item.task.status)}`}
                                     onClick={() => setSelectedTaskItem(item)}
                                     title={`${item.task.task} (${item.task.startDate} ~ ${item.task.endDate})`}
                                   >
@@ -783,6 +808,7 @@ export function WeeklyWorkBoard({
                 <DialogTitle>프로젝트 메모</DialogTitle>
                 <DialogDescription>
                   {selectedProjectMemo.person} · {selectedProjectMemo.projectName}
+                  {selectedProjectMemo.subProjectName ? ` · ${selectedProjectMemo.subProjectName}` : ""}
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-4">
@@ -809,6 +835,7 @@ export function WeeklyWorkBoard({
                 <DialogTitle>업무 상세</DialogTitle>
                 <DialogDescription>
                   {selectedTaskItem.person} · {selectedTaskItem.projectName}
+                  {selectedTaskItem.subProjectName ? ` · ${selectedTaskItem.subProjectName}` : ""}
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-3 text-sm">
