@@ -74,6 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ictWeeklyWork: userPermissions.ictWeeklyWork && userDepartmentPermissions.ictWeeklyWork,
         gptTest: userPermissions.gptTest && userDepartmentPermissions.gptTest,
         mbtiPage: userPermissions.mbtiPage && userDepartmentPermissions.mbtiPage,
+        recentChangesWidget:
+          userPermissions.recentChangesWidget && userDepartmentPermissions.recentChangesWidget,
       })
       setPermissionLoading(false)
     }

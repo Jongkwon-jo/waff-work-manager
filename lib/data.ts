@@ -1,6 +1,20 @@
 ﻿export type TaskStatus = "완료" | "진행" | "예정" | "보류" | "미정"
 export type TaskCategory = "일반" | "중요" | "정기" | "상시"
 
+export const EDITABLE_TASK_FIELD_OPTIONS = [
+  { key: "status", label: "상태" },
+  { key: "memo", label: "메모" },
+  { key: "manDays", label: "공수" },
+  { key: "startDate", label: "시작일" },
+  { key: "endDate", label: "종료일" },
+  { key: "task", label: "업무내용(제목)" },
+  { key: "category", label: "구분" },
+  { key: "department", label: "부서" },
+  { key: "person", label: "담당자" },
+] as const
+
+export type EditableTaskField = (typeof EDITABLE_TASK_FIELD_OPTIONS)[number]["key"]
+
 export interface Task {
   id: string
   displayOrder?: number

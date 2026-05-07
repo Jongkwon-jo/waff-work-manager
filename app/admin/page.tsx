@@ -16,10 +16,12 @@ import {
   DEPARTMENT_PERSON_GROUPS,
   DEFAULT_DEPARTMENT_PAGE_PERMISSIONS,
   DEFAULT_DEPARTMENT_PERSON_SETTINGS,
+  DEFAULT_MY_PAGE_EDITABLE_FIELDS,
   MBTI_TYPES,
   saveDepartmentPagePermissions,
   saveDepartmentPersonSettings,
   saveGlobalSchedules,
+  saveMyPageEditableFields,
   saveUserDepartment,
   saveUserMbti,
   saveUserPagePermissions,
@@ -28,15 +30,18 @@ import {
   subscribeDepartmentPagePermissions,
   subscribeDepartmentPersonSettings,
   subscribeGlobalSchedules,
+  subscribeMyPageEditableFields,
   subscribeUserProfiles,
   type GlobalSchedule,
   type DepartmentPagePermissions,
   type DepartmentPersonGroup,
   type DepartmentPersonSettings,
   type MbtiType,
+  type MyPageEditableFieldsSettings,
   type UserPagePermissionEntry,
   type UserProfile,
 } from "@/lib/firestore-service"
+import { EDITABLE_TASK_FIELD_OPTIONS, type EditableTaskField } from "@/lib/data"
 import {
   DEFAULT_PAGE_PERMISSIONS,
   PAGE_PERMISSIONS,
@@ -63,6 +68,7 @@ const PAGE_PERMISSION_SHORT_LABELS: Record<string, string> = {
   ictWeeklyWork: "ICT\n주간 업무로드현황",
   gptTest: "GPT\n테스트",
   mbtiPage: "MBTI",
+  recentChangesWidget: "최근 변경\n위젯",
 }
 
 
@@ -97,6 +103,10 @@ export default function AdminPage() {
   const [savingDepartmentPermissions, setSavingDepartmentPermissions] = useState(false)
   const [draftGlobalSchedules, setDraftGlobalSchedules] = useState<DraftGlobalSchedule[]>([])
   const [savingGlobalSchedules, setSavingGlobalSchedules] = useState(false)
+  const [draftMyPageEditableFields, setDraftMyPageEditableFields] = useState<MyPageEditableFieldsSettings>([
+    ...DEFAULT_MY_PAGE_EDITABLE_FIELDS,
+  ])
+  const [savingMyPageEditableFields, setSavingMyPageEditableFields] = useState(false)
 
   useEffect(() => {
     if (!isAdmin) return
@@ -116,6 +126,7 @@ export default function AdminPage() {
         })),
       )
     })
+    const unsubscribeMyPageEditableFields = subscribeMyPageEditableFields(setDraftMyPageEditableFields)
 
     return () => {
       unsubscribeProfiles()
@@ -123,6 +134,7 @@ export default function AdminPage() {
       unsubscribeDepartmentPersons()
       unsubscribeDepartmentPagePermissions()
       unsubscribeGlobalSchedules()
+      unsubscribeMyPageEditableFields()
     }
   }, [isAdmin])
 
@@ -388,6 +400,25 @@ export default function AdminPage() {
     )
   }
 
+  const handleToggleMyPageEditableField = (field: EditableTaskField, checked: boolean) => {
+    setDraftMyPageEditableFields((prev) => {
+      const without = prev.filter((value) => value !== field)
+      return checked ? [...without, field] : without
+    })
+  }
+
+  const handleSaveMyPageEditableFields = async () => {
+    setSavingMyPageEditableFields(true)
+    try {
+      await saveMyPageEditableFields(draftMyPageEditableFields)
+      toast.success("마이페이지 편집 가능 필드가 저장되었습니다.")
+    } catch {
+      toast.error("마이페이지 편집 가능 필드 저장에 실패했습니다.")
+    } finally {
+      setSavingMyPageEditableFields(false)
+    }
+  }
+
   const handleSaveGlobalSchedules = async () => {
     const normalized = draftGlobalSchedules
       .map((item) => ({
@@ -508,6 +539,56 @@ export default function AdminPage() {
               >
                 <Save className="h-4 w-4" />
                 {savingDepartmentPermissions ? "저장 중..." : "부서 권한 저장"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">마이페이지 업무 수정 범위</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              사용자가 마이페이지에서 본인 담당 업무를 수정할 때 편집 가능한 필드를 선택합니다. 체크 해제된 필드는 자물쇠로 잠겨 관리자만 수정할 수 있습니다.
+            </p>
+            <div className="grid gap-2 md:grid-cols-3">
+              {EDITABLE_TASK_FIELD_OPTIONS.map((option) => {
+                const checked = draftMyPageEditableFields.includes(option.key)
+                return (
+                  <label
+                    key={option.key}
+                    className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
+                  >
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={(value) => handleToggleMyPageEditableField(option.key, value === true)}
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                )
+              })}
+            </div>
+            {draftMyPageEditableFields.length === 0 && (
+              <p className="text-xs text-amber-600">
+                체크된 필드가 없으면 마이페이지의 "수정" 버튼이 표시되지 않습니다.
+              </p>
+            )}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDraftMyPageEditableFields([...DEFAULT_MY_PAGE_EDITABLE_FIELDS])}
+              >
+                기본값으로 되돌리기
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleSaveMyPageEditableFields()}
+                disabled={savingMyPageEditableFields}
+              >
+                <Save className="h-4 w-4" />
+                {savingMyPageEditableFields ? "저장중..." : "수정 범위 저장"}
               </Button>
             </div>
           </CardContent>

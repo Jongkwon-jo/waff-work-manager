@@ -30,6 +30,7 @@ import {
   type ChangeHistoryEntry,
   type GlobalSchedule,
 } from "@/lib/firestore-service"
+import { RecentChangesWidget } from "@/components/recent-changes-widget"
 import { auth } from "@/lib/firebase"
 import { useAuth } from "@/components/auth/auth-provider"
 import { LoginForm } from "@/components/auth/login-form"
@@ -203,6 +204,7 @@ export default function StrategyWorkManagementPage() {
       await addHistoryEntry({
         ...entry,
         actorEmail: user.email,
+        source: entry.source || "work-management",
       })
       if (options?.refreshHistory ?? true) {
         await loadHistory()
@@ -1592,6 +1594,17 @@ export default function StrategyWorkManagementPage() {
                 </div>
               )}
             </div>
+            {(isAdmin || pagePermissions.recentChangesWidget) && (
+              <RecentChangesWidget
+                loadEntries={() => fetchHistoryEntries(20)}
+                rollbackEntry={async (entry) => {
+                  await rollbackHistoryEntry(entry as ChangeHistoryEntry)
+                  await deleteHistoryEntry(entry.id)
+                }}
+                projects={projectList}
+                currentUserEmail={user?.email || undefined}
+              />
+            )}
             {projectList.length === 0 ? (
               <div className="flex h-[40vh] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 text-center p-8">
                 <Building2 className="h-10 w-10 text-muted-foreground/50 mb-4" />

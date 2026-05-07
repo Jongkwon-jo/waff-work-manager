@@ -11,6 +11,7 @@ export const PAGE_PERMISSIONS = [
   { key: "ictWeeklyWork", label: "ICT사업부 주간 업무로드현황", path: "/ict-work-management/weekly" },
   { key: "gptTest", label: "GPT 테스트", path: "/gpt-test" },
   { key: "mbtiPage", label: "MBTI", path: "/mbti" },
+  { key: "recentChangesWidget", label: "최근 사용자 변경 위젯", path: "" },
 ] as const
 
 export type PagePermissionKey = (typeof PAGE_PERMISSIONS)[number]["key"]
@@ -28,6 +29,7 @@ export const DEFAULT_PAGE_PERMISSIONS: UserPagePermissions = {
   ictWeeklyWork: true,
   gptTest: true,
   mbtiPage: true,
+  recentChangesWidget: false,
 }
 
 export function normalizeEmail(email: string) {
@@ -69,6 +71,10 @@ export function normalizePermissions(raw?: Partial<Record<string, unknown>>): Us
       typeof raw?.ictWeeklyWork === "boolean" ? raw.ictWeeklyWork : DEFAULT_PAGE_PERMISSIONS.ictWeeklyWork,
     gptTest: typeof raw?.gptTest === "boolean" ? raw.gptTest : DEFAULT_PAGE_PERMISSIONS.gptTest,
     mbtiPage: typeof raw?.mbtiPage === "boolean" ? raw.mbtiPage : DEFAULT_PAGE_PERMISSIONS.mbtiPage,
+    recentChangesWidget:
+      typeof raw?.recentChangesWidget === "boolean"
+        ? raw.recentChangesWidget
+        : DEFAULT_PAGE_PERMISSIONS.recentChangesWidget,
   }
 }
 

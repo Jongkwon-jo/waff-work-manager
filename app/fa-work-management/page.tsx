@@ -32,6 +32,7 @@ import {
   subscribeGlobalSchedules,
   type GlobalSchedule,
 } from "@/lib/firestore-service"
+import { RecentChangesWidget } from "@/components/recent-changes-widget"
 import { auth } from "@/lib/firebase"
 import { useAuth } from "@/components/auth/auth-provider"
 import { LoginForm } from "@/components/auth/login-form"
@@ -191,7 +192,11 @@ export default function FaWorkManagementPage() {
 
   const recordHistory = async (entry: Omit<ChangeHistoryEntry, "id" | "createdAt">) => {
     try {
-      await addHistoryEntry(entry)
+      await addHistoryEntry({
+        ...entry,
+        actorEmail: entry.actorEmail || user?.email || undefined,
+        source: entry.source || "fa-work-management",
+      })
       await loadHistory()
     } catch (error) {
       console.error("History write failed:", error)
@@ -1402,6 +1407,17 @@ export default function FaWorkManagementPage() {
                 </div>
               )}
             </div>
+            {(isAdmin || pagePermissions.recentChangesWidget) && (
+              <RecentChangesWidget
+                loadEntries={() => fetchHistoryEntries(20)}
+                rollbackEntry={async (entry) => {
+                  await rollbackHistoryEntry(entry as ChangeHistoryEntry)
+                  await deleteHistoryEntry(entry.id)
+                }}
+                projects={projectList}
+                currentUserEmail={user?.email || undefined}
+              />
+            )}
             {projectList.length === 0 ? (
               <div className="flex h-[40vh] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 text-center p-8">
                 <Building2 className="h-10 w-10 text-muted-foreground/50 mb-4" />

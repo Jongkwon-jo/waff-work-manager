@@ -15,7 +15,8 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore"
-import type { Project, Task } from "./data"
+import type { EditableTaskField, Project, Task } from "./data"
+import { EDITABLE_TASK_FIELD_OPTIONS } from "./data"
 import {
   DEFAULT_PAGE_PERMISSIONS,
   normalizeEmail,
@@ -33,6 +34,7 @@ const DASHBOARD_PREFERENCES_DOC = "dashboard_preferences"
 const DEPARTMENT_PERSON_SETTINGS_DOC = "department_person_settings"
 const DEPARTMENT_PAGE_PERMISSIONS_DOC = "department_page_permissions"
 const GLOBAL_SCHEDULES_DOC = "global_schedules"
+const MY_PAGE_EDITABLE_FIELDS_DOC = "my_page_editable_fields"
 const USER_PROFILES_COLLECTION = "user_profiles"
 const GANTT_COLLAPSE_STATE_FIELD = "ganttCollapseState"
 const USER_PAGE_PERMISSIONS_COLLECTION = "user_page_permissions"
@@ -114,6 +116,8 @@ type HistoryBatchItem = {
   after?: Record<string, unknown>
 }
 
+export type HistorySource = "my-page" | "work-management" | "fa-work-management" | "gantt" | "other"
+
 export interface ChangeHistoryEntry {
   id: string
   entityType: HistoryEntityType
@@ -125,9 +129,50 @@ export interface ChangeHistoryEntry {
   after?: Record<string, unknown>
   batch?: HistoryBatchItem[]
   createdAt?: Date
+  source?: HistorySource
 }
 
 export type HistoryEntryInput = Omit<ChangeHistoryEntry, "id" | "createdAt">
+
+export type MyPageEditableFieldsSettings = EditableTaskField[]
+
+export const DEFAULT_MY_PAGE_EDITABLE_FIELDS: MyPageEditableFieldsSettings = [
+  "status",
+  "memo",
+  "manDays",
+  "startDate",
+  "endDate",
+]
+
+const ALL_EDITABLE_FIELD_KEYS: ReadonlySet<EditableTaskField> = new Set(
+  EDITABLE_TASK_FIELD_OPTIONS.map((option) => option.key),
+)
+
+function normalizeMyPageEditableFields(raw: unknown): MyPageEditableFieldsSettings {
+  if (!Array.isArray(raw)) return [...DEFAULT_MY_PAGE_EDITABLE_FIELDS]
+  const collected: EditableTaskField[] = []
+  raw.forEach((value) => {
+    if (typeof value !== "string") return
+    if (!ALL_EDITABLE_FIELD_KEYS.has(value as EditableTaskField)) return
+    if (collected.includes(value as EditableTaskField)) return
+    collected.push(value as EditableTaskField)
+  })
+  return collected
+}
+
+export function isUserOwnerOfTask(task: Pick<Task, "person">, aliases: string[]): boolean {
+  const person = (task.person || "").trim().toLowerCase()
+  if (!person) return false
+  const tokens = person
+    .split(",")
+    .map((token) => token.trim())
+    .filter(Boolean)
+  return aliases.some((rawAlias) => {
+    const alias = rawAlias.trim().toLowerCase()
+    if (!alias) return false
+    return tokens.includes(alias) || person.includes(alias)
+  })
+}
 
 export const DEFAULT_DEPARTMENT_PERSON_SETTINGS: DepartmentPersonSettings = {
   ICT: [],
@@ -579,6 +624,7 @@ export async function fetchHistoryEntries(limitCount = 30, actorEmail?: string):
       after: (raw?.after as Record<string, unknown> | undefined) || undefined,
       batch: (raw?.batch as HistoryBatchItem[] | undefined) || undefined,
       createdAt: raw?.createdAt?.toDate?.() || undefined,
+      source: (toOptionalString(raw?.source) as HistorySource | undefined) || undefined,
     }
   })
 
@@ -735,6 +781,37 @@ export async function saveDepartmentPersonSettings(settings: DepartmentPersonSet
     settingsRef,
     {
       ...normalizeDepartmentPersonSettings(settings),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export function subscribeMyPageEditableFields(callback: (fields: MyPageEditableFieldsSettings) => void) {
+  const settingsRef = doc(db, SETTINGS_COLLECTION, MY_PAGE_EDITABLE_FIELDS_DOC)
+  return onSnapshot(
+    settingsRef,
+    (snapshot) => {
+      const raw = snapshot.data() as { fields?: unknown } | undefined
+      if (!raw || !Array.isArray(raw.fields)) {
+        callback([...DEFAULT_MY_PAGE_EDITABLE_FIELDS])
+        return
+      }
+      callback(normalizeMyPageEditableFields(raw.fields))
+    },
+    (error) => {
+      console.error("My-page editable fields snapshot error:", error)
+      callback([...DEFAULT_MY_PAGE_EDITABLE_FIELDS])
+    },
+  )
+}
+
+export async function saveMyPageEditableFields(fields: MyPageEditableFieldsSettings): Promise<void> {
+  const settingsRef = doc(db, SETTINGS_COLLECTION, MY_PAGE_EDITABLE_FIELDS_DOC)
+  await setDoc(
+    settingsRef,
+    {
+      fields: normalizeMyPageEditableFields(fields),
       updatedAt: serverTimestamp(),
     },
     { merge: true },
