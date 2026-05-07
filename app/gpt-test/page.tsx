@@ -796,6 +796,7 @@ export default function GptTestPage() {
         <div className="rounded-[28px] border border-white/70 bg-white/75 p-6 shadow-[0_20px_80px_rgba(15,23,42,0.08)] backdrop-blur">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">WorkHub</p>
               <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-700">OpenAI File Search</p>
               <h1 className="mt-2 text-3xl font-bold tracking-tight lg:text-4xl">GPT 테스트 채팅</h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">

@@ -1362,7 +1362,8 @@ export default function StrategyWorkManagementPage() {
               />
             </div>
             <div>
-              <h1 className="text-base font-bold text-card-foreground leading-tight">{"전략사업부 업무관리"}</h1>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">WorkHub</p>
+              <h1 className="text-base font-bold text-card-foreground leading-tight">{"전략기획 사업부 스케줄"}</h1>
             </div>
           </div>
           <div className="relative flex w-full flex-wrap items-center gap-2 text-xs text-muted-foreground lg:w-auto lg:flex-nowrap">

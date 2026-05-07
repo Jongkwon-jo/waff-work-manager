@@ -58,6 +58,7 @@ export type MyPageTaskPreference = {
   priority: MyPageTaskPriority
   important: boolean
   order?: number
+  deleted?: boolean
 }
 export type MyPagePersonalTask = {
   id: string
@@ -77,6 +78,8 @@ export type UserProfile = {
   hiddenOwnerOptions?: string[]
   myPageTaskPreferences?: Record<string, MyPageTaskPreference>
   myPagePersonalTasks?: MyPagePersonalTask[]
+  myPageMemo?: string
+  myPageCollapsedProjectGroups?: Record<string, boolean>
   department?: DepartmentPersonGroup
   mbti?: MbtiType
 }
@@ -195,6 +198,7 @@ function normalizeMyPageTaskPreferences(raw: unknown): Record<string, MyPageTask
       priority,
       important: Boolean(candidate.important),
       order: toNumberOr(candidate.order, Number.MAX_SAFE_INTEGER),
+      deleted: toBooleanOr(candidate.deleted, false),
     }
   })
   return result
@@ -800,6 +804,8 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
             hiddenOwnerOptions?: unknown
             myPageTaskPreferences?: unknown
             myPagePersonalTasks?: unknown
+            myPageMemo?: unknown
+            myPageCollapsedProjectGroups?: unknown
             mbti?: unknown
           }
           return {
@@ -817,6 +823,16 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
               : [],
             myPageTaskPreferences: normalizeMyPageTaskPreferences(raw?.myPageTaskPreferences),
             myPagePersonalTasks: normalizeMyPagePersonalTasks(raw?.myPagePersonalTasks),
+            myPageMemo: toOptionalString(raw?.myPageMemo),
+            myPageCollapsedProjectGroups:
+              raw?.myPageCollapsedProjectGroups && typeof raw.myPageCollapsedProjectGroups === "object"
+                ? Object.fromEntries(
+                    Object.entries(raw.myPageCollapsedProjectGroups as Record<string, unknown>).map(([key, value]) => [
+                      key,
+                      toBooleanOr(value, false),
+                    ]),
+                  )
+                : {},
             mbti: (MBTI_TYPES as readonly string[]).includes(raw?.mbti as string) ? (raw.mbti as MbtiType) : undefined,
           } satisfies UserProfile
         })
@@ -854,6 +870,8 @@ export function subscribeCurrentUserProfile(email: string, callback: (profile: U
         hiddenOwnerOptions?: unknown
         myPageTaskPreferences?: unknown
         myPagePersonalTasks?: unknown
+        myPageMemo?: unknown
+        myPageCollapsedProjectGroups?: unknown
       }
       callback({
         email: normalizeEmail(toStringOrEmpty(raw?.email)),
@@ -870,6 +888,16 @@ export function subscribeCurrentUserProfile(email: string, callback: (profile: U
           : [],
         myPageTaskPreferences: normalizeMyPageTaskPreferences(raw?.myPageTaskPreferences),
         myPagePersonalTasks: normalizeMyPagePersonalTasks(raw?.myPagePersonalTasks),
+        myPageMemo: toOptionalString(raw?.myPageMemo),
+        myPageCollapsedProjectGroups:
+          raw?.myPageCollapsedProjectGroups && typeof raw.myPageCollapsedProjectGroups === "object"
+            ? Object.fromEntries(
+                Object.entries(raw.myPageCollapsedProjectGroups as Record<string, unknown>).map(([key, value]) => [
+                  key,
+                  toBooleanOr(value, false),
+                ]),
+              )
+            : {},
       })
     },
     (error) => {
@@ -980,6 +1008,39 @@ export async function saveMyPagePersonalTasks(email: string, tasks: MyPagePerson
     {
       email: normalizedEmail,
       myPagePersonalTasks: sanitized,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export async function saveMyPageMemo(email: string, memo: string): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  await setDoc(
+    doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
+    {
+      email: normalizedEmail,
+      myPageMemo: toStringOrEmpty(memo),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export async function saveMyPageCollapsedProjectGroups(
+  email: string,
+  groups: Record<string, boolean>,
+): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  await setDoc(
+    doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
+    {
+      email: normalizedEmail,
+      myPageCollapsedProjectGroups: groups,
       updatedAt: serverTimestamp(),
     },
     { merge: true },

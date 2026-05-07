@@ -413,6 +413,7 @@ export function WeeklyWorkBoard({
             <div className="space-y-4">
               <Image src="/placeholder-logo.png" alt="WorkHub 로고" width={180} height={52} className="h-12 w-auto object-contain" priority />
               <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">WorkHub</p>
                 <h1 className="text-3xl font-bold tracking-tight text-slate-900">{title}</h1>
                 <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
               </div>
@@ -449,7 +450,7 @@ export function WeeklyWorkBoard({
                 </Link>
               </Button>
               <Button asChild variant="outline">
-                <Link href={managementHref}>업무관리</Link>
+                <Link href={managementHref}>스케줄</Link>
               </Button>
               <Button type="button" variant="outline" onClick={handleLogout}>
                 <LogOut className="h-4 w-4" />
@@ -475,7 +476,7 @@ export function WeeklyWorkBoard({
           <>
           <section className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white/90 shadow-sm md:hidden">
             <div className="flex items-center justify-between gap-2 border-b border-slate-200/90 px-3 py-2">
-              <span className="text-xs font-semibold text-slate-600">모바일 주간업무</span>
+              <span className="text-xs font-semibold text-slate-600">모바일 주간 업무로드현황</span>
               <div className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white p-1">
                 <Button
                   type="button"
@@ -796,7 +797,7 @@ export function WeeklyWorkBoard({
         )}
 
         <div className="rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 text-xs text-slate-500 shadow-sm">
-          주간업무는 현재 날짜가 포함된 주간 범위와 겹치는 최하위 업무만 표시합니다. 숨김 처리된 프로젝트와 업무는 제외되며, 인원 목록은 부서 담당자 설정을 기준으로 노출됩니다.
+          주간 업무로드현황은 현재 날짜가 포함된 주간 범위와 겹치는 최하위 업무만 표시합니다. 숨김 처리된 프로젝트와 업무는 제외되며, 인원 목록은 부서 담당자 설정을 기준으로 노출됩니다.
         </div>
       </div>
 
