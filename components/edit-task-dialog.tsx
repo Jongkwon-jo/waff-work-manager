@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Pencil, CalendarIcon, Check, ChevronDown } from "lucide-react"
+import { Pencil, CalendarIcon, Check, ChevronDown, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -27,7 +27,7 @@ import {
   resolveDepartmentPersonGroup,
   subscribeDepartmentPersonSettings,
 } from "@/lib/firestore-service"
-import type { Task, TaskStatus, TaskCategory } from "@/lib/data"
+import type { EditableTaskField, Task, TaskStatus, TaskCategory } from "@/lib/data"
 
 interface EditTaskDialogProps {
   task: Task
@@ -36,7 +36,19 @@ interface EditTaskDialogProps {
   openOnDoubleClick?: boolean
   trigger?: React.ReactNode
   onOpenChange?: (open: boolean) => void
+  editableFields?: ReadonlyArray<EditableTaskField>
+  lockedFieldHint?: string
 }
+
+const LockIcon = ({ hint }: { hint: string }) => (
+  <span
+    className="inline-flex items-center text-muted-foreground"
+    title={hint}
+    aria-label={hint}
+  >
+    <Lock className="h-3 w-3" />
+  </span>
+)
 
 function parseKoreanDate(value: string): Date | undefined {
   const text = (value || "").trim()
@@ -70,7 +82,16 @@ export function EditTaskDialog({
   openOnDoubleClick = false,
   trigger,
   onOpenChange,
+  editableFields,
+  lockedFieldHint = "관리자만 수정할 수 있는 항목입니다.",
 }: EditTaskDialogProps) {
+  const editableFieldSet = useMemo(
+    () => (editableFields ? new Set<EditableTaskField>(editableFields) : null),
+    [editableFields],
+  )
+  const isFieldEditable = (field: EditableTaskField) =>
+    editableFieldSet === null || editableFieldSet.has(field)
+  const hasFieldRestriction = editableFieldSet !== null
   const parseListValue = (value: string): string[] =>
     value
       .split(",")
@@ -144,15 +165,19 @@ export function EditTaskDialog({
 
     const updatedTask: Task = {
       ...task,
-      task: taskName,
-      memo: memo.trim(),
-      category,
-      department,
-      person: joinListValue(personList),
-      startDate: startDate ? formatDate(startDate) : task.startDate,
-      endDate: endDate ? formatDate(endDate) : task.endDate,
-      status,
-      manDays: parseFloat(manDays) || 0,
+      task: isFieldEditable("task") ? taskName : task.task,
+      memo: isFieldEditable("memo") ? memo.trim() : task.memo,
+      category: isFieldEditable("category") ? category : task.category,
+      department: isFieldEditable("department") ? department : task.department,
+      person: isFieldEditable("person") ? joinListValue(personList) : task.person,
+      startDate: isFieldEditable("startDate")
+        ? (startDate ? formatDate(startDate) : task.startDate)
+        : task.startDate,
+      endDate: isFieldEditable("endDate")
+        ? (endDate ? formatDate(endDate) : task.endDate)
+        : task.endDate,
+      status: isFieldEditable("status") ? status : task.status,
+      manDays: isFieldEditable("manDays") ? (parseFloat(manDays) || 0) : task.manDays,
     }
 
     onEditTask(updatedTask)
@@ -167,9 +192,10 @@ export function EditTaskDialog({
 
   useEffect(() => {
     if (!startDate || !endDate) return
+    if (!isFieldEditable("manDays")) return
     const calculated = calculateManDaysBetweenDates(startDate, endDate, includeWeekends)
     setManDays(String(calculated))
-  }, [startDate, endDate, includeWeekends])
+  }, [startDate, endDate, includeWeekends, editableFieldSet])
 
   const togglePerson = (owner: string) => {
     setPersonList((prev) => {
@@ -202,19 +228,39 @@ export function EditTaskDialog({
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>업무 수정</DialogTitle>
-            <DialogDescription>업무 정보를 수정합니다.</DialogDescription>
+            <DialogDescription>
+              {hasFieldRestriction
+                ? "내가 편집할 수 있는 항목만 활성화됩니다. 잠금 표시된 항목은 관리자만 수정할 수 있습니다."
+                : "업무 정보를 수정합니다."}
+            </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="edit-task">업무내용</Label>
-              <Input id="edit-task" value={taskName} onChange={(e) => setTaskName(e.target.value)} required />
+              <Label htmlFor="edit-task" className="flex items-center gap-1.5">
+                업무내용
+                {!isFieldEditable("task") && <LockIcon hint={lockedFieldHint} />}
+              </Label>
+              <Input
+                id="edit-task"
+                value={taskName}
+                onChange={(e) => setTaskName(e.target.value)}
+                required
+                disabled={!isFieldEditable("task")}
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label>구분</Label>
-                <Select value={category} onValueChange={(v) => setCategory(v as TaskCategory)}>
+                <Label className="flex items-center gap-1.5">
+                  구분
+                  {!isFieldEditable("category") && <LockIcon hint={lockedFieldHint} />}
+                </Label>
+                <Select
+                  value={category}
+                  onValueChange={(v) => setCategory(v as TaskCategory)}
+                  disabled={!isFieldEditable("category")}
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -227,8 +273,11 @@ export function EditTaskDialog({
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label>부서</Label>
-                <Select value={department} onValueChange={setDepartment}>
+                <Label className="flex items-center gap-1.5">
+                  부서
+                  {!isFieldEditable("department") && <LockIcon hint={lockedFieldHint} />}
+                </Label>
+                <Select value={department} onValueChange={setDepartment} disabled={!isFieldEditable("department")}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -244,10 +293,19 @@ export function EditTaskDialog({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="edit-person">담당자</Label>
+                <Label htmlFor="edit-person" className="flex items-center gap-1.5">
+                  담당자
+                  {!isFieldEditable("person") && <LockIcon hint={lockedFieldHint} />}
+                </Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button id="edit-person" type="button" variant="outline" className="w-full justify-between font-normal">
+                    <Button
+                      id="edit-person"
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-between font-normal"
+                      disabled={!isFieldEditable("person")}
+                    >
                       <span className="truncate">{personList.length > 0 ? joinListValue(personList) : "담당자 선택(복수 가능)"}</span>
                       <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     </Button>
@@ -282,23 +340,34 @@ export function EditTaskDialog({
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor="edit-manDays">공수 (일)</Label>
+                  <Label htmlFor="edit-manDays" className="flex items-center gap-1.5">
+                    공수 (일)
+                    {!isFieldEditable("manDays") && <LockIcon hint={lockedFieldHint} />}
+                  </Label>
                   <label className="flex items-center gap-1 text-xs text-muted-foreground">
                     <input
                       type="checkbox"
                       checked={includeWeekends}
                       onChange={(e) => setIncludeWeekends(e.target.checked)}
+                      disabled={!isFieldEditable("manDays")}
                     />
                     주말 포함
                   </label>
                 </div>
                 <div className="flex gap-2">
-                  <Input id="edit-manDays" type="number" step="0.5" value={manDays} onChange={(e) => setManDays(e.target.value)} />
+                  <Input
+                    id="edit-manDays"
+                    type="number"
+                    step="0.5"
+                    value={manDays}
+                    onChange={(e) => setManDays(e.target.value)}
+                    disabled={!isFieldEditable("manDays")}
+                  />
                   <Button
                     type="button"
                     variant="outline"
                     className="shrink-0"
-                    disabled={!startDate || !endDate}
+                    disabled={!startDate || !endDate || !isFieldEditable("manDays")}
                     onClick={handleAutoCalculateManDays}
                   >
                     자동 계산
@@ -309,10 +378,17 @@ export function EditTaskDialog({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label>시작일</Label>
+                <Label className="flex items-center gap-1.5">
+                  시작일
+                  {!isFieldEditable("startDate") && <LockIcon hint={lockedFieldHint} />}
+                </Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !startDate && "text-muted-foreground")}>
+                    <Button
+                      variant="outline"
+                      className={cn("w-full justify-start text-left font-normal", !startDate && "text-muted-foreground")}
+                      disabled={!isFieldEditable("startDate")}
+                    >
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {startDate ? format(startDate, "MM월 dd일", { locale: ko }) : <span>날짜 선택</span>}
                     </Button>
@@ -323,10 +399,17 @@ export function EditTaskDialog({
                 </Popover>
               </div>
               <div className="grid gap-2">
-                <Label>종료일</Label>
+                <Label className="flex items-center gap-1.5">
+                  종료일
+                  {!isFieldEditable("endDate") && <LockIcon hint={lockedFieldHint} />}
+                </Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !endDate && "text-muted-foreground")}>
+                    <Button
+                      variant="outline"
+                      className={cn("w-full justify-start text-left font-normal", !endDate && "text-muted-foreground")}
+                      disabled={!isFieldEditable("endDate")}
+                    >
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {endDate ? format(endDate, "MM월 dd일", { locale: ko }) : <span>날짜 선택</span>}
                     </Button>
@@ -339,8 +422,15 @@ export function EditTaskDialog({
             </div>
 
             <div className="grid gap-2">
-              <Label>상태</Label>
-              <Select value={status} onValueChange={(v) => setStatus(v as TaskStatus)}>
+              <Label className="flex items-center gap-1.5">
+                상태
+                {!isFieldEditable("status") && <LockIcon hint={lockedFieldHint} />}
+              </Label>
+              <Select
+                value={status}
+                onValueChange={(v) => setStatus(v as TaskStatus)}
+                disabled={!isFieldEditable("status")}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -355,13 +445,17 @@ export function EditTaskDialog({
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="edit-memo">메모</Label>
+              <Label htmlFor="edit-memo" className="flex items-center gap-1.5">
+                메모
+                {!isFieldEditable("memo") && <LockIcon hint={lockedFieldHint} />}
+              </Label>
               <Textarea
                 id="edit-memo"
                 value={memo}
                 onChange={(e) => setMemo(e.target.value)}
                 placeholder="업무 관련 메모를 입력하세요"
                 rows={3}
+                disabled={!isFieldEditable("memo")}
               />
             </div>
           </div>

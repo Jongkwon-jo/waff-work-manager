@@ -29,17 +29,28 @@ import { Textarea } from "@/components/ui/textarea"
 import { CategoryBadge, ProjectTypeBadge, StatusBadge } from "@/components/status-badge"
 import { toast } from "sonner"
 import {
+  addHistoryEntry as addStrategyHistoryEntry,
+  DEFAULT_MY_PAGE_EDITABLE_FIELDS,
+  isUserOwnerOfTask,
   saveMyPageMemo,
   saveMyPageCollapsedProjectGroups,
   saveMyPagePersonalTasks,
   saveMyPageTaskPreferences,
   subscribeCurrentUserProfile,
+  subscribeMyPageEditableFields,
   subscribeToData as subscribeStrategyData,
+  updateTaskInDB as updateStrategyTaskInDB,
+  type MyPageEditableFieldsSettings,
   type MyPagePersonalTask,
   type MyPageTaskPreference,
 } from "@/lib/firestore-service"
-import { subscribeToData as subscribeFaData } from "@/lib/firestore-service-fa"
+import {
+  addHistoryEntry as addFaHistoryEntry,
+  subscribeToData as subscribeFaData,
+  updateTaskInDB as updateFaTaskInDB,
+} from "@/lib/firestore-service-fa"
 import type { Project, Task } from "@/lib/data"
+import { EditTaskDialog } from "@/components/edit-task-dialog"
 import { cn } from "@/lib/utils"
 
 type GroupedProject = {
@@ -70,6 +81,28 @@ const DEFAULT_TASK_PREFERENCE: MyPageTaskPreference = {
 
 const PROJECT_TASK_DND_MIME = "application/x-workhub-project-task"
 const PERSONAL_TASK_DND_MIME = "application/x-workhub-personal-task"
+
+
+const serializeTaskForHistory = (task: Task) => {
+  const payload: Record<string, unknown> = {
+    projectId: task.projectId,
+    task: task.task,
+    category: task.category,
+    department: task.department,
+    person: task.person,
+    startDate: task.startDate,
+    endDate: task.endDate,
+    status: task.status,
+    manDays: task.manDays,
+  }
+  if (task.parentId) payload.parentId = task.parentId
+  if (task.memo !== undefined) payload.memo = task.memo
+  if (task.isSubTask !== undefined) payload.isSubTask = task.isSubTask
+  if (task.isHidden !== undefined) payload.isHidden = task.isHidden
+  if (task.depth !== undefined) payload.depth = task.depth
+  if (task.displayOrder !== undefined) payload.displayOrder = task.displayOrder
+  return payload
+}
 
 const priorityMeta: Record<MyPageTaskPreference["priority"], { label: string; className: string; rank: number }> = {
   high: { label: "높음", className: "bg-rose-100 text-rose-700", rank: 0 },
@@ -164,13 +197,18 @@ export default function MyPage() {
   const [isPersonalCompletedCollapsed, setIsPersonalCompletedCollapsed] = useState(false)
   const [myMemo, setMyMemo] = useState("")
   const [isSavingMemo, setIsSavingMemo] = useState(false)
+  const [editableFieldsConfig, setEditableFieldsConfig] = useState<MyPageEditableFieldsSettings>([
+    ...DEFAULT_MY_PAGE_EDITABLE_FIELDS,
+  ])
 
   useEffect(() => {
     const unsubscribeStrategy = subscribeStrategyData(setStrategyProjects)
     const unsubscribeFa = subscribeFaData(setFaProjects)
+    const unsubscribeEditableFields = subscribeMyPageEditableFields(setEditableFieldsConfig)
     return () => {
       unsubscribeStrategy()
       unsubscribeFa()
+      unsubscribeEditableFields()
     }
   }, [])
 
@@ -288,6 +326,63 @@ export default function MyPage() {
 
   const updateProjectPref = (taskKey: string, updates: Partial<MyPageTaskPreference>) =>
     void savePreferences({ ...taskPreferences, [taskKey]: { ...(taskPreferences[taskKey] || DEFAULT_TASK_PREFERENCE), ...updates } })
+
+  const handleProjectTaskEdit = async (
+    item: ProjectTaskItem,
+    updatedTask: Task,
+  ) => {
+    if (!user?.email) {
+      toast.error("로그인 정보를 확인할 수 없습니다.")
+      return
+    }
+    if (!isUserOwnerOfTask(item.task, aliases)) {
+      toast.error("본인 담당 업무만 수정할 수 있습니다.")
+      return
+    }
+
+    const allowedFieldSet = new Set(editableFieldsConfig)
+    if (allowedFieldSet.size === 0) {
+      toast.info("관리자가 편집을 허용한 항목이 없습니다.")
+      return
+    }
+    const allowedUpdates: Partial<Task> = {}
+    if (allowedFieldSet.has("status")) allowedUpdates.status = updatedTask.status
+    if (allowedFieldSet.has("memo")) allowedUpdates.memo = updatedTask.memo
+    if (allowedFieldSet.has("manDays")) allowedUpdates.manDays = updatedTask.manDays
+    if (allowedFieldSet.has("startDate")) allowedUpdates.startDate = updatedTask.startDate
+    if (allowedFieldSet.has("endDate")) allowedUpdates.endDate = updatedTask.endDate
+    if (allowedFieldSet.has("task")) allowedUpdates.task = updatedTask.task
+    if (allowedFieldSet.has("category")) allowedUpdates.category = updatedTask.category
+    if (allowedFieldSet.has("department")) allowedUpdates.department = updatedTask.department
+    if (allowedFieldSet.has("person")) allowedUpdates.person = updatedTask.person
+
+    const isFa = item.departmentPage === "FA 사업부"
+    const updateFn = isFa ? updateFaTaskInDB : updateStrategyTaskInDB
+    const recordFn = isFa ? addFaHistoryEntry : addStrategyHistoryEntry
+
+    try {
+      await updateFn(item.task.id, allowedUpdates)
+      const merged: Task = { ...item.task, ...allowedUpdates }
+      try {
+        await recordFn({
+          entityType: "task",
+          action: "update",
+          entityId: item.task.id,
+          projectId: item.task.projectId,
+          before: serializeTaskForHistory(item.task),
+          after: serializeTaskForHistory(merged),
+          actorEmail: user.email,
+          source: "my-page",
+        })
+      } catch (historyError) {
+        console.error("History write failed:", historyError)
+      }
+      toast.success("업무가 수정되었습니다.")
+    } catch (error) {
+      console.error("Task update failed:", error)
+      toast.error("업무 수정에 실패했습니다.")
+    }
+  }
 
   const toggleCompletedProjectTaskSelection = (taskKey: string, checked: boolean) => {
     setSelectedCompletedProjectTaskKeys((prev) => {
@@ -523,6 +618,23 @@ export default function MyPage() {
             >
               <Star className={cn("h-3 w-3", important && "fill-current")} />중요
             </button>
+            {editableFieldsConfig.length > 0 && (
+              <EditTaskDialog
+                task={item.task}
+                onEditTask={(updated) => void handleProjectTaskEdit(item, updated)}
+                defaultDepartment={item.task.department || (item.departmentPage === "FA 사업부" ? "FA" : "전략")}
+                editableFields={editableFieldsConfig}
+                trigger={
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] text-sky-700 hover:bg-sky-200"
+                    title="업무 수정 (관리자가 허용한 항목만 편집 가능)"
+                  >
+                    <Pencil className="h-3 w-3" />수정
+                  </button>
+                }
+              />
+            )}
           </div>
         </div>
         <div className="mt-1.5 flex items-start justify-between gap-2">

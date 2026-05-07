@@ -60,16 +60,20 @@ type HistoryBatchItem = {
   after?: Record<string, unknown>
 }
 
+export type HistorySource = "my-page" | "work-management" | "fa-work-management" | "gantt" | "other"
+
 export interface ChangeHistoryEntry {
   id: string
   entityType: HistoryEntityType
   action: HistoryActionType
+  actorEmail?: string
   entityId?: string
   projectId?: string
   before?: Record<string, unknown>
   after?: Record<string, unknown>
   batch?: HistoryBatchItem[]
   createdAt?: Date
+  source?: HistorySource
 }
 
 export type HistoryEntryInput = Omit<ChangeHistoryEntry, "id" | "createdAt">
@@ -337,32 +341,43 @@ export async function updateTaskOrdersInDB(taskIds: string[]): Promise<void> {
 }
 
 export async function addHistoryEntry(entry: HistoryEntryInput): Promise<string> {
+  const actorEmail = toOptionalString(entry.actorEmail)
   const payload = compactObject({
     ...entry,
+    actorEmail: actorEmail ? normalizeEmail(actorEmail) : undefined,
     createdAt: serverTimestamp(),
   })
   const docRef = await addDoc(collection(db, HISTORY_COLLECTION), payload)
   return docRef.id
 }
 
-export async function fetchHistoryEntries(limitCount = 30): Promise<ChangeHistoryEntry[]> {
-  const historyQ = query(collection(db, HISTORY_COLLECTION), orderBy("createdAt", "desc"), limit(limitCount))
+export async function fetchHistoryEntries(limitCount = 30, actorEmail?: string): Promise<ChangeHistoryEntry[]> {
+  const historyQ = query(collection(db, HISTORY_COLLECTION), orderBy("createdAt", "desc"), limit(Math.max(limitCount * 5, limitCount)))
   const snapshot = await getDocs(historyQ)
 
-  return snapshot.docs.map((docSnap) => {
+  const entries = snapshot.docs.map((docSnap) => {
     const raw = docSnap.data() as any
     return {
       id: docSnap.id,
       entityType: (toStringOrEmpty(raw?.entityType) as HistoryEntityType) || "batch",
       action: (toStringOrEmpty(raw?.action) as HistoryActionType) || "batch_update",
+      actorEmail: toOptionalString(raw?.actorEmail),
       entityId: toOptionalString(raw?.entityId),
       projectId: toOptionalString(raw?.projectId),
       before: (raw?.before as Record<string, unknown> | undefined) || undefined,
       after: (raw?.after as Record<string, unknown> | undefined) || undefined,
       batch: (raw?.batch as HistoryBatchItem[] | undefined) || undefined,
       createdAt: raw?.createdAt?.toDate?.() || undefined,
+      source: (toOptionalString(raw?.source) as HistorySource | undefined) || undefined,
     }
   })
+
+  if (!actorEmail) return entries.slice(0, limitCount)
+
+  const normalizedActorEmail = normalizeEmail(actorEmail)
+  return entries
+    .filter((entry) => normalizeEmail(entry.actorEmail || "") === normalizedActorEmail)
+    .slice(0, limitCount)
 }
 
 function getCollectionForEntity(entityType: "project" | "task") {
