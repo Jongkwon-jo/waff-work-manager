@@ -45,8 +45,8 @@ export default function HomePage() {
     },
     {
       href: "/work-management",
-      title: "전략기획사업부 업무관리",
-      description: "전략기획사업부 프로젝트와 업무를 관리합니다.",
+      title: "전략기획 사업부 스케줄",
+      description: "전략기획 사업부 프로젝트와 업무를 관리합니다.",
       icon: BriefcaseBusiness,
       visible: isAdmin || pagePermissions.strategyWorkManagement,
       tone: "from-amber-50 via-orange-50/60 to-white",
@@ -55,8 +55,8 @@ export default function HomePage() {
     },
     {
       href: "/work-management/weekly",
-      title: "전략기획사업부 주간업무",
-      description: "전략기획사업부의 이번 주 업무를 팀과 담당자 기준으로 확인합니다.",
+      title: "전략기획 사업부 주간 업무로드현황",
+      description: "전략기획 사업부의 이번 주 업무를 팀과 담당자 기준으로 확인합니다.",
       icon: CalendarDays,
       visible: isAdmin || pagePermissions.strategyWeeklyWork,
       tone: "from-amber-50 via-orange-50/60 to-white",
@@ -65,7 +65,7 @@ export default function HomePage() {
     },
     {
       href: "/fa-work-management",
-      title: "FA사업부 업무관리",
+      title: "FA사업부 스케줄",
       description: "FA사업부 프로젝트와 업무를 관리합니다.",
       icon: Cpu,
       visible: isAdmin || pagePermissions.faWorkManagement,
@@ -75,7 +75,7 @@ export default function HomePage() {
     },
     {
       href: "/fa-work-management/weekly",
-      title: "FA사업부 주간업무",
+      title: "FA사업부 주간 업무로드현황",
       description: "FA사업부의 이번 주 업무를 팀과 담당자 기준으로 확인합니다.",
       icon: CalendarDays,
       visible: isAdmin || pagePermissions.faWeeklyWork,
@@ -85,7 +85,7 @@ export default function HomePage() {
     },
     {
       href: "/ict-work-management/weekly",
-      title: "ICT사업부 주간업무",
+      title: "ICT사업부 주간 업무로드현황",
       description: "ICT사업부의 이번 주 업무를 팀과 담당자 기준으로 확인합니다.",
       icon: CalendarDays,
       visible: isAdmin || pagePermissions.ictWeeklyWork,
@@ -126,7 +126,7 @@ export default function HomePage() {
   ].filter((card) => card.visible)
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(14,165,233,0.10),transparent),linear-gradient(180deg,#f0f6ff_0%,#f5f7fb_40%,#ffffff_100%)] px-4 py-10 lg:px-10">
+    <main className="min-h-screen bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(14,165,233,0.10),transparent),linear-gradient(180deg,#f0f6ff_0%,#f5f7fb_40%,#ffffff_100%)] px-3 py-6 lg:px-6">
       <div
         className="pointer-events-none fixed inset-0 opacity-[0.025]"
         style={{
@@ -135,9 +135,9 @@ export default function HomePage() {
         }}
       />
 
-      <div className="relative mx-auto max-w-6xl space-y-8">
-        <header className="flex flex-col gap-5 rounded-3xl border border-slate-200/70 bg-white/90 p-7 shadow-[0_8px_40px_rgba(15,23,42,0.07)] backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-5">
+      <div className="relative mx-auto max-w-6xl space-y-5">
+        <header className="flex flex-col gap-4 rounded-3xl border border-slate-200/70 bg-white/90 p-5 shadow-[0_8px_40px_rgba(15,23,42,0.07)] backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-4">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-sm">
               <Image
                 src="/placeholder-logo.png"
@@ -153,7 +153,7 @@ export default function HomePage() {
               <p className="mt-0.5 text-sm text-slate-500">사용 가능한 기능을 선택해서 바로 이동할 수 있습니다.</p>
             </div>
           </div>
-          <div className="flex items-center gap-3 lg:justify-end">
+          <div className="flex items-center gap-2 lg:justify-end">
             <div className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-600">
               {user?.email || "로그인 사용자"}
             </div>
@@ -170,7 +170,7 @@ export default function HomePage() {
           </div>
         </header>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {cards.map((card) => {
             const Icon = card.icon
 

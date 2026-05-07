@@ -54,13 +54,13 @@ type DraftGlobalSchedule = Pick<GlobalSchedule, "id" | "title" | "type" | "start
 
 const PAGE_PERMISSION_SHORT_LABELS: Record<string, string> = {
   myPage: "마이\n페이지",
-  strategyWorkManagement: "전략\n업무관리",
+  strategyWorkManagement: "전략\n스케줄",
   strategyWorkManagementEdit: "전략\n업무수정",
-  strategyWeeklyWork: "전략\n주간업무",
-  faWorkManagement: "FA\n업무관리",
+  strategyWeeklyWork: "전략\n주간 업무로드현황",
+  faWorkManagement: "FA\n스케줄",
   faWorkManagementEdit: "FA\n업무수정",
-  faWeeklyWork: "FA\n주간업무",
-  ictWeeklyWork: "ICT\n주간업무",
+  faWeeklyWork: "FA\n주간 업무로드현황",
+  ictWeeklyWork: "ICT\n주간 업무로드현황",
   gptTest: "GPT\n테스트",
   mbtiPage: "MBTI",
 }
@@ -418,6 +418,7 @@ export default function AdminPage() {
       <div className="mx-auto max-w-[1700px] space-y-6">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">WorkHub</p>
             <p className="text-sm font-medium text-primary">관리자 전용</p>
             <h1 className="text-3xl font-bold tracking-tight">사용자 권한 및 부서 설정 관리</h1>
             <p className="mt-2 text-sm text-muted-foreground">

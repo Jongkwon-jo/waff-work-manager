@@ -2,13 +2,13 @@ export const ADMIN_EMAIL = "admin@waff.co.kr"
 
 export const PAGE_PERMISSIONS = [
   { key: "myPage", label: "마이 페이지", path: "/my-page" },
-  { key: "strategyWorkManagement", label: "전략기획사업부 업무관리", path: "/work-management" },
-  { key: "strategyWorkManagementEdit", label: "전략기획사업부 업무관리 수정", path: "/work-management" },
-  { key: "strategyWeeklyWork", label: "전략기획사업부 주간업무", path: "/work-management/weekly" },
-  { key: "faWorkManagement", label: "FA사업부 업무관리", path: "/fa-work-management" },
-  { key: "faWorkManagementEdit", label: "FA사업부 업무관리 수정", path: "/fa-work-management" },
-  { key: "faWeeklyWork", label: "FA사업부 주간업무", path: "/fa-work-management/weekly" },
-  { key: "ictWeeklyWork", label: "ICT사업부 주간업무", path: "/ict-work-management/weekly" },
+  { key: "strategyWorkManagement", label: "전략기획 사업부 스케줄", path: "/work-management" },
+  { key: "strategyWorkManagementEdit", label: "전략기획 사업부 스케줄 수정", path: "/work-management" },
+  { key: "strategyWeeklyWork", label: "전략기획 사업부 주간 업무로드현황", path: "/work-management/weekly" },
+  { key: "faWorkManagement", label: "FA사업부 스케줄", path: "/fa-work-management" },
+  { key: "faWorkManagementEdit", label: "FA사업부 스케줄 수정", path: "/fa-work-management" },
+  { key: "faWeeklyWork", label: "FA사업부 주간 업무로드현황", path: "/fa-work-management/weekly" },
+  { key: "ictWeeklyWork", label: "ICT사업부 주간 업무로드현황", path: "/ict-work-management/weekly" },
   { key: "gptTest", label: "GPT 테스트", path: "/gpt-test" },
   { key: "mbtiPage", label: "MBTI", path: "/mbti" },
 ] as const

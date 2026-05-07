@@ -155,6 +155,7 @@ export default function MbtiPage() {
       <div className="relative mx-auto max-w-6xl space-y-8">
         <header className="flex flex-col gap-4 rounded-3xl border border-slate-200/70 bg-white/90 p-7 shadow-[0_8px_40px_rgba(15,23,42,0.07)] backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
           <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">WorkHub</p>
             <p className="text-sm font-medium text-primary">직원 성향 분석</p>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900">MBTI 분포</h1>
             <p className="mt-1 text-sm text-muted-foreground">
