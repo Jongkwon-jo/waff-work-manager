@@ -20,6 +20,10 @@ import {
   subscribeDashboardSortBy,
   saveGanttCollapseState,
   subscribeGanttCollapseState,
+  saveGanttDetailPanelWidth,
+  saveGanttLeftPanelWidth,
+  subscribeGanttDetailPanelWidth,
+  subscribeGanttLeftPanelWidth,
   addHistoryEntry,
   fetchHistoryEntries,
   rollbackHistoryEntry,
@@ -41,7 +45,7 @@ import { FilterBar, ProjectSortType } from "@/components/filter-bar"
 import { ProjectList } from "@/components/project-list"
 import { GanttView } from "@/components/gantt-view"
 import { ProjectCardView } from "@/components/project-card-view"
-import { CalendarDays, Building2, Home, List, BarChart3, LayoutGrid, RotateCcw, History, ChevronDown, ChevronRight, Sparkles, LogOut, ShieldCheck, UserRoundSearch } from "lucide-react"
+import { CalendarDays, Building2, Home, List, BarChart3, LayoutGrid, RotateCcw, History, ChevronDown, ChevronRight, LogOut, UserRoundSearch } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -66,6 +70,8 @@ export default function FaWorkManagementPage() {
   const [ganttCollapsedProjectIds, setGanttCollapsedProjectIds] = useState<string[]>([])
   const [ganttCollapsedTaskIds, setGanttCollapsedTaskIds] = useState<string[]>([])
   const [isGanttCollapseStateReady, setIsGanttCollapseStateReady] = useState(false)
+  const [ganttLeftPanelWidth, setGanttLeftPanelWidth] = useState<number | null>(null)
+  const [ganttDetailPanelWidth, setGanttDetailPanelWidth] = useState<number | null>(null)
   const [defaultTaskPerson, setDefaultTaskPerson] = useState("")
   const [hiddenOwnerOptions, setHiddenOwnerOptions] = useState<string[]>([])
   const [globalSchedules, setGlobalSchedules] = useState<GlobalSchedule[]>([])
@@ -137,6 +143,21 @@ export default function FaWorkManagementPage() {
     })
 
     return () => unsubscribe()
+  }, [user?.email])
+
+  useEffect(() => {
+    const email = user?.email || ""
+    setGanttLeftPanelWidth(null)
+    setGanttDetailPanelWidth(null)
+
+    if (!email) return
+
+    const unsubscribeLeftPanel = subscribeGanttLeftPanelWidth(email, setGanttLeftPanelWidth)
+    const unsubscribeDetailPanel = subscribeGanttDetailPanelWidth(email, setGanttDetailPanelWidth)
+    return () => {
+      unsubscribeLeftPanel()
+      unsubscribeDetailPanel()
+    }
   }, [user?.email])
 
   useEffect(() => {
@@ -600,6 +621,26 @@ export default function FaWorkManagementPage() {
       await saveGanttCollapseState(user.email || "", state)
     } catch (error) {
       console.error("Failed to save gantt collapse state:", error)
+    }
+  }
+
+  const handlePersistGanttLeftPanelWidth = async (width: number) => {
+    if (!user?.email) return
+    setGanttLeftPanelWidth(width)
+    try {
+      await saveGanttLeftPanelWidth(user.email, width)
+    } catch (error) {
+      console.error("Failed to save FA gantt left panel width:", error)
+    }
+  }
+
+  const handlePersistGanttDetailPanelWidth = async (width: number) => {
+    if (!user?.email) return
+    setGanttDetailPanelWidth(width)
+    try {
+      await saveGanttDetailPanelWidth(user.email, width)
+    } catch (error) {
+      console.error("Failed to save FA gantt detail panel width:", error)
     }
   }
 
@@ -1166,7 +1207,7 @@ export default function FaWorkManagementPage() {
       <header className="sticky top-0 z-50 border-b border-border bg-card/95 backdrop-blur-sm">
         <div className="mx-auto flex max-w-full flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between lg:px-10">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 items-center">
+            <div className="flex h-10 shrink-0 items-center">
               <Image
                 src="/placeholder-logo.png"
                 alt="WorkHub 로고"
@@ -1177,17 +1218,17 @@ export default function FaWorkManagementPage() {
               />
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">WorkHub</p>
-              <h1 className="text-base font-bold text-card-foreground leading-tight">{"FA 사업부 스케줄"}</h1>
+              <p className="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">WorkHub</p>
+              <h1 className="whitespace-nowrap text-base font-bold text-card-foreground leading-tight">{"FA 사업부 스케줄"}</h1>
             </div>
           </div>
           <div className="relative flex w-full flex-wrap items-center gap-2 text-xs text-muted-foreground lg:w-auto lg:flex-nowrap">
-            <div className="hidden items-center rounded-md border border-border bg-background px-3 py-1.5 text-[11px] text-foreground shadow-sm lg:flex">
+            <div className="hidden shrink-0 items-center whitespace-nowrap rounded-md border border-border bg-background px-3 py-1.5 text-[11px] text-foreground shadow-sm lg:flex">
               {user.email || "로그인 사용자"}
             </div>
             <Link
               href="/"
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-background px-3 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
             >
               <Home className="h-3.5 w-3.5" />
               메인
@@ -1195,56 +1236,29 @@ export default function FaWorkManagementPage() {
             {(isAdmin || pagePermissions.myPage) && (
               <Link
                 href="/my-page"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-background px-3 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
               >
                 <UserRoundSearch className="h-3.5 w-3.5" />
                 마이 페이지
               </Link>
             )}
-            {(isAdmin || pagePermissions.strategyWorkManagement) && (
-              <Link
-                href="/work-management"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
-              >
-                전략사업부
-              </Link>
-            )}
-            {(isAdmin || pagePermissions.faWorkManagement) && (
-              <Link
-                href="/fa-work-management"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
-              >
-                FA 사업부
-              </Link>
-            )}
-            {(isAdmin || pagePermissions.gptTest) && (
-              <Link
-                href="/gpt-test"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                GPT 테스트
-              </Link>
-            )}
-            {isAdmin && (
-              <Link
-                href="/admin"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
-              >
-                <ShieldCheck className="h-3.5 w-3.5" />
-                관리자
-              </Link>
-            )}
+            <Link
+              href="/fa-work-management/weekly"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-background px-3 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+              주간 업무
+            </Link>
             <div
               className={cn(
-                "flex overflow-hidden rounded-md border border-border bg-background shadow-sm lg:mr-4",
+                "flex shrink-0 overflow-hidden rounded-md border border-border bg-background shadow-sm lg:mr-4",
                 shouldHideMobileGanttControls && "hidden",
               )}
             >
               <button
                 onClick={() => setViewMode("gantt")}
                 className={cn(
-                  "flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition-colors",
+                  "flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-1.5 text-xs font-medium transition-colors",
                   viewMode === "gantt"
                     ? "bg-primary text-primary-foreground"
                     : "bg-background text-muted-foreground hover:bg-accent",
@@ -1256,7 +1270,7 @@ export default function FaWorkManagementPage() {
               <button
                 onClick={() => setViewMode("list")}
                 className={cn(
-                  "flex items-center gap-1.5 border-l border-border px-4 py-1.5 text-xs font-medium transition-colors",
+                  "flex shrink-0 items-center gap-1.5 whitespace-nowrap border-l border-border px-4 py-1.5 text-xs font-medium transition-colors",
                   viewMode === "list"
                     ? "bg-primary text-primary-foreground"
                     : "bg-background text-muted-foreground hover:bg-accent",
@@ -1268,7 +1282,7 @@ export default function FaWorkManagementPage() {
               <button
                 onClick={() => setViewMode("card")}
                 className={cn(
-                  "flex items-center gap-1.5 border-l border-border px-4 py-1.5 text-xs font-medium transition-colors",
+                  "flex shrink-0 items-center gap-1.5 whitespace-nowrap border-l border-border px-4 py-1.5 text-xs font-medium transition-colors",
                   viewMode === "card"
                     ? "bg-primary text-primary-foreground"
                     : "bg-background text-muted-foreground hover:bg-accent",
@@ -1278,7 +1292,7 @@ export default function FaWorkManagementPage() {
                 {"카드"}
               </button>
             </div>
-            <div className="hidden items-center gap-1.5 font-medium md:flex">
+            <div className="hidden shrink-0 items-center gap-1.5 whitespace-nowrap font-medium md:flex">
               <CalendarDays className="h-4 w-4" />
               <span>{formattedDate}</span>
             </div>
@@ -1286,7 +1300,7 @@ export default function FaWorkManagementPage() {
               <Button
                 variant="outline"
                 size="sm"
-                className="ml-2 h-8 gap-1.5 px-2 text-[11px]"
+                className="ml-2 h-8 shrink-0 gap-1.5 whitespace-nowrap px-2 text-[11px]"
                 onClick={handleRollbackLatest}
                 disabled={isRollingBack || historyEntries.length === 0}
                 title={historyEntries.length === 0 ? "롤백할 이력이 없습니다." : "가장 최근 변경을 되돌립니다."}
@@ -1300,7 +1314,7 @@ export default function FaWorkManagementPage() {
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-8 gap-1.5 px-2 text-[11px]"
+                className="h-8 shrink-0 gap-1.5 whitespace-nowrap px-2 text-[11px]"
                 onClick={() => setIsHistoryOpen((prev) => !prev)}
               >
                 <History className="h-3.5 w-3.5" />
@@ -1312,7 +1326,7 @@ export default function FaWorkManagementPage() {
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 gap-1.5 px-2 text-[11px]"
+              className="h-8 shrink-0 gap-1.5 whitespace-nowrap px-2 text-[11px]"
               onClick={handleLogout}
             >
               <LogOut className="h-3.5 w-3.5" />
@@ -1463,9 +1477,13 @@ export default function FaWorkManagementPage() {
                 onReorderTask={handleReorderTask}
                 persistedCollapsedProjectIds={ganttCollapsedProjectIds}
                 persistedCollapsedTaskIds={ganttCollapsedTaskIds}
+                persistedLeftPanelWidth={ganttLeftPanelWidth}
+                persistedDetailPanelWidth={ganttDetailPanelWidth}
                 persistedHiddenOwnerOptions={hiddenOwnerOptions}
                 isCollapseStateReady={isGanttCollapseStateReady}
                 onPersistCollapseState={handlePersistGanttCollapseState}
+                onPersistLeftPanelWidth={handlePersistGanttLeftPanelWidth}
+                onPersistDetailPanelWidth={handlePersistGanttDetailPanelWidth}
                 onPersistHiddenOwnerOptions={handlePersistHiddenOwnerOptions}
               />
             ) : (

@@ -1,6 +1,7 @@
 ﻿"use client"
 
 import { useMemo, useState, useRef, useEffect, useCallback } from "react"
+import type { PointerEvent as ReactPointerEvent } from "react"
 import type { Project, Task, TaskStatus, TaskCategory } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import { ProjectTypeBadge } from "@/components/status-badge"
@@ -65,9 +66,13 @@ interface GanttViewProps {
   ) => void
   persistedCollapsedProjectIds?: string[]
   persistedCollapsedTaskIds?: string[]
+  persistedLeftPanelWidth?: number | null
+  persistedDetailPanelWidth?: number | null
   persistedHiddenOwnerOptions?: string[]
   isCollapseStateReady?: boolean
   onPersistCollapseState?: (state: { collapsedProjectIds: string[]; collapsedTaskIds: string[] }) => void
+  onPersistLeftPanelWidth?: (width: number) => void
+  onPersistDetailPanelWidth?: (width: number) => void
   onPersistHiddenOwnerOptions?: (owners: string[]) => void
 }
 
@@ -101,8 +106,10 @@ type ExportProject = Pick<Project, "id" | "name" | "type"> & {
 const CELL_WIDTH = 28
 const LEFT_PANEL_MIN_WIDTH = 380
 const LEFT_PANEL_MAX_WIDTH = 820
-const DETAIL_PANEL_MIN_WIDTH = 700
-const DETAIL_PANEL_MAX_WIDTH = 1100
+const COMPACT_LEFT_PANEL_MIN_WIDTH = 240
+const COMPACT_LEFT_PANEL_MAX_WIDTH = 360
+const DETAIL_PANEL_MIN_WIDTH = 620
+const DETAIL_PANEL_MAX_WIDTH = 900
 const COMPACT_VIEWPORT_BREAKPOINT = 1024
 const MOBILE_VIEWPORT_BREAKPOINT = 640
 const HEADER_APPROX_HEIGHT = 110
@@ -230,6 +237,18 @@ function areSetsEqual(a: Set<string>, b: Set<string>) {
   return true
 }
 
+function clampLeftPanelWidth(width: number, isCompactViewport: boolean) {
+  const minWidth = isCompactViewport ? COMPACT_LEFT_PANEL_MIN_WIDTH : LEFT_PANEL_MIN_WIDTH
+  const maxWidth = isCompactViewport ? COMPACT_LEFT_PANEL_MAX_WIDTH : LEFT_PANEL_MAX_WIDTH
+  return Math.min(maxWidth, Math.max(minWidth, Math.round(width)))
+}
+
+function clampDetailPanelWidth(width: number, isCompactViewport: boolean) {
+  const minWidth = isCompactViewport ? 480 : DETAIL_PANEL_MIN_WIDTH
+  const maxWidth = isCompactViewport ? 680 : DETAIL_PANEL_MAX_WIDTH
+  return Math.min(maxWidth, Math.max(minWidth, Math.round(width)))
+}
+
 function formatTaskHoverDetails(task: Task): string {
   const lines = [
     task.task,
@@ -284,9 +303,13 @@ export function GanttView({
   onReorderTask,
   persistedCollapsedProjectIds = [],
   persistedCollapsedTaskIds = [],
+  persistedLeftPanelWidth = null,
+  persistedDetailPanelWidth = null,
   persistedHiddenOwnerOptions = [],
   isCollapseStateReady = false,
   onPersistCollapseState,
+  onPersistLeftPanelWidth,
+  onPersistDetailPanelWidth,
   onPersistHiddenOwnerOptions,
 }: GanttViewProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -339,14 +362,36 @@ export function GanttView({
     typeof window === "undefined" ? 1280 : window.innerWidth,
   )
   const [layoutFrozenViewportWidth, setLayoutFrozenViewportWidth] = useState<number | null>(null)
+  const [customLeftPanelWidth, setCustomLeftPanelWidth] = useState<number | null>(null)
+  const [customDetailPanelWidth, setCustomDetailPanelWidth] = useState<number | null>(null)
   const [activeEditDialogTaskId, setActiveEditDialogTaskId] = useState<string | null>(null)
   const [stickyBodyTop, setStickyBodyTop] = useState(70)
+  const leftPanelResizeCleanupRef = useRef<(() => void) | null>(null)
+  const detailPanelResizeCleanupRef = useRef<(() => void) | null>(null)
   const lastCollapseStateSignatureRef = useRef("")
   const pendingPersistCollapseStateSignatureRef = useRef<string | null>(null)
   const hasHydratedCollapseStateRef = useRef(false)
   const effectiveViewportWidth = layoutFrozenViewportWidth ?? viewportWidth
   const isCompactViewport = effectiveViewportWidth < COMPACT_VIEWPORT_BREAKPOINT
   const isMobileViewport = effectiveViewportWidth < MOBILE_VIEWPORT_BREAKPOINT
+
+  useEffect(() => {
+    if (typeof persistedLeftPanelWidth !== "number" || !Number.isFinite(persistedLeftPanelWidth)) {
+      setCustomLeftPanelWidth(null)
+      return
+    }
+
+    setCustomLeftPanelWidth(clampLeftPanelWidth(persistedLeftPanelWidth, isCompactViewport))
+  }, [persistedLeftPanelWidth, isCompactViewport])
+
+  useEffect(() => {
+    if (typeof persistedDetailPanelWidth !== "number" || !Number.isFinite(persistedDetailPanelWidth)) {
+      setCustomDetailPanelWidth(null)
+      return
+    }
+
+    setCustomDetailPanelWidth(clampDetailPanelWidth(persistedDetailPanelWidth, isCompactViewport))
+  }, [persistedDetailPanelWidth, isCompactViewport])
 
   const handleEditDialogOpenChange = useCallback(
     (taskId: string, open: boolean) => {
@@ -842,7 +887,7 @@ export function GanttView({
   }
 
 
-  const { leftPanelWidth, detailPanelWidth, detailGridTemplate } = useMemo(() => {
+  const { defaultLeftPanelWidth, defaultDetailPanelWidth, detailGridTemplate } = useMemo(() => {
     const font = typeof document !== "undefined" ? getComputedStyle(document.body).font : "12px sans-serif"
     const leftTexts = [
       "Project & Task Details",
@@ -892,15 +937,15 @@ export function GanttView({
       }).map((text) => getMeasuredTextWidth(text, font)),
     )
 
-    const categoryColumnWidth = Math.max(68, Math.min(isCompactViewport ? 84 : 96, Math.ceil(maxCategoryTextWidth + 24)))
-    const departmentColumnWidth = Math.max(96, Math.min(isCompactViewport ? 170 : 210, Math.ceil(maxDepartmentTextWidth + 24)))
-    const ownerColumnWidth = Math.max(130, Math.min(isCompactViewport ? 220 : 340, Math.ceil(maxOwnerTextWidth + 14)))
-    const startColumnWidth = Math.max(96, Math.ceil(getMeasuredTextWidth("12월 30일", font) + 48))
-    const endColumnWidth = Math.max(96, Math.ceil(getMeasuredTextWidth("12월 30일", font) + 48))
-    const manDayColumnWidth = Math.max(40, Math.ceil(getMeasuredTextWidth("99.5", font) + 28))
+    const categoryColumnWidth = Math.max(64, Math.min(isCompactViewport ? 78 : 88, Math.ceil(maxCategoryTextWidth + 18)))
+    const departmentColumnWidth = Math.max(88, Math.min(isCompactViewport ? 150 : 180, Math.ceil(maxDepartmentTextWidth + 18)))
+    const ownerColumnWidth = Math.max(100, Math.min(isCompactViewport ? 150 : 180, Math.ceil(maxOwnerTextWidth + 8)))
+    const startColumnWidth = Math.max(88, Math.ceil(getMeasuredTextWidth("12월 30일", font) + 34))
+    const endColumnWidth = Math.max(88, Math.ceil(getMeasuredTextWidth("12월 30일", font) + 34))
+    const manDayColumnWidth = Math.max(38, Math.ceil(getMeasuredTextWidth("99.5", font) + 24))
 
-    const detailPanelMinWidth = isCompactViewport ? 520 : DETAIL_PANEL_MIN_WIDTH
-    const detailPanelMaxWidth = isCompactViewport ? 780 : DETAIL_PANEL_MAX_WIDTH
+    const detailPanelMinWidth = isCompactViewport ? 480 : DETAIL_PANEL_MIN_WIDTH
+    const detailPanelMaxWidth = isCompactViewport ? 680 : DETAIL_PANEL_MAX_WIDTH
     const computedDetailPanelWidth = Math.min(
       detailPanelMaxWidth,
       Math.max(
@@ -916,11 +961,101 @@ export function GanttView({
     )
 
     return {
-      leftPanelWidth: computedLeftPanelWidth,
-      detailPanelWidth: computedDetailPanelWidth,
+      defaultLeftPanelWidth: computedLeftPanelWidth,
+      defaultDetailPanelWidth: computedDetailPanelWidth,
       detailGridTemplate: `${categoryColumnWidth}px ${departmentColumnWidth}px ${ownerColumnWidth}px ${startColumnWidth}px ${endColumnWidth}px ${manDayColumnWidth}px`,
     }
   }, [projects, departmentOptions, visibleOwnerOptions, isCompactViewport])
+
+  const leftPanelWidth = clampLeftPanelWidth(customLeftPanelWidth ?? defaultLeftPanelWidth, isCompactViewport)
+  const detailPanelWidth = clampDetailPanelWidth(customDetailPanelWidth ?? defaultDetailPanelWidth, isCompactViewport)
+
+  const handleLeftPanelResizeStart = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      event.preventDefault()
+      event.stopPropagation()
+
+      leftPanelResizeCleanupRef.current?.()
+
+      const startX = event.clientX
+      const startWidth = leftPanelWidth
+      let latestWidth = startWidth
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        latestWidth = clampLeftPanelWidth(startWidth + moveEvent.clientX - startX, isCompactViewport)
+        setCustomLeftPanelWidth(latestWidth)
+      }
+
+      const cleanup = () => {
+        window.removeEventListener("pointermove", handlePointerMove)
+        window.removeEventListener("pointerup", handlePointerUp)
+        window.removeEventListener("pointercancel", handlePointerUp)
+        document.body.style.cursor = ""
+        document.body.style.userSelect = ""
+        leftPanelResizeCleanupRef.current = null
+      }
+
+      const handlePointerUp = () => {
+        cleanup()
+        onPersistLeftPanelWidth?.(latestWidth)
+      }
+
+      document.body.style.cursor = "col-resize"
+      document.body.style.userSelect = "none"
+      window.addEventListener("pointermove", handlePointerMove)
+      window.addEventListener("pointerup", handlePointerUp)
+      window.addEventListener("pointercancel", handlePointerUp)
+      leftPanelResizeCleanupRef.current = cleanup
+    },
+    [isCompactViewport, leftPanelWidth, onPersistLeftPanelWidth],
+  )
+
+  const handleDetailPanelResizeStart = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      event.preventDefault()
+      event.stopPropagation()
+
+      detailPanelResizeCleanupRef.current?.()
+
+      const startX = event.clientX
+      const startWidth = detailPanelWidth
+      let latestWidth = startWidth
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        latestWidth = clampDetailPanelWidth(startWidth + moveEvent.clientX - startX, isCompactViewport)
+        setCustomDetailPanelWidth(latestWidth)
+      }
+
+      const cleanup = () => {
+        window.removeEventListener("pointermove", handlePointerMove)
+        window.removeEventListener("pointerup", handlePointerUp)
+        window.removeEventListener("pointercancel", handlePointerUp)
+        document.body.style.cursor = ""
+        document.body.style.userSelect = ""
+        detailPanelResizeCleanupRef.current = null
+      }
+
+      const handlePointerUp = () => {
+        cleanup()
+        onPersistDetailPanelWidth?.(latestWidth)
+      }
+
+      document.body.style.cursor = "col-resize"
+      document.body.style.userSelect = "none"
+      window.addEventListener("pointermove", handlePointerMove)
+      window.addEventListener("pointerup", handlePointerUp)
+      window.addEventListener("pointercancel", handlePointerUp)
+      detailPanelResizeCleanupRef.current = cleanup
+    },
+    [detailPanelWidth, isCompactViewport, onPersistDetailPanelWidth],
+  )
+
+  useEffect(() => {
+    return () => {
+      leftPanelResizeCleanupRef.current?.()
+      detailPanelResizeCleanupRef.current?.()
+    }
+  }, [])
 
   const allDays = useMemo(() => {
     const today = new Date()
@@ -1646,7 +1781,7 @@ export function GanttView({
         <div className="relative min-w-fit flex flex-col isolate">
           <div ref={stickyHeaderRef} className="sticky top-0 z-40 flex bg-card border-b border-border shadow-sm">
             <div
-              className="sticky left-0 z-[80] shrink-0 border-r border-border bg-card px-4 py-2.5 flex items-stretch overflow-visible"
+              className="sticky left-0 z-[80] flex shrink-0 items-stretch overflow-visible border-r border-border bg-card px-4 py-2.5"
               style={{ width: leftPanelWidth }}
             >
               <div className="flex w-full flex-col items-stretch gap-1.5">
@@ -1886,6 +2021,15 @@ export function GanttView({
                   </div>
                 </div>
               </div>
+              <button
+                type="button"
+                onPointerDown={handleLeftPanelResizeStart}
+                className="absolute inset-y-0 -right-1 z-[90] flex w-2 cursor-col-resize items-center justify-center outline-none hover:bg-primary/10 focus-visible:bg-primary/10"
+                title="Project & Task Details 폭 조절"
+                aria-label="Project & Task Details 폭 조절"
+              >
+                <span className="h-8 w-0.5 rounded-full bg-border transition-colors hover:bg-primary" />
+              </button>
             </div>
 
             {showDetailColumns && (
@@ -1904,6 +2048,15 @@ export function GanttView({
                   <span>End</span>
                   <span>Man-day</span>
                 </div>
+                <button
+                  type="button"
+                  onPointerDown={handleDetailPanelResizeStart}
+                  className="absolute inset-y-0 -right-1 z-[60] flex w-2 cursor-col-resize items-center justify-center outline-none hover:bg-primary/10 focus-visible:bg-primary/10"
+                  title="상세 보기 폭 조절"
+                  aria-label="상세 보기 폭 조절"
+                >
+                  <span className="h-8 w-0.5 rounded-full bg-border transition-colors hover:bg-primary" />
+                </button>
               </div>
             )}
 
@@ -3544,15 +3697,15 @@ function OwnerMultiSelect({
         >
           {selected.length > 0 ? (
             <span className="flex min-w-0 items-center gap-1 overflow-hidden">
-              {selected.slice(0, 3).map((owner) => (
+              {selected.slice(0, 2).map((owner) => (
                 <span
                   key={owner}
-                  className={cn("max-w-[84px] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold", getOwnerTokenColorClass(owner))}
+                  className={cn("max-w-[58px] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold", getOwnerTokenColorClass(owner))}
                 >
                   {owner}
                 </span>
               ))}
-              {selected.length > 3 && <span className="text-[10px] text-muted-foreground">+{selected.length - 3}</span>}
+              {selected.length > 2 && <span className="text-[10px] text-muted-foreground">+{selected.length - 2}</span>}
             </span>
           ) : (
             <span className="truncate">담당자 선택</span>

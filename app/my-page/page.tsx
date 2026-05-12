@@ -12,6 +12,9 @@ import {
   GripVertical,
   Home,
   LogOut,
+  EyeOff,
+  Minus,
+  MessageSquareText,
   Pencil,
   Plus,
   Star,
@@ -49,7 +52,7 @@ import {
   subscribeToData as subscribeFaData,
   updateTaskInDB as updateFaTaskInDB,
 } from "@/lib/firestore-service-fa"
-import type { Project, Task } from "@/lib/data"
+import type { Project, Task, TaskStatus } from "@/lib/data"
 import { EditTaskDialog } from "@/components/edit-task-dialog"
 import { cn } from "@/lib/utils"
 
@@ -109,6 +112,31 @@ const priorityMeta: Record<MyPageTaskPreference["priority"], { label: string; cl
   medium: { label: "보통", className: "bg-amber-100 text-amber-700", rank: 1 },
   low: { label: "낮음", className: "bg-slate-700 text-white", rank: 2 },
 }
+
+type ProjectStatusFilter = Exclude<TaskStatus, "완료">
+
+const PROJECT_STATUS_FILTERS: ProjectStatusFilter[] = ["진행", "예정", "보류", "미정"]
+
+const projectStatusFilterMeta: Record<ProjectStatusFilter, { className: string; activeClassName: string }> = {
+  진행: {
+    className: "border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-400",
+    activeClassName: "border-blue-600 bg-blue-600 text-white ring-2 ring-blue-100",
+  },
+  예정: {
+    className: "border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-400",
+    activeClassName: "border-gray-500 bg-gray-600 text-white ring-2 ring-gray-100",
+  },
+  보류: {
+    className: "border-yellow-200 bg-yellow-50 text-yellow-800 hover:border-yellow-400",
+    activeClassName: "border-yellow-500 bg-yellow-400 text-yellow-950 ring-2 ring-yellow-100",
+  },
+  미정: {
+    className: "border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-400",
+    activeClassName: "border-rose-500 bg-rose-500 text-white ring-2 ring-rose-100",
+  },
+}
+
+const isProjectStatusFilter = (status: TaskStatus): status is ProjectStatusFilter => PROJECT_STATUS_FILTERS.includes(status as ProjectStatusFilter)
 
 const parseDateLabel = (value?: string) => {
   const matched = value?.match(/(\d{1,2})\D+(\d{1,2})/)
@@ -191,10 +219,12 @@ export default function MyPage() {
   const [isProjectTasksCollapsed, setIsProjectTasksCollapsed] = useState(false)
   const [isProjectActiveCollapsed, setIsProjectActiveCollapsed] = useState(false)
   const [isProjectCompletedCollapsed, setIsProjectCompletedCollapsed] = useState(false)
-  const [selectedCompletedProjectTaskKeys, setSelectedCompletedProjectTaskKeys] = useState<string[]>([])
+  const [isProjectHiddenCollapsed, setIsProjectHiddenCollapsed] = useState(true)
+  const [selectedProjectStatus, setSelectedProjectStatus] = useState<ProjectStatusFilter | null>(null)
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Record<string, boolean>>({})
   const [isPersonalActiveCollapsed, setIsPersonalActiveCollapsed] = useState(false)
   const [isPersonalCompletedCollapsed, setIsPersonalCompletedCollapsed] = useState(false)
+  const [expandedPersonalMemoIds, setExpandedPersonalMemoIds] = useState<string[]>([])
   const [myMemo, setMyMemo] = useState("")
   const [isSavingMemo, setIsSavingMemo] = useState(false)
   const [editableFieldsConfig, setEditableFieldsConfig] = useState<MyPageEditableFieldsSettings>([
@@ -237,24 +267,45 @@ export default function MyPage() {
             { departmentPage, projectName: project.name, projectType: project.type },
             `${departmentPage}-${project.id}`,
             aliases,
-          ).filter((item) => !(taskPreferences[item.key] || DEFAULT_TASK_PREFERENCE).deleted),
+          ),
         }))
         .filter((project) => project.tasks.length > 0)
 
     return [...toGrouped(strategyProjects, "전략사업부"), ...toGrouped(faProjects, "FA 사업부")]
   }, [aliases, strategyProjects, faProjects, taskPreferences])
 
-  const projectTasks = useMemo<ProjectTaskItem[]>(() => {
+  const allProjectTasks = useMemo<ProjectTaskItem[]>(() => {
     return groupedProjects.flatMap((project) => project.tasks)
   }, [groupedProjects])
-
+  const projectTasks = useMemo(
+    () => allProjectTasks.filter((item) => !(taskPreferences[item.key] || DEFAULT_TASK_PREFERENCE).deleted),
+    [allProjectTasks, taskPreferences],
+  )
+  const hiddenProjectTasks = useMemo(
+    () => allProjectTasks.filter((item) => (taskPreferences[item.key] || DEFAULT_TASK_PREFERENCE).deleted),
+    [allProjectTasks, taskPreferences],
+  )
+  const projectStatusCounts = useMemo(
+    () => {
+      const counts = Object.fromEntries(PROJECT_STATUS_FILTERS.map((status) => [status, 0])) as Record<ProjectStatusFilter, number>
+      projectTasks.forEach((item) => {
+        if (!isProjectStatusFilter(item.task.status)) return
+        counts[item.task.status] += 1
+      })
+      return counts
+    },
+    [projectTasks],
+  )
   const activeProjectTasks = useMemo(
-    () => projectTasks.filter((item) => !(taskPreferences[item.key] || DEFAULT_TASK_PREFERENCE).checked),
-    [projectTasks, taskPreferences],
+    () =>
+      projectTasks.filter(
+        (item) => item.task.status !== "완료" && (!selectedProjectStatus || item.task.status === selectedProjectStatus),
+      ),
+    [projectTasks, selectedProjectStatus],
   )
   const completedProjectTasks = useMemo(
-    () => projectTasks.filter((item) => (taskPreferences[item.key] || DEFAULT_TASK_PREFERENCE).checked),
-    [projectTasks, taskPreferences],
+    () => projectTasks.filter((item) => item.task.status === "완료"),
+    [projectTasks],
   )
   const groupTasksByProject = (items: ProjectTaskItem[]) =>
     Object.values(
@@ -278,10 +329,7 @@ export default function MyPage() {
     )
   const activeProjectTaskGroups = useMemo(() => groupTasksByProject(activeProjectTasks), [activeProjectTasks])
   const completedProjectTaskGroups = useMemo(() => groupTasksByProject(completedProjectTasks), [completedProjectTasks])
-  useEffect(() => {
-    const completedSet = new Set(completedProjectTasks.map((item) => item.key))
-    setSelectedCompletedProjectTaskKeys((prev) => prev.filter((key) => completedSet.has(key)))
-  }, [completedProjectTasks])
+  const hiddenProjectTaskGroups = useMemo(() => groupTasksByProject(hiddenProjectTasks), [hiddenProjectTasks])
 
   const orderedPersonalTasks = useMemo(() => personalTasks.slice().sort((a, b) => a.order - b.order), [personalTasks])
   const activePersonalTasks = useMemo(() => orderedPersonalTasks.filter((task) => !task.checked), [orderedPersonalTasks])
@@ -305,6 +353,10 @@ export default function MyPage() {
     } catch {
       toast.error("개인 업무 저장에 실패했습니다.")
     }
+  }
+
+  const toggleProjectStatusFilter = (status: ProjectStatusFilter) => {
+    setSelectedProjectStatus((prev) => (prev === status ? null : status))
   }
 
   const reorderProject = (dragged: string, target: string, position: "before" | "after" = "before") => {
@@ -384,41 +436,24 @@ export default function MyPage() {
     }
   }
 
-  const toggleCompletedProjectTaskSelection = (taskKey: string, checked: boolean) => {
-    setSelectedCompletedProjectTaskKeys((prev) => {
-      if (checked) {
-        if (prev.includes(taskKey)) return prev
-        return [...prev, taskKey]
-      }
-      return prev.filter((key) => key !== taskKey)
-    })
-  }
-
-  const deleteSelectedCompletedProjectTasks = () => {
-    if (selectedCompletedProjectTaskKeys.length === 0) return
+  const hideCompletedProjectTask = (taskKey: string) => {
     const next = { ...taskPreferences }
-    selectedCompletedProjectTaskKeys.forEach((taskKey) => {
-      next[taskKey] = {
-        ...(next[taskKey] || DEFAULT_TASK_PREFERENCE),
-        checked: true,
-        deleted: true,
-      }
-    })
-    setSelectedCompletedProjectTaskKeys([])
+    next[taskKey] = {
+      ...(next[taskKey] || DEFAULT_TASK_PREFERENCE),
+      deleted: true,
+    }
     void savePreferences(next)
   }
 
-  const deleteAllCompletedProjectTasks = () => {
+  const hideAllCompletedProjectTasks = () => {
     if (completedProjectTasks.length === 0) return
     const next = { ...taskPreferences }
     completedProjectTasks.forEach((item) => {
       next[item.key] = {
         ...(next[item.key] || DEFAULT_TASK_PREFERENCE),
-        checked: true,
         deleted: true,
       }
     })
-    setSelectedCompletedProjectTaskKeys([])
     void savePreferences(next)
   }
 
@@ -445,8 +480,14 @@ export default function MyPage() {
   const updatePersonal = (id: string, updates: Partial<MyPagePersonalTask>) =>
     void savePersonal(personalTasks.map((task) => (task.id === id ? { ...task, ...updates, updatedAt: Date.now() } : task)))
 
-  const removePersonal = (id: string) =>
+  const removePersonal = (id: string) => {
+    setExpandedPersonalMemoIds((prev) => prev.filter((memoId) => memoId !== id))
     void savePersonal(personalTasks.filter((task) => task.id !== id).map((task, i) => ({ ...task, order: i })))
+  }
+
+  const togglePersonalMemo = (id: string) => {
+    setExpandedPersonalMemoIds((prev) => (prev.includes(id) ? prev.filter((memoId) => memoId !== id) : [...prev, id]))
+  }
 
   const reorderPersonal = (dragged: string, target: string, position: "before" | "after" = "before") => {
     if (dragged === target) return
@@ -501,11 +542,12 @@ export default function MyPage() {
     })
   }
 
-  const renderProjectTaskCard = (item: ProjectTaskItem, options?: { selectableForDelete?: boolean }) => {
+  const renderProjectTaskCard = (item: ProjectTaskItem, options?: { selectableForHide?: boolean }) => {
     const pref = taskPreferences[item.key] || DEFAULT_TASK_PREFERENCE
     const important = pref.important || item.task.category === "중요"
-    const selectableForDelete = Boolean(options?.selectableForDelete)
-    const selectedForDelete = selectedCompletedProjectTaskKeys.includes(item.key)
+    const isCompleted = item.task.status === "완료"
+    const selectableForHide = Boolean(options?.selectableForHide)
+    const isHidden = Boolean(pref.deleted)
     return (
       <div
         key={item.key}
@@ -551,14 +593,16 @@ export default function MyPage() {
           />
         )}
         <div className="flex flex-wrap items-center gap-1.5">
-          {selectableForDelete ? (
-            <label className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600">
+          {selectableForHide ? (
+            <label className="inline-flex h-6 w-6 items-center justify-center rounded border border-slate-300 bg-white text-slate-600">
               <input
                 type="checkbox"
-                checked={selectedForDelete}
-                onChange={(e) => toggleCompletedProjectTaskSelection(item.key, e.target.checked)}
+                checked={false}
+                onChange={(e) => {
+                  if (e.target.checked) hideCompletedProjectTask(item.key)
+                }}
+                aria-label="숨길 완료 업무 선택"
               />
-              선택
             </label>
           ) : null}
           <button
@@ -579,24 +623,11 @@ export default function MyPage() {
           >
             <GripVertical className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            onClick={() => updateProjectPref(item.key, { checked: !pref.checked })}
-            className={cn(
-              "inline-flex h-6 w-6 items-center justify-center rounded-sm border-2 transition-colors",
-              pref.checked
-                ? "border-emerald-600 bg-emerald-600 text-white shadow-[0_0_0_2px_rgba(16,185,129,0.2)]"
-                : "border-slate-300 bg-white text-transparent hover:border-slate-400",
-            )}
-            aria-label={pref.checked ? "완료 해제" : "완료 처리"}
-            title={pref.checked ? "완료 해제" : "완료 처리"}
-          >
-            <CheckCircle2 className="h-4 w-4" />
-          </button>
           <Badge variant="outline">{item.departmentPage}</Badge>
           <ProjectTypeBadge type={item.projectType} />
           <CategoryBadge category={item.task.category} />
           <StatusBadge status={item.task.status} />
+          {isHidden ? <Badge variant="secondary">숨김</Badge> : null}
           <div className="ml-auto flex items-center gap-1">
             {(["high", "medium", "low"] as const).map((p) => (
               <button
@@ -638,7 +669,7 @@ export default function MyPage() {
           </div>
         </div>
         <div className="mt-1.5 flex items-start justify-between gap-2">
-          <p className={cn("text-sm font-semibold leading-5", pref.checked && "line-through")}>{item.task.task}</p>
+          <p className={cn("text-sm font-semibold leading-5", isCompleted && "line-through")}>{item.task.task}</p>
           <p className="shrink-0 text-[11px] text-slate-500">
             상위업무: {item.ancestorNames.length > 0 ? item.ancestorNames.join(" > ") : "없음 (최상위)"}
           </p>
@@ -655,7 +686,11 @@ export default function MyPage() {
     )
   }
 
-  const renderPersonalTaskCard = (task: MyPagePersonalTask) => (
+  const renderPersonalTaskCard = (task: MyPagePersonalTask) => {
+    const hasMemo = Boolean(task.memo)
+    const isMemoExpanded = expandedPersonalMemoIds.includes(task.id)
+
+    return (
     <div
       key={task.id}
       onDragOver={(e) => {
@@ -732,8 +767,29 @@ export default function MyPage() {
           <CheckCircle2 className="h-4 w-4" />
         </button>
         <p className={cn("flex-1 font-semibold", task.checked && "line-through")}>{task.title}</p>
+        {hasMemo ? (
+          <button
+            type="button"
+            onClick={() => togglePersonalMemo(task.id)}
+            className={cn(
+              "inline-flex h-7 items-center gap-1 rounded-full border px-2 text-xs font-semibold transition-colors",
+              isMemoExpanded
+                ? "border-amber-400 bg-amber-100 text-amber-800"
+                : "border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300 hover:bg-amber-100",
+            )}
+            aria-label={isMemoExpanded ? "메모 접기" : "메모 보기"}
+            title={isMemoExpanded ? "메모 접기" : "메모 보기"}
+          >
+            <MessageSquareText className="h-3.5 w-3.5" />
+            메모
+          </button>
+        ) : null}
       </div>
-      {task.memo ? <p className="mt-1 text-xs text-slate-500">{task.memo}</p> : null}
+      {hasMemo && isMemoExpanded ? (
+        <div className="mt-2 whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+          {task.memo}
+        </div>
+      ) : null}
       <div className="mt-2 flex flex-wrap gap-2">
         {(["high", "medium", "low"] as const).map((p) => (
           <button key={p} type="button" onClick={() => updatePersonal(task.id, { priority: p })} className={cn("rounded-full px-3 py-1 text-xs", task.priority === p ? priorityMeta[p].className : "bg-slate-100 text-slate-500")}>
@@ -761,7 +817,8 @@ export default function MyPage() {
         </div>
       ) : null}
     </div>
-  )
+    )
+  }
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.12),_transparent_35%),linear-gradient(180deg,#f8fbff_0%,#f5f7fb_55%,#ffffff_100%)] px-3 py-6 lg:px-6">
@@ -788,11 +845,34 @@ export default function MyPage() {
 
         <section className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
           <Card className="h-fit">
-            <CardHeader className="pb-3">
+            <CardHeader className="pb-0">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <CardTitle>프로젝트 연동 업무</CardTitle>
-                  <CardDescription>완료/미완료가 분리되며 드래그앤드롭으로 우선순서를 조정합니다.</CardDescription>
+                  <CardDescription>스케줄 상태에 따라 진행/완료가 분리되며 드래그앤드롭으로 우선순서를 조정합니다.</CardDescription>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {PROJECT_STATUS_FILTERS.map((status) => {
+                      const isSelected = selectedProjectStatus === status
+                      const meta = projectStatusFilterMeta[status]
+                      return (
+                        <button
+                          key={status}
+                          type="button"
+                          onClick={() => toggleProjectStatusFilter(status)}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
+                            isSelected ? meta.activeClassName : meta.className,
+                          )}
+                          aria-pressed={isSelected}
+                        >
+                          {status}
+                          <span className={cn("rounded-full px-1.5 py-0.5 text-[10px]", isSelected ? "bg-white/20" : "bg-white/80")}>
+                            {projectStatusCounts[status] || 0}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
                 <Button type="button" variant="outline" size="sm" onClick={() => setIsProjectTasksCollapsed((prev) => !prev)} className="shrink-0">
                   <ChevronDown className={cn("h-4 w-4 transition-transform", isProjectTasksCollapsed && "-rotate-90")} />
@@ -801,21 +881,21 @@ export default function MyPage() {
               </div>
             </CardHeader>
             {!isProjectTasksCollapsed && (
-              <CardContent>
-                {projectTasks.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
-                    <UserRoundSearch className="mx-auto mb-2 h-6 w-6" />연동된 업무가 없습니다.
-                  </div>
+              <CardContent className="pt-0">
+	                {projectTasks.length === 0 && hiddenProjectTasks.length === 0 ? (
+	                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+	                    <UserRoundSearch className="mx-auto mb-2 h-6 w-6" />연동된 업무가 없습니다.
+	                  </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="space-y-2">
-                      <button
+                    <div className="space-y-1">
+	                      <button
                         type="button"
                         onClick={() => setIsProjectActiveCollapsed((prev) => !prev)}
                         className="flex items-center gap-1 text-xs font-semibold text-slate-500"
                       >
                         <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", isProjectActiveCollapsed && "-rotate-90")} />
-                        진행 업무 ({activeProjectTasks.length})
+                        {selectedProjectStatus ? `${selectedProjectStatus} 업무` : "전체 업무"} ({activeProjectTasks.length})
                       </button>
                       {!isProjectActiveCollapsed &&
                         activeProjectTaskGroups.map((group) => (
@@ -858,21 +938,24 @@ export default function MyPage() {
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={deleteSelectedCompletedProjectTasks}
-                            disabled={selectedCompletedProjectTaskKeys.length === 0}
+                            onClick={hideAllCompletedProjectTasks}
+                            disabled={completedProjectTasks.length === 0}
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            선택삭제
+                            <EyeOff className="h-3.5 w-3.5" />
+                            일괄숨김
+                          </Button>
+                          <Button type="button" variant="outline" size="sm" disabled>
+                            <EyeOff className="h-3 w-3" />
+                            숨김 {hiddenProjectTasks.length}
                           </Button>
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={deleteAllCompletedProjectTasks}
-                            disabled={completedProjectTasks.length === 0}
+                            onClick={() => setIsProjectHiddenCollapsed((prev) => !prev)}
+                            aria-label={isProjectHiddenCollapsed ? "숨긴 업무 펼치기" : "숨긴 업무 접기"}
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            일괄삭제
+                            {isProjectHiddenCollapsed ? <Plus className="h-3.5 w-3.5" /> : <Minus className="h-3.5 w-3.5" />}
                           </Button>
                         </div>
                       </div>
@@ -898,17 +981,50 @@ export default function MyPage() {
                                 </div>
                               </button>
                               {!collapsedProjectGroups[`completed-${group.key}`] ? (
-                                <div className="space-y-2">{group.items.map((item) => renderProjectTaskCard(item, { selectableForDelete: true }))}</div>
-                              ) : null}
-                            </div>
-                          )) : (
+	                                <div className="space-y-2">{group.items.map((item) => renderProjectTaskCard(item, { selectableForHide: true }))}</div>
+	                              ) : null}
+	                            </div>
+	                          )) : (
                             <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">완료된 업무가 없습니다.</div>
                           )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
+	                        </div>
+	                      )}
+	                    </div>
+		                    {!isProjectHiddenCollapsed && (
+		                      <div className="border-t border-dashed border-slate-300 pt-3">
+		                        <div className="space-y-2">
+		                          {hiddenProjectTasks.length > 0 ? hiddenProjectTaskGroups.map((group) => (
+		                            <div key={`hidden-${group.key}`} className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/40 p-2">
+		                              <button
+		                                type="button"
+		                                onClick={() => toggleProjectGroupCollapsed(`hidden-${group.key}`)}
+		                                className="flex w-full items-center justify-between gap-2 text-left"
+		                              >
+		                                <div className="flex items-center gap-2">
+		                                  <ChevronDown
+		                                    className={cn(
+		                                      "h-3.5 w-3.5 text-slate-500 transition-transform",
+		                                      collapsedProjectGroups[`hidden-${group.key}`] && "-rotate-90",
+		                                    )}
+		                                  />
+		                                  <EyeOff className="h-3.5 w-3.5 text-slate-500" />
+		                                  <Badge variant="outline">{group.departmentPage}</Badge>
+		                                  <ProjectTypeBadge type={group.projectType} />
+		                                  <span className="text-base font-bold text-slate-800">{group.projectName}</span>
+		                                </div>
+		                              </button>
+		                              {!collapsedProjectGroups[`hidden-${group.key}`] ? (
+		                                <div className="space-y-2">{group.items.map((item) => renderProjectTaskCard(item))}</div>
+		                              ) : null}
+		                            </div>
+		                          )) : (
+		                            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">숨김 처리된 업무가 없습니다.</div>
+		                          )}
+		                        </div>
+		                      </div>
+		                    )}
+	                  </div>
+	                )}
               </CardContent>
             )}
           </Card>
@@ -920,9 +1036,15 @@ export default function MyPage() {
                 <CardDescription>완료/미완료가 분리되며 개별 작성/수정/삭제가 가능합니다.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="grid gap-2 md:grid-cols-[1fr_2fr_auto]">
+                <div className="grid gap-2 md:grid-cols-[1fr_2fr_auto] md:items-start">
                   <Input value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} placeholder="업무 제목" />
-                  <Input value={draftMemo} onChange={(e) => setDraftMemo(e.target.value)} placeholder="메모 (선택)" />
+                  <Textarea
+                    value={draftMemo}
+                    onChange={(e) => setDraftMemo(e.target.value)}
+                    placeholder="메모 (선택)"
+                    rows={1}
+                    className="h-9 min-h-9 resize-y py-1"
+                  />
                   <Button type="button" onClick={addPersonal}><Plus className="h-4 w-4" />추가</Button>
                 </div>
 
