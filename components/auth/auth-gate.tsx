@@ -31,6 +31,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
 
   const permissionKey = resolvePathToPermissionKey(pathname)
+  if (
+    pathname.startsWith("/weekly-work") &&
+    !isAdmin &&
+    !pagePermissions.strategyWeeklyWork &&
+    !pagePermissions.faWeeklyWork &&
+    !pagePermissions.ictWeeklyWork
+  ) {
+    return <AccessDenied message="이 페이지를 볼 수 있는 권한이 없습니다." />
+  }
   if (permissionKey && !isAdmin && !pagePermissions[permissionKey]) {
     return <AccessDenied message="이 페이지를 볼 수 있는 권한이 없습니다." />
   }

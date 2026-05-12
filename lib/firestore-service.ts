@@ -68,6 +68,8 @@ export type MyPagePersonalTask = {
   id: string
   title: string
   memo?: string
+  startDate?: string
+  endDate?: string
   checked: boolean
   priority: MyPageTaskPriority
   important: boolean
@@ -270,6 +272,8 @@ function normalizeMyPagePersonalTasks(raw: unknown): MyPagePersonalTask[] {
       id: toStringOrEmpty(candidate.id) || `personal-${Date.now()}-${index}`,
       title,
       memo: toOptionalString(candidate.memo),
+      startDate: toOptionalString(candidate.startDate),
+      endDate: toOptionalString(candidate.endDate),
       checked: Boolean(candidate.checked),
       priority,
       important: Boolean(candidate.important),
@@ -431,6 +435,18 @@ function normalizeTask(raw: any): Task {
     startDate: toStringOrEmpty(raw?.startDate) || toStringOrEmpty(raw?.start_date) || todayLabel(),
     endDate: toStringOrEmpty(raw?.endDate) || toStringOrEmpty(raw?.end_date) || todayLabel(),
     manDays: toNumberOr(raw?.manDays ?? raw?.man_days, 0),
+    completionPhoto:
+      raw?.completionPhoto && typeof raw.completionPhoto === "object"
+        ? {
+            url: toStringOrEmpty(raw.completionPhoto.url),
+            path: toStringOrEmpty(raw.completionPhoto.path),
+            name: toStringOrEmpty(raw.completionPhoto.name),
+            contentType: toOptionalString(raw.completionPhoto.contentType),
+            size: typeof raw.completionPhoto.size === "number" ? raw.completionPhoto.size : undefined,
+            uploadedAt: toOptionalString(raw.completionPhoto.uploadedAt),
+            uploadedBy: toOptionalString(raw.completionPhoto.uploadedBy),
+          }
+        : undefined,
     isSubTask: Boolean(raw?.isSubTask ?? raw?.is_sub_task ?? parentId),
     isHidden: toBooleanOr(raw?.isHidden ?? raw?.is_hidden, false),
     displayOrder: toNumberOr(raw?.displayOrder, Number.MAX_SAFE_INTEGER),
@@ -1159,6 +1175,8 @@ export async function saveMyPagePersonalTasks(email: string, tasks: MyPagePerson
       id: toStringOrEmpty(task.id) || `personal-${Date.now()}-${index}`,
       title: toStringOrEmpty(task.title),
       memo: toOptionalString(task.memo),
+      startDate: toOptionalString(task.startDate),
+      endDate: toOptionalString(task.endDate),
       checked: Boolean(task.checked),
       priority,
       important: Boolean(task.important),

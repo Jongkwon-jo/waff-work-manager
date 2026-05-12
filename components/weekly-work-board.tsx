@@ -16,6 +16,7 @@ import {
   type GlobalSchedule,
   type DepartmentPersonGroup,
   type DepartmentPersonSettings,
+  type MyPagePersonalTask,
 } from "@/lib/firestore-service"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -33,6 +34,9 @@ type WeeklyTaskItem = {
   projectName: string
   subProjectName: string
   projectType: string
+  departmentGroup: DepartmentPersonGroup
+  departmentLabel: string
+  managementHref: string
   team: string
   person: string
   task: Task
@@ -71,6 +75,14 @@ type ProjectMemoDialogPayload = {
   memos: string[]
 }
 
+export type WeeklyWorkDataSource = {
+  id: string
+  label: string
+  departmentGroup: DepartmentPersonGroup
+  managementHref: string
+  subscribeToData: (callback: (projects: Project[]) => void) => () => void
+}
+
 function getWeeklyStatusBarClass(status: Task["status"]) {
   switch (status) {
     case "완료":
@@ -96,6 +108,8 @@ function flattenLeafTasksWithAncestors(tasks: Task[], ancestors: Task[] = []): A
 
 function parseTaskDate(value?: string) {
   if (!value) return undefined
+  const isoMatched = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (isoMatched) return new Date(Number(isoMatched[1]), Number(isoMatched[2]) - 1, Number(isoMatched[3]))
   const matched = value.match(/(\d{1,2})\D+(\d{1,2})/)
   if (!matched) return undefined
   const year = new Date().getFullYear()
@@ -158,9 +172,7 @@ interface WeeklyWorkBoardProps {
   title: string
   description: string
   homeHref: string
-  managementHref: string
-  subscribeToData: (callback: (projects: Project[]) => void) => () => void
-  allowedDepartmentGroups: DepartmentPersonGroup[]
+  dataSources: WeeklyWorkDataSource[]
   tone: WeeklyBoardTone
 }
 
@@ -168,15 +180,16 @@ export function WeeklyWorkBoard({
   title,
   description,
   homeHref,
-  managementHref,
-  subscribeToData,
-  allowedDepartmentGroups,
+  dataSources,
   tone,
 }: WeeklyWorkBoardProps) {
   const { user } = useAuth()
-  const [projects, setProjects] = useState<Project[]>([])
+  const [projectsBySource, setProjectsBySource] = useState<Record<string, Project[]>>({})
+  const [selectedDepartment, setSelectedDepartment] = useState<DepartmentPersonGroup | "all">("all")
   const [selectedPerson, setSelectedPerson] = useState("all")
+  const [profileDepartment, setProfileDepartment] = useState<DepartmentPersonGroup | "">("")
   const [profileDefaultPerson, setProfileDefaultPerson] = useState("")
+  const [profilePersonalTasks, setProfilePersonalTasks] = useState<MyPagePersonalTask[]>([])
   const [selectedTaskItem, setSelectedTaskItem] = useState<WeeklyTaskItem | null>(null)
   const [selectedProjectMemo, setSelectedProjectMemo] = useState<ProjectMemoDialogPayload | null>(null)
   const [currentWeekAnchor, setCurrentWeekAnchor] = useState(() => new Date())
@@ -184,12 +197,18 @@ export function WeeklyWorkBoard({
   const [departmentPersonSettings, setDepartmentPersonSettings] = useState<DepartmentPersonSettings>(
     DEFAULT_DEPARTMENT_PERSON_SETTINGS,
   )
+  const hasAppliedProfileDepartmentRef = useRef(false)
   const hasAppliedProfileDefaultRef = useRef(false)
 
   useEffect(() => {
-    const unsubscribe = subscribeToData(setProjects)
-    return () => unsubscribe()
-  }, [subscribeToData])
+    setProjectsBySource({})
+    const unsubscribes = dataSources.map((source) =>
+      source.subscribeToData((projects) => {
+        setProjectsBySource((prev) => ({ ...prev, [source.id]: projects }))
+      }),
+    )
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
+  }, [dataSources])
 
   useEffect(() => {
     const unsubscribe = subscribeDepartmentPersonSettings(setDepartmentPersonSettings)
@@ -203,13 +222,18 @@ export function WeeklyWorkBoard({
 
   useEffect(() => {
     const email = user?.email || ""
+    setProfileDepartment("")
     setProfileDefaultPerson("")
+    setProfilePersonalTasks([])
+    hasAppliedProfileDepartmentRef.current = false
     hasAppliedProfileDefaultRef.current = false
     if (!email) return
 
     const unsubscribe = subscribeCurrentUserProfile(email, (profile) => {
+      setProfileDepartment(profile?.department || "")
       const preferred = (profile?.taskAliases || [])[0]?.trim() || ""
       setProfileDefaultPerson(preferred)
+      setProfilePersonalTasks(profile?.myPagePersonalTasks || [])
     })
     return () => unsubscribe()
   }, [user?.email])
@@ -234,39 +258,131 @@ export function WeeklyWorkBoard({
     [today, weekStart],
   )
 
-  const allowedPersons = useMemo(
+  const departmentOptions = useMemo(() => dataSources.map((source) => source.departmentGroup), [dataSources])
+
+  useEffect(() => {
+    if (hasAppliedProfileDepartmentRef.current) return
+    if (!profileDepartment) return
+    if (!departmentOptions.includes(profileDepartment)) return
+    setSelectedDepartment(profileDepartment)
+    hasAppliedProfileDepartmentRef.current = true
+  }, [departmentOptions, profileDepartment])
+
+  useEffect(() => {
+    if (selectedDepartment === "all") return
+    if (departmentOptions.includes(selectedDepartment)) return
+    setSelectedDepartment("all")
+  }, [departmentOptions, selectedDepartment])
+
+  const selectedDataSources = useMemo(
     () =>
-      Array.from(new Set(allowedDepartmentGroups.flatMap((group) => departmentPersonSettings[group] || []))).sort((a, b) =>
-        a.localeCompare(b, "ko"),
-      ),
-    [allowedDepartmentGroups, departmentPersonSettings],
+      selectedDepartment === "all"
+        ? dataSources
+        : dataSources.filter((source) => source.departmentGroup === selectedDepartment),
+    [dataSources, selectedDepartment],
+  )
+
+  const allowedPersons = useMemo(
+    () => {
+      const people = selectedDataSources.flatMap((source) => departmentPersonSettings[source.departmentGroup] || [])
+      const profilePerson = profileDefaultPerson || user?.email?.split("@")[0] || ""
+      const shouldIncludePersonalPerson =
+        profilePerson &&
+        profilePersonalTasks.some((task) => task.startDate || task.endDate) &&
+        (selectedDepartment === "all" || selectedDepartment === profileDepartment)
+      if (shouldIncludePersonalPerson) people.push(profilePerson)
+      return Array.from(new Set(people)).sort((a, b) => a.localeCompare(b, "ko"))
+    },
+    [departmentPersonSettings, profileDefaultPerson, profileDepartment, profilePersonalTasks, selectedDataSources, selectedDepartment, user?.email],
   )
 
   const allowedPersonSet = useMemo(() => new Set(allowedPersons), [allowedPersons])
 
   const weeklyTasks = useMemo<WeeklyTaskItem[]>(() => {
-    return projects
-      .filter((project) => !project.isHidden)
-      .flatMap((project) =>
-        flattenLeafTasksWithAncestors(project.tasks)
-          .filter(({ task }) => !task.isHidden)
-          .filter(({ task }) => isTaskInCurrentWeek(task, weekStart, weekEnd))
-          .flatMap(({ task, ancestors }) =>
-            splitPersons(task.person)
-              .filter((person) => allowedPersonSet.has(person))
-              .map((person) => ({
-                projectId: project.id,
-                projectName: project.name,
-                subProjectName: ancestors[0]?.task || "",
-                projectType: project.type,
-                team: task.department || "기타",
-                person,
-                task,
-                startTime: getSortTime(task),
-              })),
+    const profilePerson = profileDefaultPerson || user?.email?.split("@")[0] || "개인"
+    const shouldIncludePersonalTasks = selectedDepartment === "all" || selectedDepartment === profileDepartment
+    const personalWeeklyTasks: WeeklyTaskItem[] = shouldIncludePersonalTasks
+      ? profilePersonalTasks
+          .filter((task) => task.startDate || task.endDate)
+          .filter((task) =>
+            isTaskInCurrentWeek(
+              {
+                id: task.id,
+                projectId: "personal",
+                task: task.title,
+                memo: task.memo,
+                category: task.important ? "중요" : "일반",
+                department: profileDepartment || "기타",
+                person: profilePerson,
+                startDate: task.startDate || task.endDate || "",
+                endDate: task.endDate || task.startDate || "",
+                status: task.checked ? "완료" : "진행",
+                manDays: 0,
+              },
+              weekStart,
+              weekEnd,
+            ),
+          )
+          .map((task) => ({
+            projectId: `personal-${task.id}`,
+            projectName: "개인 업무",
+            subProjectName: "",
+            projectType: "Etc",
+            departmentGroup: profileDepartment || "기타",
+            departmentLabel: "개인",
+            managementHref: "/my-page",
+            team: profileDepartment || "기타",
+            person: profilePerson,
+            task: {
+              id: task.id,
+              projectId: "personal",
+              task: task.title,
+              memo: task.memo,
+              category: task.important ? "중요" : "일반",
+              department: profileDepartment || "기타",
+              person: profilePerson,
+              startDate: task.startDate || task.endDate || "",
+              endDate: task.endDate || task.startDate || "",
+              status: task.checked ? "완료" : "진행",
+              manDays: 0,
+            },
+            startTime: parseTaskDate(task.startDate || task.endDate)?.getTime() ?? Number.MAX_SAFE_INTEGER,
+          }))
+      : []
+
+    return [
+      ...selectedDataSources
+      .flatMap((source) =>
+        (projectsBySource[source.id] || [])
+          .filter((project) => !project.isHidden)
+          .flatMap((project) =>
+            flattenLeafTasksWithAncestors(project.tasks)
+              .filter(({ task }) => !task.isHidden)
+              .filter(({ task }) => isTaskInCurrentWeek(task, weekStart, weekEnd))
+              .flatMap(({ task, ancestors }) =>
+                splitPersons(task.person)
+                  .filter((person) => allowedPersonSet.has(person))
+                  .map((person) => ({
+                    projectId: `${source.id}-${project.id}`,
+                    projectName: project.name,
+                    subProjectName: ancestors[0]?.task || "",
+                    projectType: project.type,
+                    departmentGroup: source.departmentGroup,
+                    departmentLabel: source.label,
+                    managementHref: source.managementHref,
+                    team: task.department || "기타",
+                    person,
+                    task,
+                    startTime: getSortTime(task),
+                  })),
+              ),
           ),
-      )
+      ),
+      ...personalWeeklyTasks,
+    ]
       .sort((a, b) => {
+        const byDepartment = a.departmentLabel.localeCompare(b.departmentLabel, "ko")
+        if (byDepartment !== 0) return byDepartment
         const byPerson = a.person.localeCompare(b.person, "ko")
         if (byPerson !== 0) return byPerson
         if (a.startTime !== b.startTime) return a.startTime - b.startTime
@@ -274,7 +390,7 @@ export function WeeklyWorkBoard({
         if (byTeam !== 0) return byTeam
         return a.task.task.localeCompare(b.task.task, "ko")
       })
-  }, [allowedPersonSet, projects, weekEnd, weekStart])
+  }, [allowedPersonSet, profileDefaultPerson, profileDepartment, profilePersonalTasks, projectsBySource, selectedDataSources, selectedDepartment, user?.email, weekEnd, weekStart])
 
   const personOptions = allowedPersons
 
@@ -300,7 +416,7 @@ export function WeeklyWorkBoard({
   const groupedTasksByPersonProject = useMemo(() => {
     const personMap = new Map<
       string,
-      Map<string, { projectName: string; subProjectName: string; projectType: string; items: WeeklyTaskItem[] }>
+      Map<string, { projectName: string; subProjectName: string; projectType: string; departmentLabel: string; items: WeeklyTaskItem[] }>
     >()
     visibleTasks.forEach((item) => {
       if (!personMap.has(item.person)) personMap.set(item.person, new Map())
@@ -311,6 +427,7 @@ export function WeeklyWorkBoard({
           projectName: item.projectName,
           subProjectName: item.subProjectName,
           projectType: item.projectType,
+          departmentLabel: item.departmentLabel,
           items: [],
         })
       }
@@ -327,6 +444,7 @@ export function WeeklyWorkBoard({
             projectName: project.projectName,
             subProjectName: project.subProjectName,
             projectType: project.projectType,
+            departmentLabel: project.departmentLabel,
             items: project.items.sort((a, b) => {
               if (a.startTime !== b.startTime) return a.startTime - b.startTime
               return a.task.task.localeCompare(b.task.task, "ko")
@@ -339,6 +457,8 @@ export function WeeklyWorkBoard({
           }),
       }))
   }, [visibleTasks])
+
+  const selectedManagementHref = selectedDataSources[0]?.managementHref || homeHref
 
   const weeklyGlobalSchedules = useMemo<WeeklyGlobalScheduleItem[]>(() => {
     return globalSchedules
@@ -417,23 +537,39 @@ export function WeeklyWorkBoard({
                 <h1 className="text-3xl font-bold tracking-tight text-slate-900">{title}</h1>
                 <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
               </div>
-              <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
-                <Badge variant="outline" className={`gap-1.5 ${tone.summaryBadge}`}>
-                  <CalendarDays className="h-3.5 w-3.5" />
-                  {format(weekStart, "yyyy년 M월 d일", { locale: ko })} - {format(weekEnd, "M월 d일", { locale: ko })}
-                </Badge>
-                <Badge variant="outline" className="gap-1.5">
-                  <Users className="h-3.5 w-3.5" />
-                  {selectedPerson === "all" ? "전체 인원" : selectedPerson} / {visibleTasks.length}개 업무
-                </Badge>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Select value={selectedPerson} onValueChange={setSelectedPerson}>
-                <SelectTrigger className="h-10 min-w-[180px] bg-white">
-                  <SelectValue placeholder="담당자 선택" />
-                </SelectTrigger>
+	              <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+	                <Badge variant="outline" className={`gap-1.5 ${tone.summaryBadge}`}>
+	                  <CalendarDays className="h-3.5 w-3.5" />
+	                  {format(weekStart, "yyyy년 M월 d일", { locale: ko })} - {format(weekEnd, "M월 d일", { locale: ko })}
+	                </Badge>
+	                <Badge variant="outline" className="gap-1.5">
+	                  {selectedDepartment === "all" ? "전체 부서" : selectedDepartment}
+	                </Badge>
+	                <Badge variant="outline" className="gap-1.5">
+	                  <Users className="h-3.5 w-3.5" />
+	                  {selectedPerson === "all" ? "전체 인원" : selectedPerson} / {visibleTasks.length}개 업무
+	                </Badge>
+	              </div>
+	            </div>
+	
+	            <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-auto lg:grid-cols-none lg:auto-cols-max lg:grid-flow-col">
+	              <Select value={selectedDepartment} onValueChange={(value) => setSelectedDepartment(value as DepartmentPersonGroup | "all")}>
+	                <SelectTrigger className="h-10 w-full bg-white lg:w-[150px]">
+	                  <SelectValue placeholder="부서 선택" />
+	                </SelectTrigger>
+	                <SelectContent>
+	                  <SelectItem value="all">전체 부서</SelectItem>
+	                  {dataSources.map((source) => (
+	                    <SelectItem key={source.id} value={source.departmentGroup}>
+	                      {source.label}
+	                    </SelectItem>
+	                  ))}
+	                </SelectContent>
+	              </Select>
+	              <Select value={selectedPerson} onValueChange={setSelectedPerson}>
+	                <SelectTrigger className="h-10 w-full bg-white lg:w-[180px]">
+	                  <SelectValue placeholder="담당자 선택" />
+	                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">전체 인원</SelectItem>
                   {personOptions.map((person) => (
@@ -448,10 +584,10 @@ export function WeeklyWorkBoard({
                   <Home className="h-4 w-4" />
                   메인
                 </Link>
-              </Button>
-              <Button asChild variant="outline">
-                <Link href={managementHref}>스케줄</Link>
-              </Button>
+	              </Button>
+	              <Button asChild variant="outline">
+	                <Link href={selectedManagementHref}>스케줄</Link>
+	              </Button>
               <Button type="button" variant="outline" onClick={handleLogout}>
                 <LogOut className="h-4 w-4" />
                 로그아웃
@@ -523,8 +659,11 @@ export function WeeklyWorkBoard({
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
                               <div className="flex items-start gap-1.5">
-                                <ProjectTypeBadge type={project.projectType} />
-                                <div className="min-w-0">
+	                                <ProjectTypeBadge type={project.projectType} />
+	                                <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+	                                  {project.departmentLabel}
+	                                </Badge>
+	                                <div className="min-w-0">
                                   <span className="block truncate text-[13px] font-semibold leading-4 text-slate-900">{project.projectName}</span>
                                   {project.subProjectName && (
                                     <div className="mt-0.5 truncate text-[10px] leading-4 text-slate-500">하위: {project.subProjectName}</div>
@@ -711,8 +850,11 @@ export function WeeklyWorkBoard({
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0">
                                 <div className="flex items-start gap-1.5">
-                                  <ProjectTypeBadge type={project.projectType} />
-                                  <div className="min-w-0">
+	                                  <ProjectTypeBadge type={project.projectType} />
+	                                  <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+	                                    {project.departmentLabel}
+	                                  </Badge>
+	                                  <div className="min-w-0">
                                     <div className="truncate text-xs font-semibold leading-4 text-slate-900">{project.projectName}</div>
                                     {project.subProjectName && (
                                       <div className="mt-0.5 truncate text-[10px] leading-4 text-slate-500">하위: {project.subProjectName}</div>

@@ -1239,11 +1239,11 @@ export default function FaWorkManagementPage() {
                 className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-background px-3 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
               >
                 <UserRoundSearch className="h-3.5 w-3.5" />
-                마이 페이지
+                마이 워크
               </Link>
             )}
             <Link
-              href="/fa-work-management/weekly"
+              href="/weekly-work"
               className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-background px-3 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
             >
               <CalendarDays className="h-3.5 w-3.5" />
