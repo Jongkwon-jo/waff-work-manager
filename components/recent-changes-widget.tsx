@@ -45,7 +45,7 @@ const FIELD_LABELS: Record<string, string> = {
 }
 
 const SOURCE_LABELS: Record<string, string> = {
-  "my-page": "마이페이지",
+  "my-page": "마이 워크",
   "work-management": "전략기획 스케줄",
   "fa-work-management": "FA 스케줄",
   gantt: "간트뷰",
@@ -145,7 +145,7 @@ export function RecentChangesWidget({
   onJump,
   refreshIntervalMs = 60_000,
   title = "최근 사용자 변경",
-  description = "사용자가 마이페이지 등에서 직접 편집한 업무를 확인합니다.",
+  description = "사용자가 마이 워크 등에서 직접 편집한 업무를 확인합니다.",
   emptyMessage = "최근 사용자 변경이 없습니다.",
 }: RecentChangesWidgetProps) {
   const [entries, setEntries] = useState<RecentChangeEntry[]>([])

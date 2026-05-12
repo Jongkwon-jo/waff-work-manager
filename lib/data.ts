@@ -1,6 +1,16 @@
 ﻿export type TaskStatus = "완료" | "진행" | "예정" | "보류" | "미정"
 export type TaskCategory = "일반" | "중요" | "정기" | "상시"
 
+export type TaskCompletionPhoto = {
+  url: string
+  path: string
+  name: string
+  contentType?: string
+  size?: number
+  uploadedAt?: string
+  uploadedBy?: string
+}
+
 export const EDITABLE_TASK_FIELD_OPTIONS = [
   { key: "status", label: "상태" },
   { key: "memo", label: "메모" },
@@ -31,6 +41,7 @@ export interface Task {
   endDate: string
   status: TaskStatus
   manDays: number
+  completionPhoto?: TaskCompletionPhoto
   isSubTask?: boolean
   subTasks?: Task[]
 }

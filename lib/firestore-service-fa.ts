@@ -175,6 +175,18 @@ function normalizeTask(raw: any): Task {
     startDate: toStringOrEmpty(raw?.startDate) || toStringOrEmpty(raw?.start_date) || todayLabel(),
     endDate: toStringOrEmpty(raw?.endDate) || toStringOrEmpty(raw?.end_date) || todayLabel(),
     manDays: toNumberOr(raw?.manDays ?? raw?.man_days, 0),
+    completionPhoto:
+      raw?.completionPhoto && typeof raw.completionPhoto === "object"
+        ? {
+            url: toStringOrEmpty(raw.completionPhoto.url),
+            path: toStringOrEmpty(raw.completionPhoto.path),
+            name: toStringOrEmpty(raw.completionPhoto.name),
+            contentType: toOptionalString(raw.completionPhoto.contentType),
+            size: typeof raw.completionPhoto.size === "number" ? raw.completionPhoto.size : undefined,
+            uploadedAt: toOptionalString(raw.completionPhoto.uploadedAt),
+            uploadedBy: toOptionalString(raw.completionPhoto.uploadedBy),
+          }
+        : undefined,
     isSubTask: Boolean(raw?.isSubTask ?? raw?.is_sub_task ?? parentId),
     isHidden: toBooleanOr(raw?.isHidden ?? raw?.is_hidden, false),
     displayOrder: toNumberOr(raw?.displayOrder, Number.MAX_SAFE_INTEGER),
