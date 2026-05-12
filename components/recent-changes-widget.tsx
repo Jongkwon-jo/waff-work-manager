@@ -149,7 +149,7 @@ export function RecentChangesWidget({
   emptyMessage = "최근 사용자 변경이 없습니다.",
 }: RecentChangesWidgetProps) {
   const [entries, setEntries] = useState<RecentChangeEntry[]>([])
-  const [isOpen, setIsOpen] = useState(true)
+  const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [rollingBackId, setRollingBackId] = useState<string | null>(null)
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set())

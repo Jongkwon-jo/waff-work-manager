@@ -37,6 +37,8 @@ const GLOBAL_SCHEDULES_DOC = "global_schedules"
 const MY_PAGE_EDITABLE_FIELDS_DOC = "my_page_editable_fields"
 const USER_PROFILES_COLLECTION = "user_profiles"
 const GANTT_COLLAPSE_STATE_FIELD = "ganttCollapseState"
+const GANTT_LEFT_PANEL_WIDTH_FIELD = "ganttLeftPanelWidth"
+const GANTT_DETAIL_PANEL_WIDTH_FIELD = "ganttDetailPanelWidth"
 const USER_PAGE_PERMISSIONS_COLLECTION = "user_page_permissions"
 
 export type DashboardSortBy = "name" | "type" | "progress" | "latest"
@@ -191,6 +193,8 @@ export const DEFAULT_GANTT_COLLAPSE_STATE: GanttCollapseState = {
   collapsedProjectIds: [],
   collapsedTaskIds: [],
 }
+export const DEFAULT_GANTT_LEFT_PANEL_WIDTH = 0
+export const DEFAULT_GANTT_DETAIL_PANEL_WIDTH = 0
 
 function toStringOrEmpty(value: unknown): string {
   if (typeof value === "string") return value.trim()
@@ -760,6 +764,90 @@ export async function saveGanttCollapseState(email: string, state: GanttCollapse
   )
 }
 
+export function subscribeGanttLeftPanelWidth(email: string, callback: (width: number | null) => void) {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) {
+    callback(null)
+    return () => {}
+  }
+
+  const profileRef = doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail))
+  return onSnapshot(
+    profileRef,
+    (snapshot) => {
+      const profile = snapshot.data() as { ganttLeftPanelWidth?: unknown } | undefined
+      const raw = profile?.[GANTT_LEFT_PANEL_WIDTH_FIELD]
+      const width = toNumberOr(raw, DEFAULT_GANTT_LEFT_PANEL_WIDTH)
+      callback(width > 0 ? width : null)
+    },
+    (error) => {
+      console.error("Gantt left panel width snapshot error:", error)
+      callback(null)
+    },
+  )
+}
+
+export async function saveGanttLeftPanelWidth(email: string, width: number): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  const normalizedWidth = Math.round(toNumberOr(width, DEFAULT_GANTT_LEFT_PANEL_WIDTH))
+  if (normalizedWidth <= 0) return
+
+  const profileRef = doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail))
+  await setDoc(
+    profileRef,
+    {
+      email: normalizedEmail,
+      [GANTT_LEFT_PANEL_WIDTH_FIELD]: normalizedWidth,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export function subscribeGanttDetailPanelWidth(email: string, callback: (width: number | null) => void) {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) {
+    callback(null)
+    return () => {}
+  }
+
+  const profileRef = doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail))
+  return onSnapshot(
+    profileRef,
+    (snapshot) => {
+      const profile = snapshot.data() as { ganttDetailPanelWidth?: unknown } | undefined
+      const raw = profile?.[GANTT_DETAIL_PANEL_WIDTH_FIELD]
+      const width = toNumberOr(raw, DEFAULT_GANTT_DETAIL_PANEL_WIDTH)
+      callback(width > 0 ? width : null)
+    },
+    (error) => {
+      console.error("Gantt detail panel width snapshot error:", error)
+      callback(null)
+    },
+  )
+}
+
+export async function saveGanttDetailPanelWidth(email: string, width: number): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  const normalizedWidth = Math.round(toNumberOr(width, DEFAULT_GANTT_DETAIL_PANEL_WIDTH))
+  if (normalizedWidth <= 0) return
+
+  const profileRef = doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail))
+  await setDoc(
+    profileRef,
+    {
+      email: normalizedEmail,
+      [GANTT_DETAIL_PANEL_WIDTH_FIELD]: normalizedWidth,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
 export function subscribeDepartmentPersonSettings(callback: (settings: DepartmentPersonSettings) => void) {
   const settingsRef = doc(db, SETTINGS_COLLECTION, DEPARTMENT_PERSON_SETTINGS_DOC)
   return onSnapshot(
@@ -1067,7 +1155,7 @@ export async function saveMyPagePersonalTasks(email: string, tasks: MyPagePerson
 
   const sanitized = tasks.map((task, index) => {
     const priority = task.priority === "high" || task.priority === "medium" || task.priority === "low" ? task.priority : "medium"
-    return {
+    return compactObject({
       id: toStringOrEmpty(task.id) || `personal-${Date.now()}-${index}`,
       title: toStringOrEmpty(task.title),
       memo: toOptionalString(task.memo),
@@ -1077,7 +1165,7 @@ export async function saveMyPagePersonalTasks(email: string, tasks: MyPagePerson
       order: toNumberOr(task.order, index),
       createdAt: toNumberOr(task.createdAt, Date.now()),
       updatedAt: toNumberOr(task.updatedAt, Date.now()),
-    } satisfies MyPagePersonalTask
+    }) satisfies MyPagePersonalTask
   })
 
   await setDoc(
