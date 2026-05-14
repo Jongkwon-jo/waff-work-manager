@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useRef, useEffect, useCallback } from "react"
 import type { PointerEvent as ReactPointerEvent } from "react"
-import type { Project, Task, TaskStatus, TaskCategory } from "@/lib/data"
+import type { Project, ProjectPmOption, Task, TaskStatus, TaskCategory } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import { ProjectTypeBadge } from "@/components/status-badge"
 import { EditTaskDialog } from "./edit-task-dialog"
@@ -41,11 +41,18 @@ import type { GlobalSchedule } from "@/lib/firestore-service"
 interface GanttViewProps {
   projects: Project[]
   globalSchedules?: GlobalSchedule[]
+  changeHistoryEntries?: GanttChangeHistoryEntry[]
+  seenChangeHistoryIds?: string[]
+  changeHistoryIdPrefix?: string
+  highlightedTaskId?: string | null
+  currentUserEmail?: string
+  onMarkChangeHistorySeen?: (ids: string[]) => void
   statusFilter: TaskStatus | "all"
   departmentFilter: string
   personFilter: string
   defaultTaskDepartment?: string
   defaultTaskPerson?: string
+  pmOptions?: ProjectPmOption[]
   searchQuery: string
   canEdit?: boolean
   onAddProject: (project: Project) => void
@@ -74,6 +81,18 @@ interface GanttViewProps {
   onPersistLeftPanelWidth?: (width: number) => void
   onPersistDetailPanelWidth?: (width: number) => void
   onPersistHiddenOwnerOptions?: (owners: string[]) => void
+}
+
+type GanttChangeHistoryEntry = {
+  id: string
+  entityType: string
+  action: string
+  actorEmail?: string
+  entityId?: string
+  projectId?: string
+  before?: Record<string, unknown>
+  after?: Record<string, unknown>
+  createdAt?: Date
 }
 
 type FlattenedTask = Task & {
@@ -118,6 +137,18 @@ const TASK_ROW_HEIGHT = 36
 const VIRTUAL_OVERSCAN_ROWS = 20
 const PROJECT_HEADER_ROW_BG_CLASS = "bg-blue-600/50"
 const PROJECT_NAME_BADGE_BG_CLASS = "bg-transparent text-white"
+const HISTORY_FIELD_LABELS: Record<string, string> = {
+  task: "제목",
+  status: "상태",
+  startDate: "시작일",
+  endDate: "종료일",
+  manDays: "공수",
+  memo: "메모",
+  person: "담당자",
+  category: "구분",
+  department: "부서",
+  pmEmail: "PM",
+}
 let textMeasureCanvas: HTMLCanvasElement | null = null
 const textWidthCache = new Map<string, number>()
 function getDaysInMonth(year: number, month: number) {
@@ -269,6 +300,47 @@ function formatTaskDateRange(task: Pick<Task, "startDate" | "endDate">): string 
   return start || end || ""
 }
 
+function formatHistoryValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "-"
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  return JSON.stringify(value)
+}
+
+function getChangedHistoryFields(entry: GanttChangeHistoryEntry): string[] {
+  if (!entry.before || !entry.after) return []
+  const keys = new Set([...Object.keys(entry.before), ...Object.keys(entry.after)])
+  return Array.from(keys).filter((key) => {
+    const beforeValue = entry.before?.[key] ?? null
+    const afterValue = entry.after?.[key] ?? null
+    return JSON.stringify(beforeValue) !== JSON.stringify(afterValue)
+  })
+}
+
+function formatTaskChangeHistory(entries: GanttChangeHistoryEntry[]): string {
+  return entries
+    .slice(0, 5)
+    .map((entry) => {
+      const actor = entry.actorEmail?.split("@")[0] || "알 수 없음"
+      const time = entry.createdAt?.toLocaleString("ko-KR", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+      const fields = getChangedHistoryFields(entry)
+      const details = fields
+        .slice(0, 4)
+        .map((field) => {
+          const label = HISTORY_FIELD_LABELS[field] || field
+          return `${label}: ${formatHistoryValue(entry.before?.[field])} -> ${formatHistoryValue(entry.after?.[field])}`
+        })
+        .join("\n  ")
+      return [`${actor}${time ? ` · ${time}` : ""}`, details ? `  ${details}` : "  변경 필드 정보 없음"].join("\n")
+    })
+    .join("\n\n")
+}
+
 function flattenTasksForExport(tasks: Task[], depth = 0): FlattenedTask[] {
   return tasks.flatMap((task) => {
     const flattenedTask: FlattenedTask = {
@@ -283,11 +355,18 @@ function flattenTasksForExport(tasks: Task[], depth = 0): FlattenedTask[] {
 export function GanttView({
   projects,
   globalSchedules = [],
+  changeHistoryEntries = [],
+  seenChangeHistoryIds = [],
+  changeHistoryIdPrefix = "",
+  highlightedTaskId = null,
+  currentUserEmail = "",
+  onMarkChangeHistorySeen,
   statusFilter,
   departmentFilter,
   personFilter,
   defaultTaskDepartment = "전략",
   defaultTaskPerson = "",
+  pmOptions = [],
   searchQuery,
   canEdit = true,
   onAddProject,
@@ -1294,6 +1373,102 @@ export function GanttView({
     projects.forEach((project) => walk(project.tasks))
     return map
   }, [projects])
+
+  useEffect(() => {
+    if (!highlightedTaskId) return
+    const task = taskById.get(highlightedTaskId)
+    if (!task) return
+
+    setCollapsedProjectIds((prev) => {
+      if (!prev.has(task.projectId)) return prev
+      const next = new Set(prev)
+      next.delete(task.projectId)
+      return next
+    })
+
+    setCollapsedTaskIds((prev) => {
+      let changed = false
+      const next = new Set(prev)
+      let parentId = task.parentId
+      while (parentId) {
+        if (next.delete(parentId)) changed = true
+        parentId = taskById.get(parentId)?.parentId
+      }
+      return changed ? next : prev
+    })
+  }, [highlightedTaskId, taskById])
+
+  useEffect(() => {
+    if (!highlightedTaskId) return
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    let cursorY = 0
+    for (const project of filteredProjects) {
+      const taskIndex = project.tasks.findIndex((task) => task.id === highlightedTaskId)
+      if (taskIndex >= 0) {
+        const targetTop = Math.max(
+          0,
+          HEADER_APPROX_HEIGHT + cursorY + PROJECT_ROW_HEIGHT + taskIndex * TASK_ROW_HEIGHT - viewportHeight / 2,
+        )
+        container.scrollTo({ top: targetTop, behavior: "smooth" })
+        pendingScrollTopRef.current = targetTop
+        setScrollTop((prev) => (prev === targetTop ? prev : targetTop))
+        window.requestAnimationFrame(() => {
+          document.getElementById(`task-row-${highlightedTaskId}`)?.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          })
+        })
+        return
+      }
+
+      const taskCount = collapsedProjectIds.has(project.id) ? 0 : project.tasks.length
+      cursorY += PROJECT_ROW_HEIGHT + taskCount * TASK_ROW_HEIGHT
+    }
+  }, [collapsedProjectIds, filteredProjects, highlightedTaskId, viewportHeight])
+
+  const taskChangeHistoryById = useMemo(() => {
+    const currentEmail = currentUserEmail.trim().toLowerCase()
+    const seenIds = new Set(seenChangeHistoryIds)
+    const map = new Map<string, GanttChangeHistoryEntry[]>()
+    changeHistoryEntries.forEach((entry) => {
+      if (entry.entityType !== "task" || entry.action !== "update" || !entry.entityId) return
+      if (seenIds.has(`${changeHistoryIdPrefix}${entry.id}`)) return
+      if (currentEmail && (entry.actorEmail || "").trim().toLowerCase() === currentEmail) return
+      if (getChangedHistoryFields(entry).length === 0) return
+      const list = map.get(entry.entityId) || []
+      list.push(entry)
+      map.set(entry.entityId, list)
+    })
+    map.forEach((entries) => {
+      entries.sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0))
+    })
+    return map
+  }, [changeHistoryEntries, changeHistoryIdPrefix, currentUserEmail, seenChangeHistoryIds])
+
+  const renderTaskChangeBadge = (taskId: string) => {
+    const entries = taskChangeHistoryById.get(taskId) || []
+    if (entries.length === 0) return null
+    return (
+      <span
+        role="button"
+        tabIndex={0}
+        className="ml-px inline-flex h-1.5 w-1.5 shrink-0 -translate-y-px cursor-pointer self-center rounded-full bg-red-500"
+        title={formatTaskChangeHistory(entries)}
+        aria-label={`수정 이력 ${entries.length}건`}
+        onClick={(event) => {
+          event.stopPropagation()
+          onMarkChangeHistorySeen?.(entries.map((entry) => `${changeHistoryIdPrefix}${entry.id}`))
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return
+          event.preventDefault()
+          onMarkChangeHistorySeen?.(entries.map((entry) => `${changeHistoryIdPrefix}${entry.id}`))
+        }}
+      />
+    )
+  }
   const selectedTaskCount = useMemo(
     () => Array.from(selectedTaskIds).filter((id) => taskById.has(id)).length,
     [selectedTaskIds, taskById],
@@ -1743,6 +1918,12 @@ export function GanttView({
       <MobileGanttView
         filteredProjects={filteredProjects}
         allDays={allDays}
+        changeHistoryEntries={changeHistoryEntries}
+        seenChangeHistoryIds={seenChangeHistoryIds}
+        changeHistoryIdPrefix={changeHistoryIdPrefix}
+        highlightedTaskId={highlightedTaskId}
+        currentUserEmail={currentUserEmail}
+        onMarkChangeHistorySeen={onMarkChangeHistorySeen}
         dayIndexByMonthDay={dayIndexByMonthDay}
         collapsedProjectIds={collapsedProjectIds}
         collapsedTaskIds={collapsedTaskIds}
@@ -1760,6 +1941,7 @@ export function GanttView({
         onEditDialogOpenChange={handleEditDialogOpenChange}
         defaultTaskDepartment={defaultTaskDepartment}
         defaultTaskPerson={defaultTaskPerson}
+        pmOptions={pmOptions}
         handleAddProjectLevelTask={handleAddProjectLevelTask}
         handleAddNestedSubTask={handleAddNestedSubTask}
         updateTaskInline={updateTaskInline}
@@ -1793,6 +1975,7 @@ export function GanttView({
                     {canEdit && (
                       <AddProjectDialog
                         onAddProject={onAddProject}
+                        pmOptions={pmOptions}
                         trigger={
                           <Button size="sm" className="h-7 gap-1.5 px-2 text-[11px]">
                             <Plus className="h-3.5 w-3.5" />
@@ -2181,10 +2364,11 @@ export function GanttView({
                       <ProjectTypeBadge type={project.type} />
                       <div className="flex min-w-0 items-center gap-2">
                         {canEdit ? (
-                          <EditProjectDialog
-                            project={project}
-                            onEditProject={onEditProject}
-                            trigger={
+                            <EditProjectDialog
+                              project={project}
+                              onEditProject={onEditProject}
+                              pmOptions={pmOptions}
+                              trigger={
                               <button
                                 type="button"
                                 className={cn(
@@ -2320,6 +2504,7 @@ export function GanttView({
                               "group/task relative flex border-b border-border/50 transition-colors hover:bg-accent/5",
                               depthRowBgClass,
                               dragOverInfo?.taskId === task.id && "ring-1 ring-blue-300/70 ring-inset",
+                              highlightedTaskId === task.id && "ring-2 ring-yellow-400/80 ring-inset bg-yellow-100/40",
                             )}
                             onDragOver={(e) => {
                               if (!canDropOnTask(task)) return
@@ -2461,6 +2646,7 @@ export function GanttView({
                                                 {depthPrefix}
                                                 {task.task}
                                               </span>
+                                              {renderTaskChangeBadge(task.id)}
                                               {formatTaskDateRange(task) && (
                                                 <span className="shrink-0 text-[10px] font-normal text-muted-foreground/80">
                                                   {formatTaskDateRange(task)}
@@ -2489,6 +2675,7 @@ export function GanttView({
                                             {depthPrefix}
                                             {task.task}
                                           </span>
+                                          {renderTaskChangeBadge(task.id)}
                                           {formatTaskDateRange(task) && (
                                             <span className="shrink-0 text-[10px] font-normal text-muted-foreground/80">
                                               {formatTaskDateRange(task)}
@@ -2533,6 +2720,7 @@ export function GanttView({
                                                 {depthPrefix}
                                                 {task.task}
                                               </span>
+                                              {renderTaskChangeBadge(task.id)}
                                               {formatTaskDateRange(task) && (
                                                 <span className="shrink-0 text-[10px] text-muted-foreground/80">
                                                   {formatTaskDateRange(task)}
@@ -2568,6 +2756,7 @@ export function GanttView({
                                             {depthPrefix}
                                             {task.task}
                                           </span>
+                                          {renderTaskChangeBadge(task.id)}
                                           {formatTaskDateRange(task) && (
                                             <span className="shrink-0 text-[10px] text-muted-foreground/80">
                                               {formatTaskDateRange(task)}
@@ -2860,6 +3049,12 @@ interface MobileGanttViewProps {
     isWeekend: boolean
     isToday: boolean
   }>
+  changeHistoryEntries: GanttChangeHistoryEntry[]
+  seenChangeHistoryIds: string[]
+  changeHistoryIdPrefix: string
+  highlightedTaskId: string | null
+  currentUserEmail: string
+  onMarkChangeHistorySeen?: (ids: string[]) => void
   dayIndexByMonthDay: Map<string, number>
   collapsedProjectIds: Set<string>
   collapsedTaskIds: Set<string>
@@ -2877,6 +3072,7 @@ interface MobileGanttViewProps {
   onEditDialogOpenChange: (taskId: string, open: boolean) => void
   defaultTaskDepartment: string
   defaultTaskPerson: string
+  pmOptions: ProjectPmOption[]
   handleAddProjectLevelTask: (task: Task) => void
   handleAddNestedSubTask: (task: Task) => void
   updateTaskInline: (task: Task, updates: Partial<Task>) => void
@@ -2888,6 +3084,12 @@ const STATUS_ORDER = ["완료", "진행", "예정", "보류"] as const
 function MobileGanttView({
   filteredProjects,
   allDays,
+  changeHistoryEntries,
+  seenChangeHistoryIds,
+  changeHistoryIdPrefix,
+  highlightedTaskId,
+  currentUserEmail,
+  onMarkChangeHistorySeen,
   dayIndexByMonthDay,
   collapsedProjectIds,
   collapsedTaskIds,
@@ -2905,6 +3107,7 @@ function MobileGanttView({
   onEditDialogOpenChange,
   defaultTaskDepartment,
   defaultTaskPerson,
+  pmOptions,
   handleAddProjectLevelTask,
   handleAddNestedSubTask,
   updateTaskInline,
@@ -3017,6 +3220,48 @@ function MobileGanttView({
   const selectedProject = selectedProjectId
     ? filteredProjects.find((p) => p.id === selectedProjectId) ?? null
     : null
+
+  const taskChangeHistoryById = useMemo(() => {
+    const currentEmail = currentUserEmail.trim().toLowerCase()
+    const seenIds = new Set(seenChangeHistoryIds)
+    const map = new Map<string, GanttChangeHistoryEntry[]>()
+    changeHistoryEntries.forEach((entry) => {
+      if (entry.entityType !== "task" || entry.action !== "update" || !entry.entityId) return
+      if (seenIds.has(`${changeHistoryIdPrefix}${entry.id}`)) return
+      if (currentEmail && (entry.actorEmail || "").trim().toLowerCase() === currentEmail) return
+      if (getChangedHistoryFields(entry).length === 0) return
+      const list = map.get(entry.entityId) || []
+      list.push(entry)
+      map.set(entry.entityId, list)
+    })
+    map.forEach((entries) => {
+      entries.sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0))
+    })
+    return map
+  }, [changeHistoryEntries, changeHistoryIdPrefix, currentUserEmail, seenChangeHistoryIds])
+
+  const renderTaskChangeBadge = (taskId: string) => {
+    const entries = taskChangeHistoryById.get(taskId) || []
+    if (entries.length === 0) return null
+    return (
+      <span
+        role="button"
+        tabIndex={0}
+        className="ml-px inline-flex h-1.5 w-1.5 shrink-0 -translate-y-px cursor-pointer self-center rounded-full bg-red-500"
+        title={formatTaskChangeHistory(entries)}
+        aria-label={`수정 이력 ${entries.length}건`}
+        onClick={(event) => {
+          event.stopPropagation()
+          onMarkChangeHistorySeen?.(entries.map((entry) => `${changeHistoryIdPrefix}${entry.id}`))
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return
+          event.preventDefault()
+          onMarkChangeHistorySeen?.(entries.map((entry) => `${changeHistoryIdPrefix}${entry.id}`))
+        }}
+      />
+    )
+  }
 
   const hasTodayTask = selectedProject !== null
     && selectedProject.tasks.some((task) => isTaskContainsToday(task))
@@ -3194,6 +3439,7 @@ function MobileGanttView({
                       "border-b border-border/25 px-3 py-2",
                       depthRowBgClass,
                       containsToday && "ring-1 ring-inset ring-yellow-300/50",
+                      highlightedTaskId === task.id && "ring-2 ring-inset ring-yellow-400/80 bg-yellow-100/40",
                     )}
                   >
                     {/* 태스크명 행 */}
@@ -3256,6 +3502,8 @@ function MobileGanttView({
                             {task.task}
                           </span>
                         )}
+
+                        {renderTaskChangeBadge(task.id)}
 
                         {hasMemo && (
                           <span
@@ -3336,6 +3584,7 @@ function MobileGanttView({
               {canEdit && (
                 <AddProjectDialog
                   onAddProject={onAddProject}
+                  pmOptions={pmOptions}
                   trigger={
                     <Button size="sm" className="h-7 gap-1 px-2 text-[11px]">
                       <Plus className="h-3.5 w-3.5" />
