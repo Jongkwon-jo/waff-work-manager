@@ -27,6 +27,7 @@ interface RecentChangesWidgetProps {
   currentUserEmail?: string
   onJump?: (entry: RecentChangeEntry) => void
   refreshIntervalMs?: number
+  defaultOpen?: boolean
   title?: string
   description?: string
   emptyMessage?: string
@@ -144,12 +145,15 @@ export function RecentChangesWidget({
   currentUserEmail,
   onJump,
   refreshIntervalMs = 60_000,
+  defaultOpen = false,
   title = "최근 사용자 변경",
   description = "사용자가 마이 워크 등에서 직접 편집한 업무를 확인합니다.",
   emptyMessage = "최근 사용자 변경이 없습니다.",
 }: RecentChangesWidgetProps) {
   const [entries, setEntries] = useState<RecentChangeEntry[]>([])
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(() =>
+    defaultOpen || (typeof window !== "undefined" && window.location.hash === "#recent-changes"),
+  )
   const [isLoading, setIsLoading] = useState(false)
   const [rollingBackId, setRollingBackId] = useState<string | null>(null)
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set())
@@ -169,6 +173,19 @@ export function RecentChangesWidget({
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  useEffect(() => {
+    if (defaultOpen) setIsOpen(true)
+  }, [defaultOpen])
+
+  useEffect(() => {
+    const openFromHash = () => {
+      if (window.location.hash === "#recent-changes") setIsOpen(true)
+    }
+    openFromHash()
+    window.addEventListener("hashchange", openFromHash)
+    return () => window.removeEventListener("hashchange", openFromHash)
+  }, [])
 
   useEffect(() => {
     if (!refreshIntervalMs || refreshIntervalMs <= 0) return
@@ -272,7 +289,11 @@ export function RecentChangesWidget({
                 return (
                   <li
                     key={entry.id}
-                    className="rounded-lg border border-amber-100 bg-white px-3 py-2 text-xs shadow-sm"
+                    onClick={onJump ? () => onJump(entry) : undefined}
+                    className={cn(
+                      "rounded-lg border border-amber-100 bg-white px-3 py-2 text-xs shadow-sm",
+                      onJump && "cursor-pointer transition-colors hover:border-amber-300 hover:bg-amber-50",
+                    )}
                   >
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-semibold text-slate-800">{formatActorName(entry.actorEmail)}</span>
@@ -313,7 +334,10 @@ export function RecentChangesWidget({
                           variant="outline"
                           size="sm"
                           className="h-6 px-2 text-[10px]"
-                          onClick={() => onJump(entry)}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onJump(entry)
+                          }}
                         >
                           이동
                         </Button>
@@ -325,7 +349,10 @@ export function RecentChangesWidget({
                           size="sm"
                           className="h-6 px-2 text-[10px]"
                           disabled={rollingBackId === entry.id}
-                          onClick={() => void handleRollback(entry)}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void handleRollback(entry)
+                          }}
                         >
                           <RotateCcw className="h-3 w-3" />
                           롤백

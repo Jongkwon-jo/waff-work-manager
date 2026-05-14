@@ -21,25 +21,31 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { Project, ProjectType } from "@/lib/data"
+import { ProjectPmSelect } from "@/components/project-pm-select"
+import type { Project, ProjectPmOption, ProjectType } from "@/lib/data"
 
 interface EditProjectDialogProps {
   project: Project
   onEditProject: (project: Project) => void
   trigger?: ReactNode
+  pmOptions?: ProjectPmOption[]
 }
 
-export function EditProjectDialog({ project, onEditProject, trigger }: EditProjectDialogProps) {
+const UNASSIGNED_PM_VALUE = "__none__"
+
+export function EditProjectDialog({ project, onEditProject, trigger, pmOptions = [] }: EditProjectDialogProps) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState(project.name)
   const [type, setType] = useState<ProjectType>(project.type)
   const [period, setPeriod] = useState(project.period || "")
+  const [pmEmail, setPmEmail] = useState(project.pmEmail || UNASSIGNED_PM_VALUE)
 
   useEffect(() => {
     if (open) {
       setName(project.name)
       setType(project.type)
       setPeriod(project.period || "")
+      setPmEmail(project.pmEmail || UNASSIGNED_PM_VALUE)
     }
   }, [open, project])
 
@@ -52,6 +58,7 @@ export function EditProjectDialog({ project, onEditProject, trigger }: EditProje
       name,
       type,
       period,
+      pmEmail: pmEmail === UNASSIGNED_PM_VALUE ? "" : pmEmail,
     })
     setOpen(false)
   }
@@ -106,6 +113,16 @@ export function EditProjectDialog({ project, onEditProject, trigger }: EditProje
                 value={period}
                 onChange={(e) => setPeriod(e.target.value)}
                 placeholder="예: 2025.04 ~ 2025.12"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-pm">PM</Label>
+              <ProjectPmSelect
+                id="edit-pm"
+                value={pmEmail}
+                onChange={setPmEmail}
+                options={pmOptions}
+                unassignedValue={UNASSIGNED_PM_VALUE}
               />
             </div>
           </div>

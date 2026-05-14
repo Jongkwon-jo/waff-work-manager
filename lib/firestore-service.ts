@@ -86,6 +86,7 @@ export type UserProfile = {
   myPagePersonalTasks?: MyPagePersonalTask[]
   myPageMemo?: string
   myPageCollapsedProjectGroups?: Record<string, boolean>
+  seenRecentChangeIds?: string[]
   department?: DepartmentPersonGroup
   mbti?: MbtiType
 }
@@ -987,6 +988,7 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
             myPagePersonalTasks?: unknown
             myPageMemo?: unknown
             myPageCollapsedProjectGroups?: unknown
+            seenRecentChangeIds?: unknown
             mbti?: unknown
           }
           return {
@@ -1014,6 +1016,9 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
                     ]),
                   )
                 : {},
+            seenRecentChangeIds: Array.isArray(raw?.seenRecentChangeIds)
+              ? uniqueTrimmedStrings(raw.seenRecentChangeIds.filter((value): value is string => typeof value === "string"))
+              : [],
             mbti: (MBTI_TYPES as readonly string[]).includes(raw?.mbti as string) ? (raw.mbti as MbtiType) : undefined,
           } satisfies UserProfile
         })
@@ -1053,6 +1058,7 @@ export function subscribeCurrentUserProfile(email: string, callback: (profile: U
         myPagePersonalTasks?: unknown
         myPageMemo?: unknown
         myPageCollapsedProjectGroups?: unknown
+        seenRecentChangeIds?: unknown
       }
       callback({
         email: normalizeEmail(toStringOrEmpty(raw?.email)),
@@ -1079,6 +1085,9 @@ export function subscribeCurrentUserProfile(email: string, callback: (profile: U
                 ]),
               )
             : {},
+        seenRecentChangeIds: Array.isArray(raw?.seenRecentChangeIds)
+          ? uniqueTrimmedStrings(raw.seenRecentChangeIds.filter((value): value is string => typeof value === "string"))
+          : [],
       })
     },
     (error) => {
@@ -1224,6 +1233,21 @@ export async function saveMyPageCollapsedProjectGroups(
     {
       email: normalizedEmail,
       myPageCollapsedProjectGroups: groups,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export async function saveSeenRecentChangeIds(email: string, ids: string[]): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  await setDoc(
+    doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
+    {
+      email: normalizedEmail,
+      seenRecentChangeIds: uniqueTrimmedStrings(ids).slice(-300),
       updatedAt: serverTimestamp(),
     },
     { merge: true },

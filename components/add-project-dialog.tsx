@@ -15,18 +15,23 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { Project, ProjectType } from "@/lib/data"
+import { ProjectPmSelect } from "@/components/project-pm-select"
+import type { Project, ProjectPmOption, ProjectType } from "@/lib/data"
 
 interface AddProjectDialogProps {
   onAddProject: (project: Project) => void
   trigger?: React.ReactNode
+  pmOptions?: ProjectPmOption[]
 }
 
-export function AddProjectDialog({ onAddProject, trigger }: AddProjectDialogProps) {
+const UNASSIGNED_PM_VALUE = "__none__"
+
+export function AddProjectDialog({ onAddProject, trigger, pmOptions = [] }: AddProjectDialogProps) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [type, setType] = useState<ProjectType>("SI")
   const [period, setPeriod] = useState("")
+  const [pmEmail, setPmEmail] = useState(UNASSIGNED_PM_VALUE)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -37,6 +42,7 @@ export function AddProjectDialog({ onAddProject, trigger }: AddProjectDialogProp
       name,
       type,
       period,
+      pmEmail: pmEmail === UNASSIGNED_PM_VALUE ? "" : pmEmail,
       isHidden: false,
       tasks: [],
     }
@@ -46,6 +52,7 @@ export function AddProjectDialog({ onAddProject, trigger }: AddProjectDialogProp
     setName("")
     setType("SI")
     setPeriod("")
+    setPmEmail(UNASSIGNED_PM_VALUE)
   }
 
   return (
@@ -100,6 +107,16 @@ export function AddProjectDialog({ onAddProject, trigger }: AddProjectDialogProp
                 value={period}
                 onChange={(e) => setPeriod(e.target.value)}
                 placeholder="예: 2026.03 ~ 2026.12"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="pm">PM</Label>
+              <ProjectPmSelect
+                id="pm"
+                value={pmEmail}
+                onChange={setPmEmail}
+                options={pmOptions}
+                unassignedValue={UNASSIGNED_PM_VALUE}
               />
             </div>
           </div>

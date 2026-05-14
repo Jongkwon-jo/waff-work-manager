@@ -34,7 +34,10 @@ import { toast } from "sonner"
 import {
   addHistoryEntry as addStrategyHistoryEntry,
   DEFAULT_MY_PAGE_EDITABLE_FIELDS,
+  deleteHistoryEntry as deleteStrategyHistoryEntry,
+  fetchHistoryEntries as fetchStrategyHistoryEntries,
   isUserOwnerOfTask,
+  rollbackHistoryEntry as rollbackStrategyHistoryEntry,
   saveMyPageMemo,
   saveMyPageCollapsedProjectGroups,
   saveMyPagePersonalTasks,
@@ -49,11 +52,15 @@ import {
 } from "@/lib/firestore-service"
 import {
   addHistoryEntry as addFaHistoryEntry,
+  deleteHistoryEntry as deleteFaHistoryEntry,
+  fetchHistoryEntries as fetchFaHistoryEntries,
+  rollbackHistoryEntry as rollbackFaHistoryEntry,
   subscribeToData as subscribeFaData,
   updateTaskInDB as updateFaTaskInDB,
 } from "@/lib/firestore-service-fa"
 import type { Project, Task, TaskStatus } from "@/lib/data"
 import { EditTaskDialog } from "@/components/edit-task-dialog"
+import { RecentChangesWidget, type RecentChangeEntry } from "@/components/recent-changes-widget"
 import { cn } from "@/lib/utils"
 
 type GroupedProject = {
@@ -232,7 +239,7 @@ const collectProjectTaskItems = (
 }
 
 export default function MyPage() {
-  const { user } = useAuth()
+  const { user, isAdmin, pagePermissions } = useAuth()
   const [strategyProjects, setStrategyProjects] = useState<Project[]>([])
   const [faProjects, setFaProjects] = useState<Project[]>([])
   const [aliases, setAliases] = useState<string[]>([])
@@ -310,6 +317,78 @@ export default function MyPage() {
 
     return [...toGrouped(strategyProjects, "전략사업부"), ...toGrouped(faProjects, "FA 사업부")]
   }, [aliases, strategyProjects, faProjects, taskPreferences])
+
+  const currentUserEmail = (user?.email || "").trim().toLowerCase()
+  const strategyPmProjectIds = useMemo(
+    () =>
+      new Set(
+        strategyProjects
+          .filter((project) => (project.pmEmail || "").trim().toLowerCase() === currentUserEmail)
+          .map((project) => project.id),
+      ),
+    [currentUserEmail, strategyProjects],
+  )
+  const faPmProjectIds = useMemo(
+    () =>
+      new Set(
+        faProjects
+          .filter((project) => (project.pmEmail || "").trim().toLowerCase() === currentUserEmail)
+          .map((project) => project.id),
+      ),
+    [currentUserEmail, faProjects],
+  )
+  const canViewAllRecentChanges = isAdmin || pagePermissions.recentChangesWidget
+  const canViewRecentChanges =
+    canViewAllRecentChanges || strategyPmProjectIds.size > 0 || faPmProjectIds.size > 0
+
+  const loadVisibleRecentChanges = async (): Promise<RecentChangeEntry[]> => {
+    const [strategyEntries, faEntries] = await Promise.all([
+      fetchStrategyHistoryEntries(30),
+      fetchFaHistoryEntries(30),
+    ])
+
+    const filterByPm = (entry: RecentChangeEntry, pmProjectIds: Set<string>) => {
+      if (entry.projectId && pmProjectIds.has(entry.projectId)) return true
+      if (entry.entityType === "project" && entry.entityId && pmProjectIds.has(entry.entityId)) return true
+      return false
+    }
+
+    const visibleStrategy = canViewAllRecentChanges
+      ? strategyEntries
+      : strategyEntries.filter((entry) => filterByPm(entry, strategyPmProjectIds))
+    const visibleFa = canViewAllRecentChanges
+      ? faEntries
+      : faEntries.filter((entry) => filterByPm(entry, faPmProjectIds))
+
+    return [
+      ...visibleStrategy.map((entry) => ({
+        ...entry,
+        id: `strategy:${entry.id}`,
+        source: entry.source || "work-management",
+      })),
+      ...visibleFa.map((entry) => ({
+        ...entry,
+        id: `fa:${entry.id}`,
+        source: entry.source || "fa-work-management",
+      })),
+    ]
+      .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0))
+      .slice(0, 30)
+  }
+
+  const rollbackVisibleRecentChange = async (entry: RecentChangeEntry) => {
+    if (!canViewAllRecentChanges) return
+    if (entry.id.startsWith("fa:")) {
+      const rawId = entry.id.replace(/^fa:/, "")
+      await rollbackFaHistoryEntry({ ...entry, id: rawId } as never)
+      await deleteFaHistoryEntry(rawId)
+      return
+    }
+
+    const rawId = entry.id.replace(/^strategy:/, "")
+    await rollbackStrategyHistoryEntry({ ...entry, id: rawId } as never)
+    await deleteStrategyHistoryEntry(rawId)
+  }
 
   const allProjectTasks = useMemo<ProjectTaskItem[]>(() => {
     return groupedProjects.flatMap((project) => project.tasks)
@@ -1034,6 +1113,20 @@ export default function MyPage() {
             priority
           />
         </header>
+
+        {canViewRecentChanges && (
+          <section id="recent-changes" className="scroll-mt-6">
+            <RecentChangesWidget
+              loadEntries={loadVisibleRecentChanges}
+              rollbackEntry={canViewAllRecentChanges ? rollbackVisibleRecentChange : undefined}
+              projects={[...strategyProjects, ...faProjects]}
+              currentUserEmail={user?.email || undefined}
+              title="최근 사용자 변경"
+              description="권한이 있는 프로젝트의 최근 업무 수정 이력을 확인합니다."
+              emptyMessage="확인할 최근 사용자 변경이 없습니다."
+            />
+          </section>
+        )}
 
 	        <section className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-2">
 	            <Card className={panelCardClass("today", "lg:order-1")}>

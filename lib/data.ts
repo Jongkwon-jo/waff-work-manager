@@ -55,8 +55,14 @@ export interface Project {
   name: string
   type: ProjectType
   period?: string
+  pmEmail?: string
   tasks: Task[]
   createdAt?: Date
+}
+
+export type ProjectPmOption = {
+  email: string
+  label: string
 }
 
 export const projects: Project[] = []

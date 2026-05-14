@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import { useState, useMemo } from "react"
-import type { Project, Task, TaskStatus } from "@/lib/data"
+import type { Project, ProjectPmOption, Task, TaskStatus } from "@/lib/data"
 import { StatusBadge, CategoryBadge, ProjectTypeBadge } from "@/components/status-badge"
 import { ChevronDown, ChevronRight, User, Trash2, Plus, Briefcase, ArrowUp, ArrowDown } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -21,6 +21,7 @@ interface ProjectListProps {
   defaultTaskDepartment?: string
   searchQuery: string
   canEdit?: boolean
+  pmOptions?: ProjectPmOption[]
   onAddTask: (task: Task) => void
   onEditTask: (task: Task) => void
   onDeleteTask: (taskId: string, projectId: string) => void
@@ -36,6 +37,7 @@ export function ProjectList({
   defaultTaskDepartment = "전략",
   searchQuery,
   canEdit = true,
+  pmOptions = [],
   onAddTask,
   onEditTask,
   onDeleteTask,
@@ -193,7 +195,7 @@ export function ProjectList({
                 {canEdit && (
                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     <AddTaskDialog projectId={project.id} onAddTask={onAddTask} />
-                    <EditProjectDialog project={project} onEditProject={onEditProject} />
+                    <EditProjectDialog project={project} onEditProject={onEditProject} pmOptions={pmOptions} />
                     <Button
                       variant="ghost"
                       size="icon"

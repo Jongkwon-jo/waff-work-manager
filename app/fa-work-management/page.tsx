@@ -4,7 +4,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { useState, useMemo, useEffect, useDeferredValue } from "react"
 import { signOut } from "firebase/auth"
-import type { Project, Task, TaskStatus } from "@/lib/data"
+import type { Project, ProjectPmOption, Task, TaskStatus } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import {
   subscribeToData,
@@ -33,10 +33,12 @@ import {
 import {
   saveUserHiddenOwnerOptions,
   subscribeCurrentUserProfile,
+  subscribeUserProfiles,
+  saveSeenRecentChangeIds,
   subscribeGlobalSchedules,
   type GlobalSchedule,
+  type UserProfile,
 } from "@/lib/firestore-service"
-import { RecentChangesWidget } from "@/components/recent-changes-widget"
 import { auth } from "@/lib/firebase"
 import { useAuth } from "@/components/auth/auth-provider"
 import { LoginForm } from "@/components/auth/login-form"
@@ -45,11 +47,12 @@ import { FilterBar, ProjectSortType } from "@/components/filter-bar"
 import { ProjectList } from "@/components/project-list"
 import { GanttView } from "@/components/gantt-view"
 import { ProjectCardView } from "@/components/project-card-view"
-import { CalendarDays, Building2, Home, List, BarChart3, LayoutGrid, RotateCcw, History, ChevronDown, ChevronRight, LogOut, UserRoundSearch } from "lucide-react"
+import { Bell, CalendarDays, Building2, Home, List, BarChart3, LayoutGrid, RotateCcw, History, ChevronDown, ChevronRight, LogOut, UserRoundSearch } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { toast } from "sonner"
+import { RecentChangesWidget } from "@/components/recent-changes-widget"
 
 export default function FaWorkManagementPage() {
   const { user, loading: authLoading, isAdmin, pagePermissions } = useAuth()
@@ -64,6 +67,9 @@ export default function FaWorkManagementPage() {
   const [sortBy, setSortBy] = useState<ProjectSortType>("latest")
   const [viewMode, setViewMode] = useState<"list" | "gantt" | "card">("gantt")
   const [historyEntries, setHistoryEntries] = useState<ChangeHistoryEntry[]>([])
+  const [visibleHistoryEntries, setVisibleHistoryEntries] = useState<ChangeHistoryEntry[]>([])
+  const [isRecentChangesOpen, setIsRecentChangesOpen] = useState(false)
+  const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(null)
   const [isRollingBack, setIsRollingBack] = useState(false)
   const [rollingBackEntryId, setRollingBackEntryId] = useState<string | null>(null)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
@@ -74,6 +80,8 @@ export default function FaWorkManagementPage() {
   const [ganttDetailPanelWidth, setGanttDetailPanelWidth] = useState<number | null>(null)
   const [defaultTaskPerson, setDefaultTaskPerson] = useState("")
   const [hiddenOwnerOptions, setHiddenOwnerOptions] = useState<string[]>([])
+  const [userProfiles, setUserProfiles] = useState<UserProfile[]>([])
+  const [seenRecentChangeIds, setSeenRecentChangeIds] = useState<string[]>([])
   const [globalSchedules, setGlobalSchedules] = useState<GlobalSchedule[]>([])
   const deferredSearchQuery = useDeferredValue(searchQuery)
 
@@ -98,6 +106,15 @@ export default function FaWorkManagementPage() {
       return
     }
     const unsubscribe = subscribeGlobalSchedules(setGlobalSchedules)
+    return () => unsubscribe()
+  }, [user])
+
+  useEffect(() => {
+    if (!user) {
+      setUserProfiles([])
+      return
+    }
+    const unsubscribe = subscribeUserProfiles(setUserProfiles)
     return () => unsubscribe()
   }, [user])
 
@@ -164,6 +181,7 @@ export default function FaWorkManagementPage() {
     if (!user?.email) {
       setDefaultTaskPerson("")
       setHiddenOwnerOptions([])
+      setSeenRecentChangeIds([])
       return
     }
 
@@ -171,6 +189,7 @@ export default function FaWorkManagementPage() {
       const accountDefaultPerson = (profile?.taskAliases || [])[0]?.trim() || ""
       setDefaultTaskPerson(accountDefaultPerson)
       setHiddenOwnerOptions(profile?.hiddenOwnerOptions || [])
+      setSeenRecentChangeIds(profile?.seenRecentChangeIds || [])
     })
 
     return () => unsubscribe()
@@ -203,6 +222,7 @@ export default function FaWorkManagementPage() {
       name: project.name,
       type: project.type,
       period: project.period,
+      pmEmail: project.pmEmail,
       isHidden: project.isHidden,
       displayOrder: project.displayOrder,
       createdAt: project.createdAt,
@@ -588,6 +608,84 @@ export default function FaWorkManagementPage() {
       return baseCompare(a, b)
     })
   }, [projectList, sortBy])
+
+  const pmOptions = useMemo<ProjectPmOption[]>(
+    () =>
+      userProfiles.map((profile) => ({
+        email: profile.email,
+        label: profile.taskAliases?.[0] || profile.email,
+      })),
+    [userProfiles],
+  )
+
+  const currentUserEmail = (user?.email || "").trim().toLowerCase()
+  const pmProjectIds = useMemo(() => {
+    if (!currentUserEmail) return new Set<string>()
+    return new Set(
+      projectList
+        .filter((project) => (project.pmEmail || "").trim().toLowerCase() === currentUserEmail)
+        .map((project) => project.id),
+    )
+  }, [currentUserEmail, projectList])
+
+  const canViewAllRecentChanges = isAdmin || pagePermissions.recentChangesWidget
+  const canViewRecentChanges = canViewAllRecentChanges || pmProjectIds.size > 0
+
+  const loadVisibleHistoryEntries = async () => {
+    const entries = await fetchHistoryEntries(20)
+    if (canViewAllRecentChanges) return entries
+    return entries.filter((entry) => {
+      if (entry.projectId && pmProjectIds.has(entry.projectId)) return true
+      if (entry.entityType === "project" && entry.entityId && pmProjectIds.has(entry.entityId)) return true
+      return false
+    })
+  }
+
+  const markChangeHistorySeen = (ids: string[]) => {
+    if (!user?.email || ids.length === 0) return
+    setSeenRecentChangeIds((prev) => {
+      const next = Array.from(new Set([...prev, ...ids])).slice(-300)
+      void saveSeenRecentChangeIds(user.email || "", next).catch((error) => {
+        console.error("Failed to save seen recent changes:", error)
+      })
+      return next
+    })
+  }
+
+  const visibleUnreadChangeCount = useMemo(() => {
+    const seen = new Set(seenRecentChangeIds)
+    return visibleHistoryEntries.filter((entry) => {
+      if (entry.entityType !== "task" || entry.action !== "update") return false
+      if (currentUserEmail && (entry.actorEmail || "").trim().toLowerCase() === currentUserEmail) return false
+      return !seen.has(`fa:${entry.id}`)
+    }).length
+  }, [currentUserEmail, seenRecentChangeIds, visibleHistoryEntries])
+
+  const jumpToHistoryEntry = (entry: { entityId?: string; entityType?: string }) => {
+    if (entry.entityType !== "task" || !entry.entityId) return
+    setViewMode("gantt")
+    setHighlightedTaskId(entry.entityId)
+  }
+
+  useEffect(() => {
+    if (!user || !canViewRecentChanges) {
+      setVisibleHistoryEntries([])
+      return
+    }
+
+    let disposed = false
+    void loadVisibleHistoryEntries()
+      .then((entries) => {
+        if (!disposed) setVisibleHistoryEntries(entries)
+      })
+      .catch((error) => {
+        console.error("Visible history fetch failed:", error)
+        if (!disposed) setVisibleHistoryEntries([])
+      })
+    return () => {
+      disposed = true
+    }
+  }, [user, canViewRecentChanges, canViewAllRecentChanges, pmProjectIds])
 
   const handleAddProject = async (newProject: Project) => {
     try {
@@ -1296,6 +1394,24 @@ export default function FaWorkManagementPage() {
               <CalendarDays className="h-4 w-4" />
               <span>{formattedDate}</span>
             </div>
+            {canViewRecentChanges && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="relative inline-flex h-8 shrink-0 items-center justify-center rounded-md border border-border bg-background px-2 text-foreground shadow-sm"
+                title={`미확인 수정 이력 ${visibleUnreadChangeCount}건`}
+                aria-label={`미확인 수정 이력 ${visibleUnreadChangeCount}건`}
+                onClick={() => setIsRecentChangesOpen((prev) => !prev)}
+              >
+                <Bell className="h-3.5 w-3.5" />
+                {visibleUnreadChangeCount > 0 && (
+                  <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+                    {visibleUnreadChangeCount > 99 ? "99+" : visibleUnreadChangeCount}
+                  </span>
+                )}
+              </Button>
+            )}
             {canEdit && (
               <Button
                 variant="outline"
@@ -1364,6 +1480,28 @@ export default function FaWorkManagementPage() {
                 )}
               </div>
             )}
+            {isRecentChangesOpen && (
+              <div className="absolute left-0 top-10 z-[70] w-[min(760px,calc(100vw-2rem))] lg:left-auto lg:right-0">
+                <RecentChangesWidget
+                  loadEntries={loadVisibleHistoryEntries}
+                  rollbackEntry={
+                    canViewAllRecentChanges
+                      ? async (entry) => {
+                          await rollbackHistoryEntry(entry as ChangeHistoryEntry)
+                          await deleteHistoryEntry(entry.id)
+                        }
+                      : undefined
+                  }
+                  projects={projectList}
+                  currentUserEmail={user?.email || undefined}
+                  onJump={jumpToHistoryEntry}
+                  defaultOpen
+                  title="최근 사용자 변경"
+                  description="권한이 있는 프로젝트의 최근 업무 수정 이력을 확인합니다."
+                  emptyMessage="확인할 최근 사용자 변경이 없습니다."
+                />
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -1421,17 +1559,6 @@ export default function FaWorkManagementPage() {
                 </div>
               )}
             </div>
-            {(isAdmin || pagePermissions.recentChangesWidget) && (
-              <RecentChangesWidget
-                loadEntries={() => fetchHistoryEntries(20)}
-                rollbackEntry={async (entry) => {
-                  await rollbackHistoryEntry(entry as ChangeHistoryEntry)
-                  await deleteHistoryEntry(entry.id)
-                }}
-                projects={projectList}
-                currentUserEmail={user?.email || undefined}
-              />
-            )}
             {projectList.length === 0 ? (
               <div className="flex h-[40vh] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 text-center p-8">
                 <Building2 className="h-10 w-10 text-muted-foreground/50 mb-4" />
@@ -1447,6 +1574,7 @@ export default function FaWorkManagementPage() {
                 defaultTaskDepartment="FA"
                 searchQuery={deferredSearchQuery}
                 canEdit={canEdit}
+                pmOptions={pmOptions}
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
                 onDeleteTask={handleDeleteTask}
@@ -1457,11 +1585,18 @@ export default function FaWorkManagementPage() {
               <GanttView
                 projects={sortedProjects}
                 globalSchedules={globalSchedules}
+                changeHistoryEntries={visibleHistoryEntries}
+                seenChangeHistoryIds={seenRecentChangeIds}
+                changeHistoryIdPrefix="fa:"
+                highlightedTaskId={highlightedTaskId}
+                currentUserEmail={user?.email || undefined}
+                onMarkChangeHistorySeen={markChangeHistorySeen}
                 statusFilter={statusFilter}
                 departmentFilter={departmentFilter}
                 personFilter={personFilter}
                 defaultTaskDepartment="FA"
                 defaultTaskPerson={defaultTaskPerson}
+                pmOptions={pmOptions}
                 searchQuery={deferredSearchQuery}
                 canEdit={canEdit}
                 onAddProject={handleAddProject}
