@@ -4,12 +4,17 @@ import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 import {
   ArrowLeft,
+  AlertTriangle,
   Bot,
+  CalendarClock,
+  CheckCircle2,
   Database,
   FileText,
   History,
+  Inbox,
   KeyRound,
   LoaderCircle,
+  Mail,
   Plus,
   RefreshCcw,
   Save,
@@ -23,14 +28,27 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { useAuth } from "@/components/auth/auth-provider"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  DEFAULT_EMAIL_AGENT_SETTINGS,
+  saveCurrentUserEmailAgentSettings,
+  subscribeCurrentUserEmailAgentSettings,
+} from "@/lib/gpt-test-email-agent-settings"
 import {
   deleteGptTestVectorStoreMetadata,
   fetchGptTestVectorStoreMetadata,
   saveGptTestVectorStoreMetadata,
 } from "@/lib/gpt-test-vector-store-metadata"
+import type {
+  EmailAgentActionType,
+  EmailAgentPreview,
+  EmailAgentProposedAction,
+  EmailAgentSettings,
+  EmailWorkProposal,
+} from "@/lib/email-agent-types"
 
 type ChatMessage = {
   id: string
@@ -98,6 +116,34 @@ type VectorStoreDeleteResponse = {
   error?: string
 }
 
+type EmailPreviewResponse = {
+  emails?: EmailAgentPreview[]
+  error?: string
+}
+
+type EmailProposalResult = {
+  proposal: EmailWorkProposal
+  duplicate?: boolean
+}
+
+type EmailAnalyzeResponse = {
+  proposals?: EmailProposalResult[]
+  error?: string
+}
+
+type EmailProposalApplyResponse = {
+  proposalId?: string
+  appliedTaskId?: string
+  action?: EmailAgentProposedAction
+  error?: string
+}
+
+type EmailProposalRejectResponse = {
+  proposalId?: string
+  status?: string
+  error?: string
+}
+
 type SavedChatSession = {
   id: string
   title: string
@@ -120,7 +166,7 @@ type StoredVectorStoreFiles = Record<
   }
 >
 
-type PanelType = "history" | "settings" | "sources" | null
+type PanelType = "history" | "settings" | "sources" | "email" | null
 
 const SNIPPET_PREVIEW_LIMIT = 140
 const SNIPPET_LIST_LIMIT = 5
@@ -140,6 +186,13 @@ const CURRENT_SESSION_STORAGE_KEY = "gpt-test-current-session-id"
 const VECTOR_STORE_FILE_HISTORY_KEY = "gpt-test-vector-store-files"
 const FALLBACK_SYSTEM_PROMPT =
   "친절하고 정확한 사내 AI 비서로 답변해 주세요. 벡터 스토어 검색 결과가 있으면 그 내용을 우선 참고하고, 불확실하면 모른다고 명확히 말해 주세요."
+
+const ACTION_LABELS: Record<EmailAgentActionType, string> = {
+  create_task: "신규 업무 생성",
+  update_task: "기존 업무 수정",
+  no_action: "반영 없음",
+  needs_review: "검토 필요",
+}
 
 function normalizeSystemPrompt(value?: string) {
   const trimmed = value?.trim()
@@ -184,6 +237,23 @@ const formatTimestamp = (value: string) =>
     hour: "2-digit",
     minute: "2-digit",
   })
+
+const formatOptionalTimestamp = (value?: string) => {
+  if (!value) return "시간 정보 없음"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+const formatConfidence = (value: number) => `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`
+
+const isActionApplyable = (action: EmailAgentProposedAction) =>
+  action.type === "create_task" || action.type === "update_task"
 
 const getSnippetPreview = (text: string) => {
   const normalized = text.replace(/\s+/g, " ").trim()
@@ -243,6 +313,7 @@ const mergeStoredVectorStoreFiles = (
 }
 
 export default function GptTestPage() {
+  const { user } = useAuth()
   const [apiKey, setApiKey] = useState("")
   const [model, setModel] = useState("gpt-5.2")
   const [systemPrompt, setSystemPrompt] = useState(
@@ -270,12 +341,41 @@ export default function GptTestPage() {
   const [chatSessions, setChatSessions] = useState<SavedChatSession[]>([])
   const [currentSessionId, setCurrentSessionId] = useState("")
   const [openPanel, setOpenPanel] = useState<PanelType>(null)
+  const [emailFetchLimit, setEmailFetchLimit] = useState(10)
+  const [emailPreviews, setEmailPreviews] = useState<EmailAgentPreview[]>([])
+  const [selectedEmailIds, setSelectedEmailIds] = useState<string[]>([])
+  const [emailProposals, setEmailProposals] = useState<EmailProposalResult[]>([])
+  const [emailStatus, setEmailStatus] = useState("")
+  const [isFetchingEmails, setIsFetchingEmails] = useState(false)
+  const [isAnalyzingEmails, setIsAnalyzingEmails] = useState(false)
+  const [applyingProposalId, setApplyingProposalId] = useState("")
+  const [rejectingProposalId, setRejectingProposalId] = useState("")
+  const [editedActions, setEditedActions] = useState<Record<string, EmailAgentProposedAction>>({})
+  const [emailAgentSettings, setEmailAgentSettings] = useState<EmailAgentSettings>(DEFAULT_EMAIL_AGENT_SETTINGS)
+  const [emailAgentSettingsStatus, setEmailAgentSettingsStatus] = useState("")
+  const [isSavingEmailAgentSettings, setIsSavingEmailAgentSettings] = useState(false)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const hasRestoredPersistenceRef = useRef(false)
 
   useEffect(() => {
     setSystemPrompt((prev) => normalizeSystemPrompt(prev))
   }, [])
+
+  useEffect(() => {
+    if (!user?.email) {
+      setEmailAgentSettings(DEFAULT_EMAIL_AGENT_SETTINGS)
+      setEmailAgentSettingsStatus("이메일 에이전트 설정은 로그인 계정별로 저장됩니다.")
+      return
+    }
+
+    setEmailAgentSettingsStatus("이메일 에이전트 설정을 불러오는 중입니다...")
+    const unsubscribe = subscribeCurrentUserEmailAgentSettings(user.email, (settings) => {
+      setEmailAgentSettings(settings)
+      setEmailAgentSettingsStatus("이 계정의 이메일 에이전트 설정을 불러왔습니다.")
+    })
+
+    return unsubscribe
+  }, [user?.email])
 
   useEffect(() => {
     const viewport = viewportRef.current
@@ -786,6 +886,217 @@ export default function GptTestPage() {
     persistCurrentSession(messages, citations, snippets, usageText, responseTimeText, systemPrompt, nextSelected)
   }
 
+  const fetchEmailPreviews = async () => {
+    if (isFetchingEmails) return
+
+    setIsFetchingEmails(true)
+    setEmailStatus("")
+
+    try {
+      const response = await fetch("/api/gpt-test/email/preview", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          limit: emailFetchLimit,
+          mailbox: emailAgentSettings.imapMailbox,
+          settings: emailAgentSettings,
+        }),
+      })
+      const data = (await response.json()) as EmailPreviewResponse
+
+      if (!response.ok) {
+        throw new Error(data.error || "이메일 목록을 불러오지 못했습니다.")
+      }
+
+      const emails = data.emails || []
+      setEmailPreviews(emails)
+      setSelectedEmailIds((prev) => prev.filter((id) => emails.some((email) => email.emailId === id)))
+      setEmailStatus(emails.length > 0 ? `${emails.length}개의 최근 이메일을 불러왔습니다.` : "불러온 이메일이 없습니다.")
+    } catch (error) {
+      setEmailStatus(error instanceof Error ? error.message : "이메일 목록 조회 중 오류가 발생했습니다.")
+    } finally {
+      setIsFetchingEmails(false)
+    }
+  }
+
+  const toggleEmailSelection = (emailId: string) => {
+    setSelectedEmailIds((prev) =>
+      prev.includes(emailId) ? prev.filter((id) => id !== emailId) : [...prev, emailId],
+    )
+  }
+
+  const updateEmailAgentSettings = (updates: Partial<EmailAgentSettings>) => {
+    setEmailAgentSettings((prev) => ({
+      ...prev,
+      ...updates,
+    }))
+  }
+
+  const saveEmailAgentSettings = async () => {
+    if (!user?.email || isSavingEmailAgentSettings) {
+      setEmailAgentSettingsStatus("로그인 계정이 확인된 뒤 저장할 수 있습니다.")
+      return
+    }
+
+    setIsSavingEmailAgentSettings(true)
+    setEmailAgentSettingsStatus("이메일 에이전트 설정을 저장하는 중입니다...")
+
+    try {
+      await saveCurrentUserEmailAgentSettings(user.email, emailAgentSettings)
+      setEmailAgentSettingsStatus("이메일 에이전트 설정을 현재 계정에 저장했습니다.")
+    } catch (error) {
+      setEmailAgentSettingsStatus(error instanceof Error ? error.message : "이메일 에이전트 설정 저장 중 오류가 발생했습니다.")
+    } finally {
+      setIsSavingEmailAgentSettings(false)
+    }
+  }
+
+  const analyzeSelectedEmails = async () => {
+    if (selectedEmailIds.length === 0 || isAnalyzingEmails) return
+
+    setIsAnalyzingEmails(true)
+    setEmailStatus("선택한 이메일을 프로젝트 일정과 함께 분석하는 중입니다...")
+
+    try {
+      const response = await fetch("/api/gpt-test/email/analyze", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          emailIds: selectedEmailIds,
+          limit: Math.max(emailFetchLimit, selectedEmailIds.length),
+          settings: emailAgentSettings,
+        }),
+      })
+      const data = (await response.json()) as EmailAnalyzeResponse
+
+      if (!response.ok) {
+        throw new Error(data.error || "이메일 분석에 실패했습니다.")
+      }
+
+      const incoming = data.proposals || []
+      setEmailProposals((prev) => {
+        const next = new Map(prev.map((item) => [item.proposal.id, item]))
+        incoming.forEach((item) => next.set(item.proposal.id, item))
+        return Array.from(next.values())
+      })
+      setEmailStatus(
+        incoming.length > 0
+          ? `${incoming.length}개의 분석 제안을 만들었습니다. 승인 전까지 업무에는 반영되지 않습니다.`
+          : "생성된 분석 제안이 없습니다.",
+      )
+    } catch (error) {
+      setEmailStatus(error instanceof Error ? error.message : "이메일 분석 중 오류가 발생했습니다.")
+    } finally {
+      setIsAnalyzingEmails(false)
+    }
+  }
+
+  const updateEditedAction = (proposalId: string, actionIndex: number, updates: Partial<EmailAgentProposedAction>) => {
+    const key = `${proposalId}:${actionIndex}`
+    setEditedActions((prev) => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] || {}),
+        ...updates,
+      },
+    }))
+  }
+
+  const getEditedAction = (proposalId: string, actionIndex: number, action: EmailAgentProposedAction) => {
+    const edited = editedActions[`${proposalId}:${actionIndex}`]
+    return edited ? { ...action, ...edited } : action
+  }
+
+  const applyEmailProposal = async (proposalId: string, actionIndex: number, actionOverride?: EmailAgentProposedAction) => {
+    if (applyingProposalId) return
+
+    setApplyingProposalId(proposalId)
+    setEmailStatus("선택한 AI 제안을 업무에 반영하는 중입니다...")
+
+    try {
+      const response = await fetch(`/api/gpt-test/email/proposals/${proposalId}/apply`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ actionIndex, actionOverride, actorEmail: user?.email || "" }),
+      })
+      const data = (await response.json()) as EmailProposalApplyResponse
+
+      if (!response.ok) {
+        throw new Error(data.error || "이메일 업무 제안 반영에 실패했습니다.")
+      }
+
+      setEmailProposals((prev) =>
+        prev.map((item) =>
+          item.proposal.id === proposalId
+            ? {
+                ...item,
+                proposal: {
+                  ...item.proposal,
+                  status: "applied",
+                  appliedTaskId: data.appliedTaskId,
+                  appliedActionIndex: actionIndex,
+                  appliedAt: new Date().toISOString(),
+                },
+              }
+            : item,
+        ),
+      )
+      setEmailStatus(data.appliedTaskId ? `업무에 반영했습니다. 생성/수정된 업무 ID: ${data.appliedTaskId}` : "업무에 반영했습니다.")
+    } catch (error) {
+      setEmailStatus(error instanceof Error ? error.message : "이메일 업무 제안 반영 중 오류가 발생했습니다.")
+    } finally {
+      setApplyingProposalId("")
+    }
+  }
+
+  const rejectEmailProposal = async (proposalId: string) => {
+    if (rejectingProposalId) return
+
+    setRejectingProposalId(proposalId)
+    setEmailStatus("선택한 AI 제안을 거절하는 중입니다...")
+
+    try {
+      const response = await fetch(`/api/gpt-test/email/proposals/${proposalId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: "rejected", actorEmail: user?.email || "" }),
+      })
+      const data = (await response.json()) as EmailProposalRejectResponse
+
+      if (!response.ok) {
+        throw new Error(data.error || "이메일 업무 제안 거절에 실패했습니다.")
+      }
+
+      setEmailProposals((prev) =>
+        prev.map((item) =>
+          item.proposal.id === proposalId
+            ? {
+                ...item,
+                proposal: {
+                  ...item.proposal,
+                  status: "rejected",
+                  rejectedAt: new Date().toISOString(),
+                },
+              }
+            : item,
+        ),
+      )
+      setEmailStatus("제안을 거절했습니다.")
+    } catch (error) {
+      setEmailStatus(error instanceof Error ? error.message : "이메일 업무 제안 거절 중 오류가 발생했습니다.")
+    } finally {
+      setRejectingProposalId("")
+    }
+  }
+
   const togglePanel = (panel: Exclude<PanelType, null>) => {
     setOpenPanel((prev) => (prev === panel ? null : panel))
   }
@@ -800,7 +1111,7 @@ export default function GptTestPage() {
               <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-700">OpenAI File Search</p>
               <h1 className="mt-2 text-3xl font-bold tracking-tight lg:text-4xl">GPT 테스트 채팅</h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-                메인 채팅을 중심으로 두고, 기록과 설정, 벡터 스토어 관리는 버튼으로 열어보는 구조로 정리했습니다.
+                메인 채팅을 중심으로 두고, 기록과 설정, 벡터 스토어, 이메일 업무 분석을 버튼으로 열어보는 구조로 정리했습니다.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -815,6 +1126,10 @@ export default function GptTestPage() {
               <Button type="button" variant={openPanel === "sources" ? "default" : "outline"} onClick={() => togglePanel("sources")}>
                 <Database className="h-4 w-4" />
                 벡터 스토어              </Button>
+              <Button type="button" variant={openPanel === "email" ? "default" : "outline"} onClick={() => togglePanel("email")}>
+                <Mail className="h-4 w-4" />
+                이메일 분석
+              </Button>
               <Button type="button" variant="outline" onClick={handleNewSession}>
                 <Plus className="h-4 w-4" />
                 새 대화              </Button>
@@ -833,7 +1148,13 @@ export default function GptTestPage() {
             <div className="mt-5 rounded-3xl border border-slate-200 bg-white/90 p-5 shadow-sm">
               <div className="mb-4 flex items-center justify-between">
                 <p className="text-sm font-semibold text-slate-900">
-                  {openPanel === "history" ? "저장된 채팅" : openPanel === "settings" ? "채팅 설정" : "벡터 스토어 관리"}
+                  {openPanel === "history"
+                    ? "저장된 채팅"
+                    : openPanel === "settings"
+                      ? "채팅 설정"
+                      : openPanel === "sources"
+                        ? "벡터 스토어 관리"
+                        : "이메일 업무 분석"}
                 </p>
                 <Button type="button" variant="ghost" size="sm" onClick={() => setOpenPanel(null)}>
                   <X className="h-4 w-4" />
@@ -891,6 +1212,120 @@ export default function GptTestPage() {
                       <Save className="h-4 w-4" />
                       채팅 기록 안내                    </p>
                     <p className="mt-2 leading-6">채팅 기록은 브라우저 로컬 스토리지에 자동 저장됩니다. 새로고침 후에도 다시 확인할 수 있습니다.</p>
+                  </div>
+                  <div className="space-y-4 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 lg:col-span-2">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <p className="flex items-center gap-2 text-sm font-semibold text-amber-950">
+                          <Mail className="h-4 w-4" />
+                          Email Agent Service 계정별 설정
+                        </p>
+                        <p className="mt-2 text-xs leading-5 text-amber-900">
+                          아래 값은 현재 로그인 계정({user?.email || "로그인 사용자"}) 기준으로 저장되고 이메일 분석 요청에만 사용됩니다.
+                          IMAP 비밀번호와 OpenAI 키가 포함되므로 Firestore 보안 규칙을 계정별 접근으로 제한해 주세요.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void saveEmailAgentSettings()}
+                        disabled={!user?.email || isSavingEmailAgentSettings}
+                      >
+                        {isSavingEmailAgentSettings ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                        에이전트 설정 저장
+                      </Button>
+                    </div>
+                    <div className="grid gap-3 lg:grid-cols-2">
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-700">서비스 URL</label>
+                        <Input
+                          value={emailAgentSettings.serviceUrl}
+                          onChange={(event) => updateEmailAgentSettings({ serviceUrl: event.target.value })}
+                          placeholder="http://127.0.0.1:8787"
+                          className="bg-white"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-700">OpenAI 모델</label>
+                        <Input
+                          value={emailAgentSettings.openaiModel}
+                          onChange={(event) => updateEmailAgentSettings({ openaiModel: event.target.value })}
+                          placeholder="gpt-5.2"
+                          className="bg-white"
+                        />
+                      </div>
+                      <div className="space-y-2 lg:col-span-2">
+                        <label className="text-xs font-semibold text-slate-700">Email Agent용 OpenAI API 키</label>
+                        <Input
+                          type="password"
+                          value={emailAgentSettings.openaiApiKey}
+                          onChange={(event) => updateEmailAgentSettings({ openaiApiKey: event.target.value })}
+                          placeholder="sk-..."
+                          autoComplete="off"
+                          className="bg-white"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-700">IMAP Host</label>
+                        <Input
+                          value={emailAgentSettings.imapHost}
+                          onChange={(event) => updateEmailAgentSettings({ imapHost: event.target.value })}
+                          placeholder="imap.example.com"
+                          className="bg-white"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-700">IMAP Port</label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={65535}
+                          value={emailAgentSettings.imapPort}
+                          onChange={(event) => updateEmailAgentSettings({ imapPort: Math.max(1, Math.min(65535, Number(event.target.value) || 993)) })}
+                          className="bg-white"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-700">IMAP Username</label>
+                        <Input
+                          value={emailAgentSettings.imapUsername}
+                          onChange={(event) => updateEmailAgentSettings({ imapUsername: event.target.value })}
+                          placeholder="name@company.com"
+                          autoComplete="username"
+                          className="bg-white"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-700">IMAP Password</label>
+                        <Input
+                          type="password"
+                          value={emailAgentSettings.imapPassword}
+                          onChange={(event) => updateEmailAgentSettings({ imapPassword: event.target.value })}
+                          placeholder="앱 비밀번호"
+                          autoComplete="off"
+                          className="bg-white"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-700">Mailbox</label>
+                        <Input
+                          value={emailAgentSettings.imapMailbox}
+                          onChange={(event) => updateEmailAgentSettings({ imapMailbox: event.target.value })}
+                          placeholder="INBOX"
+                          className="bg-white"
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 rounded-xl border border-amber-100 bg-white px-3 py-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={emailAgentSettings.imapUseSsl}
+                          onChange={(event) => updateEmailAgentSettings({ imapUseSsl: event.target.checked })}
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        SSL 사용
+                      </label>
+                    </div>
+                    <p className="text-xs leading-5 text-amber-900">{emailAgentSettingsStatus}</p>
                   </div>
                 </div>
               )}
@@ -998,6 +1433,274 @@ export default function GptTestPage() {
                           )
                         })
                       )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {openPanel === "email" && (
+                <div className="space-y-5">
+                  <div className="flex flex-col gap-3 rounded-2xl border border-amber-100 bg-amber-50/80 p-4 text-sm text-slate-700 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <p className="flex items-center gap-2 font-semibold text-amber-900">
+                        <Inbox className="h-4 w-4" />
+                        IMAP 이메일을 업무 제안으로 변환
+                      </p>
+                      <p className="mt-1 leading-6">
+                        이메일 본문과 현재 프로젝트 일정을 함께 분석합니다. 승인 전에는 Firestore 업무에 반영되지 않습니다.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={emailFetchLimit}
+                        onChange={(event) => setEmailFetchLimit(Math.min(50, Math.max(1, Number(event.target.value) || 10)))}
+                        className="h-9 w-24 bg-white"
+                        aria-label="가져올 이메일 수"
+                      />
+                      <Button type="button" variant="outline" size="sm" onClick={() => void fetchEmailPreviews()} disabled={isFetchingEmails}>
+                        {isFetchingEmails ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                        이메일 가져오기
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void analyzeSelectedEmails()}
+                        disabled={selectedEmailIds.length === 0 || isAnalyzingEmails}
+                      >
+                        {isAnalyzingEmails ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                        선택 {selectedEmailIds.length}개 분석
+                      </Button>
+                    </div>
+                  </div>
+
+                  {emailStatus ? (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">{emailStatus}</div>
+                  ) : null}
+
+                  <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <p className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                          <Mail className="h-4 w-4 text-sky-600" />
+                          최근 이메일
+                        </p>
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600">
+                          선택 {selectedEmailIds.length}개
+                        </span>
+                      </div>
+                      <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
+                        {emailPreviews.length === 0 ? (
+                          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm leading-6 text-slate-500">
+                            아직 불러온 이메일이 없습니다. 이메일 가져오기를 눌러 IMAP 서비스 연결을 확인해 주세요.
+                          </div>
+                        ) : (
+                          emailPreviews.map((email) => {
+                            const isSelected = selectedEmailIds.includes(email.emailId)
+                            return (
+                              <label
+                                key={email.emailId}
+                                className={`block cursor-pointer rounded-2xl border p-4 transition-colors ${
+                                  isSelected ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                                }`}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleEmailSelection(email.emailId)}
+                                    className="mt-1 h-4 w-4 rounded border-slate-300"
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                                      <span className="font-semibold text-slate-900">{email.from || "발신자 없음"}</span>
+                                      <span>{formatOptionalTimestamp(email.receivedAt)}</span>
+                                      {email.hasAttachments ? <span className="rounded-full bg-slate-100 px-2 py-0.5">첨부 있음</span> : null}
+                                    </div>
+                                    <p className="mt-1 truncate text-sm font-semibold text-slate-900">{email.subject || "(제목 없음)"}</p>
+                                    <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-600">
+                                      {email.plainTextPreview || "본문 미리보기가 없습니다."}
+                                    </p>
+                                  </div>
+                                </div>
+                              </label>
+                            )
+                          })
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <p className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                          <CalendarClock className="h-4 w-4 text-sky-600" />
+                          분석 제안
+                        </p>
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600">
+                          {emailProposals.length}개
+                        </span>
+                      </div>
+                      <div className="max-h-[520px] space-y-4 overflow-y-auto pr-1">
+                        {emailProposals.length === 0 ? (
+                          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm leading-6 text-slate-500">
+                            선택한 이메일을 분석하면 신규 업무/기존 업무 수정/일정 리스크 제안이 여기에 표시됩니다.
+                          </div>
+                        ) : (
+                          emailProposals.map(({ proposal, duplicate }) => (
+                            <div key={proposal.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                    <span className="rounded-full bg-white px-2.5 py-1 font-semibold text-slate-700">
+                                      {proposal.status === "pending" ? "승인 대기" : proposal.status === "applied" ? "반영 완료" : "거절됨"}
+                                    </span>
+                                    <span className="rounded-full bg-white px-2.5 py-1 text-slate-600">
+                                      신뢰도 {formatConfidence(proposal.analysis.confidence)}
+                                    </span>
+                                    {duplicate ? <span className="rounded-full bg-amber-100 px-2.5 py-1 text-amber-800">중복 감지</span> : null}
+                                  </div>
+                                  <p className="mt-2 truncate text-sm font-semibold text-slate-900">{proposal.sourceEmail.subject}</p>
+                                  <p className="mt-1 text-xs text-slate-500">{proposal.sourceEmail.from}</p>
+                                </div>
+                                {proposal.status === "pending" ? (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                                    disabled={rejectingProposalId === proposal.id}
+                                    onClick={() => void rejectEmailProposal(proposal.id)}
+                                  >
+                                    {rejectingProposalId === proposal.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+                                    거절
+                                  </Button>
+                                ) : null}
+                              </div>
+
+                              <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-700">
+                                <p>{proposal.analysis.summary || "요약이 없습니다."}</p>
+                                {proposal.analysis.reasoningSummary ? (
+                                  <p className="mt-2 text-xs text-slate-500">근거: {proposal.analysis.reasoningSummary}</p>
+                                ) : null}
+                              </div>
+
+                              <div className="mt-3 space-y-2">
+                                {proposal.proposedActions.map((action, actionIndex) => {
+                                  const editableAction = getEditedAction(proposal.id, actionIndex, action)
+                                  return (
+                                    <div key={`${proposal.id}-${actionIndex}`} className="rounded-xl border border-slate-200 bg-white p-3">
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-sm font-semibold text-slate-900">{ACTION_LABELS[action.type]}</p>
+                                        {proposal.status === "pending" && isActionApplyable(action) ? (
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            onClick={() => void applyEmailProposal(proposal.id, actionIndex, editableAction)}
+                                            disabled={applyingProposalId === proposal.id}
+                                          >
+                                            {applyingProposalId === proposal.id ? (
+                                              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                                            ) : (
+                                              <CheckCircle2 className="h-3.5 w-3.5" />
+                                            )}
+                                            업무 반영
+                                          </Button>
+                                        ) : null}
+                                      </div>
+                                      <div className="mt-2 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                                        {action.projectId ? <span className="break-all">프로젝트: {action.projectId}</span> : null}
+                                        {action.taskId ? <span className="break-all">업무 ID: {action.taskId}</span> : null}
+                                        {action.status ? <span>상태: {action.status}</span> : null}
+                                        {action.category ? <span>구분: {action.category}</span> : null}
+                                      </div>
+                                      {proposal.status === "pending" && isActionApplyable(action) ? (
+                                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                          <Input
+                                            value={editableAction.title || ""}
+                                            onChange={(event) => updateEditedAction(proposal.id, actionIndex, { title: event.target.value })}
+                                            placeholder="업무명"
+                                            className="h-9 bg-slate-50 text-xs"
+                                          />
+                                          <Input
+                                            value={editableAction.person || ""}
+                                            onChange={(event) => updateEditedAction(proposal.id, actionIndex, { person: event.target.value })}
+                                            placeholder="담당자"
+                                            className="h-9 bg-slate-50 text-xs"
+                                          />
+                                          <Input
+                                            value={editableAction.department || ""}
+                                            onChange={(event) => updateEditedAction(proposal.id, actionIndex, { department: event.target.value })}
+                                            placeholder="부서"
+                                            className="h-9 bg-slate-50 text-xs"
+                                          />
+                                          <Input
+                                            type="number"
+                                            min={0}
+                                            step={0.25}
+                                            value={editableAction.manDays ?? 0}
+                                            onChange={(event) => updateEditedAction(proposal.id, actionIndex, { manDays: Number(event.target.value) || 0 })}
+                                            placeholder="공수"
+                                            className="h-9 bg-slate-50 text-xs"
+                                          />
+                                          <Input
+                                            type="date"
+                                            value={editableAction.startDate || ""}
+                                            onChange={(event) => updateEditedAction(proposal.id, actionIndex, { startDate: event.target.value })}
+                                            className="h-9 bg-slate-50 text-xs"
+                                          />
+                                          <Input
+                                            type="date"
+                                            value={editableAction.endDate || ""}
+                                            onChange={(event) => updateEditedAction(proposal.id, actionIndex, { endDate: event.target.value })}
+                                            className="h-9 bg-slate-50 text-xs"
+                                          />
+                                          <Textarea
+                                            value={editableAction.memo || ""}
+                                            onChange={(event) => updateEditedAction(proposal.id, actionIndex, { memo: event.target.value })}
+                                            placeholder="메모"
+                                            className="min-h-20 resize-none bg-slate-50 text-xs sm:col-span-2"
+                                          />
+                                        </div>
+                                      ) : (
+                                        <>
+                                          <div className="mt-2 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                                            {action.title ? <span>업무: {action.title}</span> : null}
+                                            {action.person ? <span>담당: {action.person}</span> : null}
+                                            {action.department ? <span>부서: {action.department}</span> : null}
+                                            {action.startDate || action.endDate ? (
+                                              <span>
+                                                일정: {action.startDate || "미정"} ~ {action.endDate || "미정"}
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                          {action.memo ? <p className="mt-2 text-xs leading-5 text-slate-500">{action.memo}</p> : null}
+                                        </>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+
+                              {proposal.analysis.scheduleRisks.length > 0 ? (
+                                <div className="mt-3 space-y-2">
+                                  {proposal.analysis.scheduleRisks.map((risk, riskIndex) => (
+                                    <div key={`${proposal.id}-risk-${riskIndex}`} className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                      <span>{risk.message}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+
+                              {proposal.analysis.missingInfo.length > 0 ? (
+                                <p className="mt-3 text-xs text-slate-500">추가 확인 필요: {proposal.analysis.missingInfo.join(", ")}</p>
+                              ) : null}
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
