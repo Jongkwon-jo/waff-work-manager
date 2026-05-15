@@ -173,6 +173,32 @@ function getTaskBarSpan(task: Task, weekStart: Date, weekEnd: Date) {
   }
 }
 
+function getOrgPersonOrder(
+  person: string,
+  orgChart: DepartmentOrgSettings,
+  preferredGroup?: DepartmentPersonGroup,
+) {
+  const groups = preferredGroup
+    ? [preferredGroup, ...Object.keys(orgChart).filter((group) => group !== preferredGroup)]
+    : Object.keys(orgChart)
+
+  for (const group of groups as DepartmentPersonGroup[]) {
+    const org = orgChart[group]
+    if (org.leader?.name === person) return 0
+    if ((org.advisors || []).some((member) => member.name === person)) return 1
+    for (let teamIndex = 0; teamIndex < org.teams.length; teamIndex += 1) {
+      const memberIndex = org.teams[teamIndex].members.findIndex((member) => member.name === person)
+      if (memberIndex >= 0) {
+        const member = org.teams[teamIndex].members[memberIndex]
+        const roleOrder = member.title === "팀장" ? 0 : 1
+        return (teamIndex + 2) * 100 + roleOrder * 10 + memberIndex
+      }
+    }
+  }
+
+  return 99999
+}
+
 interface WeeklyWorkBoardProps {
   title: string
   description: string
@@ -481,6 +507,11 @@ export function WeeklyWorkBoard({
     [selectedPerson, weeklyTasks],
   )
 
+  const visiblePersons = useMemo(
+    () => (selectedPerson === "all" ? personOptions : personOptions.filter((person) => person === selectedPerson)),
+    [personOptions, selectedPerson],
+  )
+
   const groupedTasksByTeamPersonProject = useMemo(() => {
     const teamMap = new Map<
       string,
@@ -496,6 +527,20 @@ export function WeeklyWorkBoard({
         >
       }
     >()
+
+    visiblePersons.forEach((person) => {
+      const orgTeam = getOrgTeamForPerson(person, getPreferredGroupForPerson(person), departmentOrgSettings)
+      if (!teamMap.has(orgTeam.teamName)) {
+        teamMap.set(orgTeam.teamName, {
+          team: orgTeam.teamName,
+          teamOrder: orgTeam.order,
+          people: new Map(),
+        })
+      }
+      const teamGroup = teamMap.get(orgTeam.teamName)!
+      teamGroup.teamOrder = Math.min(teamGroup.teamOrder, orgTeam.order)
+      if (!teamGroup.people.has(person)) teamGroup.people.set(person, new Map())
+    })
 
     visibleTasks.forEach((item) => {
       if (!teamMap.has(item.team)) {
@@ -532,7 +577,12 @@ export function WeeklyWorkBoard({
           0,
         ),
         people: Array.from(teamGroup.people.entries())
-          .sort((a, b) => a[0].localeCompare(b[0], "ko"))
+          .sort((a, b) => {
+            const orderA = getOrgPersonOrder(a[0], departmentOrgSettings, getPreferredGroupForPerson(a[0]))
+            const orderB = getOrgPersonOrder(b[0], departmentOrgSettings, getPreferredGroupForPerson(b[0]))
+            if (orderA !== orderB) return orderA - orderB
+            return a[0].localeCompare(b[0], "ko")
+          })
           .map(([person, projectMap]) => ({
             person,
             projects: Array.from(projectMap.entries())
@@ -554,7 +604,7 @@ export function WeeklyWorkBoard({
               }),
           })),
       }))
-  }, [visibleTasks])
+  }, [departmentOrgSettings, departmentPersonSettings, profileDefaultPerson, profileDepartment, selectedDataSources, selectedDepartment, visiblePersons, visibleTasks])
 
   const selectedManagementHref = selectedDataSources[0]?.managementHref || homeHref
 
@@ -728,7 +778,7 @@ export function WeeklyWorkBoard({
           </div>
         </header>
 
-        {visibleTasks.length === 0 ? (
+        {visiblePersons.length === 0 ? (
           <Card className="border-dashed">
             <CardHeader>
               <CardTitle>이번 주 업무가 없습니다.</CardTitle>
@@ -788,9 +838,19 @@ export function WeeklyWorkBoard({
                   </div>
                   <div className="space-y-4">
                     {teamGroup.people.map((personGroup) => (
-                      <div key={`mobile-${teamGroup.team}-${personGroup.person}`} className="space-y-2">
-                        <div className="text-xs font-semibold text-slate-700">{personGroup.person}</div>
+                      <div key={`mobile-${teamGroup.team}-${personGroup.person}`} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-2 shadow-sm">
+                        <div className="flex items-center justify-between gap-2 border-l-4 border-primary/70 bg-white px-2 py-1.5">
+                          <div className="text-xs font-bold text-slate-900">{personGroup.person}</div>
+                          <Badge variant="outline" className="bg-white text-[10px]">
+                            {personGroup.projects.reduce((sum, project) => sum + project.items.length, 0)}개 업무
+                          </Badge>
+                        </div>
                         <div className="space-y-3">
+                          {personGroup.projects.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
+                              이번 주 배정된 업무가 없습니다.
+                            </div>
+                          ) : null}
                           {personGroup.projects.map((project) => {
                             const projectMemos = Array.from(
                               new Set(project.items.map((item) => item.task.memo?.trim() || "").filter(Boolean)),
@@ -983,16 +1043,56 @@ export function WeeklyWorkBoard({
                   </div>
 
                   {teamGroup.people.map((personGroup) => (
-                    <div key={`${teamGroup.team}-${personGroup.person}`}>
+                    <div key={`${teamGroup.team}-${personGroup.person}`} className="border-l-4 border-primary/50 bg-slate-50/35">
                       <div className="grid grid-cols-[320px_repeat(7,minmax(90px,1fr))] border-b border-slate-200 bg-slate-50/70">
-                        <div className="px-4 py-1.5">
-                          <div className="text-sm font-semibold text-slate-900">{personGroup.person}</div>
-                          <div className="mt-0.5 text-xs text-slate-500">
-                            {personGroup.projects.reduce((sum, project) => sum + project.items.length, 0)}개 업무 · {personGroup.projects.length}개 프로젝트
+                        <div className="px-3 py-2">
+                          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span className="h-8 w-1.5 rounded-full bg-primary/70" />
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-bold text-slate-900">{personGroup.person}</div>
+                                  <div className="mt-0.5 text-xs text-slate-500">
+                                    {personGroup.projects.length}개 프로젝트
+                                  </div>
+                                </div>
+                              </div>
+                              <Badge variant="outline" className="shrink-0 bg-slate-50 text-[10px]">
+                                {personGroup.projects.reduce((sum, project) => sum + project.items.length, 0)}개 업무
+                              </Badge>
+                            </div>
                           </div>
                         </div>
                         <div className="col-span-7" />
                       </div>
+
+                      {personGroup.projects.length === 0 ? (
+                        <div className="grid grid-cols-[320px_repeat(7,minmax(90px,1fr))] items-stretch px-3 pb-2">
+                          <div className="px-4 py-3">
+                            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                              이번 주 배정된 업무가 없습니다.
+                            </div>
+                          </div>
+                          <div className="col-span-7 my-2 grid grid-cols-7 overflow-hidden rounded-lg border border-slate-200/70">
+                            {weekDays.map((day) => (
+                              <div
+                                key={`${personGroup.person}-empty-${day.date.toISOString()}`}
+                                className={`min-h-[44px] border-l border-slate-200/80 ${
+                                  weeklyGlobalScheduleDayKeys.has(toDayKey(day.date))
+                                    ? "bg-rose-100/55"
+                                    : day.isToday
+                                      ? "bg-yellow-50/80"
+                                      : day.dayOfWeek === 6
+                                        ? "bg-blue-50/60"
+                                        : day.dayOfWeek === 0
+                                          ? "bg-red-50/60"
+                                          : "bg-white"
+                                }`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
 
                       {personGroup.projects.map((project) => {
                         const projectMemos = Array.from(
@@ -1001,7 +1101,7 @@ export function WeeklyWorkBoard({
                         const rowHeight = Math.max(48, project.items.length * 26 + 8)
                         return (
                           <div key={`${personGroup.person}-${project.projectId}`} className="grid grid-cols-[320px_repeat(7,minmax(90px,1fr))] items-stretch">
-                            <div className="flex px-3 py-0.5">
+                            <div className="flex px-3 py-1">
                               <div className={`flex min-h-[48px] w-full flex-col justify-center rounded-xl border px-2 py-1 text-left ${tone.taskCard}`}>
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
@@ -1038,7 +1138,7 @@ export function WeeklyWorkBoard({
                               </div>
                             </div>
 
-                            <div className="relative col-span-7 grid grid-cols-7 border-t border-b border-slate-200/60" style={{ minHeight: `${rowHeight}px` }}>
+                            <div className="relative col-span-7 my-1 grid grid-cols-7 overflow-hidden rounded-lg border border-slate-200/70" style={{ minHeight: `${rowHeight}px` }}>
                               {weekDays.map((day) => (
                                 <div
                                   key={`${personGroup.person}-${project.projectId}-${day.date.toISOString()}`}
