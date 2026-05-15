@@ -352,6 +352,26 @@ function flattenTasksForExport(tasks: Task[], depth = 0): FlattenedTask[] {
   })
 }
 
+function taskTreeContainsId(task: Task, targetTaskId: string): boolean {
+  if (task.id === targetTaskId) return true
+  return (task.subTasks || []).some((child) => taskTreeContainsId(child, targetTaskId))
+}
+
+function projectContainsTaskId(project: Project, targetTaskId: string): boolean {
+  return project.tasks.some((task) => taskTreeContainsId(task, targetTaskId))
+}
+
+function scrollTaskRowIntoView(taskId: string) {
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      document.getElementById(`task-row-${taskId}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      })
+    })
+  })
+}
+
 export function GanttView({
   projects,
   globalSchedules = [],
@@ -853,7 +873,11 @@ export function GanttView({
 
     const sourceProjects = showHiddenProjects
       ? projects
-      : projects.filter((project) => !hiddenProjectIds.has(project.id))
+      : projects.filter(
+          (project) =>
+            !hiddenProjectIds.has(project.id) ||
+            Boolean(highlightedTaskId && projectContainsTaskId(project, highlightedTaskId)),
+        )
 
     return sourceProjects
       .map((project) => {
@@ -863,7 +887,8 @@ export function GanttView({
           return tasks.reduce((acc, task) => {
             const hasChildren = (task.subTasks?.length || 0) > 0
             const isHidden = hiddenTaskIds.has(task.id)
-            if (isHidden && !showHiddenInLevel) {
+            const containsHighlightedTask = highlightedTaskId ? taskTreeContainsId(task, highlightedTaskId) : false
+            if (isHidden && !showHiddenInLevel && !containsHighlightedTask) {
               return acc
             }
 
@@ -882,7 +907,8 @@ export function GanttView({
             const matchesSearch =
               lowerQuery.length === 0 || task.task.toLowerCase().includes(lowerQuery) || projectMatchesSearch
 
-            const matchesCurrentTask = matchesStatus && matchesDepartment && matchesPerson && matchesSearch
+            const matchesCurrentTask =
+              (matchesStatus && matchesDepartment && matchesPerson && matchesSearch) || task.id === highlightedTaskId
 
             if (!matchesCurrentTask && childRows.length === 0) {
               return acc
@@ -912,7 +938,7 @@ export function GanttView({
         }
         return true
       })
-  }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds, hiddenTaskIds, hiddenProjectIds, showHiddenProjects, expandedHiddenParentIds, expandedHiddenProjectIds, collapsedHiddenParentIds])
+  }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds, hiddenTaskIds, hiddenProjectIds, showHiddenProjects, expandedHiddenParentIds, expandedHiddenProjectIds, collapsedHiddenParentIds, highlightedTaskId])
 
   const visibleTaskMap = useMemo(() => {
     const map = new Map<string, FlattenedTask>()
@@ -1414,12 +1440,7 @@ export function GanttView({
         container.scrollTo({ top: targetTop, behavior: "smooth" })
         pendingScrollTopRef.current = targetTop
         setScrollTop((prev) => (prev === targetTop ? prev : targetTop))
-        window.requestAnimationFrame(() => {
-          document.getElementById(`task-row-${highlightedTaskId}`)?.scrollIntoView({
-            behavior: "smooth",
-            block: "center",
-          })
-        })
+        scrollTaskRowIntoView(highlightedTaskId)
         return
       }
 
@@ -2492,6 +2513,14 @@ export function GanttView({
                       const isParentHiddenExpanded =
                         !collapsedHiddenParentIds.has(task.id) &&
                         expandedHiddenParentIds.has(task.id)
+                      const isHighlightedTask = highlightedTaskId === task.id
+                      const rowBgClass = isHighlightedTask
+                        ? "bg-yellow-100/70 ring-2 ring-yellow-400/80 ring-inset"
+                        : depthRowBgClass
+                      const stickyCellBgClass = isHighlightedTask
+                        ? "bg-yellow-100/95 group-hover/task:bg-yellow-100/95"
+                        : depthRowBgClass
+                      const timelineCellBgClass = isHighlightedTask ? "bg-yellow-50/95" : depthRowBgClass
 
                       const ownerValues = visibleOwnerOptions
                       const currentDepartments = parseDepartments(task.department || "")
@@ -2502,9 +2531,8 @@ export function GanttView({
                           <div
                             className={cn(
                               "group/task relative flex border-b border-border/50 transition-colors hover:bg-accent/5",
-                              depthRowBgClass,
+                              rowBgClass,
                               dragOverInfo?.taskId === task.id && "ring-1 ring-blue-300/70 ring-inset",
-                              highlightedTaskId === task.id && "ring-2 ring-yellow-400/80 ring-inset bg-yellow-100/40",
                             )}
                             onDragOver={(e) => {
                               if (!canDropOnTask(task)) return
@@ -2551,7 +2579,7 @@ export function GanttView({
                             <div
                               className={cn(
                                 "sticky left-0 z-20 flex shrink-0 items-center border-r border-border px-4 py-1.5 group-hover/task:bg-accent/10 shadow-[2px_0_5px_rgba(0,0,0,0.05)] overflow-hidden",
-                                depthRowBgClass,
+                                stickyCellBgClass,
                               )}
                               style={{ width: leftPanelWidth }}
                             >
@@ -2866,7 +2894,7 @@ export function GanttView({
                               <div
                                 className={cn(
                                   "sticky z-20 shrink-0 border-r border-border px-3 py-1 shadow-[2px_0_5px_rgba(0,0,0,0.03)] group-hover/task:bg-accent/10 overflow-hidden",
-                                  depthRowBgClass,
+                                  stickyCellBgClass,
                                 )}
                                 style={{ left: leftPanelWidth, width: detailPanelWidth }}
                               >
@@ -2923,7 +2951,7 @@ export function GanttView({
                               </div>
                             )}
 
-                            <div className={cn("relative z-0 min-w-0 flex-1 h-9 overflow-hidden", depthRowBgClass)}>
+                            <div className={cn("relative z-0 min-w-0 flex-1 h-9 overflow-hidden", timelineCellBgClass)}>
                               <div
                                 className="relative h-full will-change-transform"
                                 style={{ width: timelineWidth, transform: `translateX(-${timelineScrollLeft}px)` }}
@@ -2931,10 +2959,15 @@ export function GanttView({
                                 {allDays.map((d, i) => (
                                   <div
                                     key={i}
-                                    className="absolute inset-y-0 pointer-events-none border-r border-border/25"
+                                    className={cn(
+                                      "absolute inset-y-0 pointer-events-none border-r border-border/25",
+                                      isHighlightedTask && "bg-yellow-100/45",
+                                    )}
                                     style={{ left: i * CELL_WIDTH, width: CELL_WIDTH }}
                                   >
-                                    {d.isWeekend && <div className="absolute inset-0 bg-muted/35" />}
+                                    {d.isWeekend && (
+                                      <div className={cn("absolute inset-0", isHighlightedTask ? "bg-yellow-100/35" : "bg-muted/35")} />
+                                    )}
                                     {(() => {
                                       const dayKey = `${d.year}-${String(d.month + 1).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`
                                       return globalSchedulesByDay.has(dayKey)
@@ -3221,6 +3254,17 @@ function MobileGanttView({
     ? filteredProjects.find((p) => p.id === selectedProjectId) ?? null
     : null
 
+  useEffect(() => {
+    if (!highlightedTaskId) return
+    const project = filteredProjects.find((candidate) =>
+      candidate.tasks.some((task) => task.id === highlightedTaskId),
+    )
+    if (!project) return
+
+    setSelectedProjectId((prev) => (prev === project.id ? prev : project.id))
+    scrollTaskRowIntoView(highlightedTaskId)
+  }, [filteredProjects, highlightedTaskId])
+
   const taskChangeHistoryById = useMemo(() => {
     const currentEmail = currentUserEmail.trim().toLowerCase()
     const seenIds = new Set(seenChangeHistoryIds)
@@ -3434,6 +3478,7 @@ function MobileGanttView({
                 return (
                   <div
                     key={task.id}
+                    id={`task-row-${task.id}`}
                     data-contains-today={containsToday ? "true" : undefined}
                     className={cn(
                       "border-b border-border/25 px-3 py-2",

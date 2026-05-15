@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { ArrowLeft, Lock, Save, ShieldCheck, Users } from "lucide-react"
+import { ArrowLeft, Save, ShieldCheck, Users } from "lucide-react"
 import { useAuth } from "@/components/auth/auth-provider"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,11 +14,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { toast } from "sonner"
 import {
   DEPARTMENT_PERSON_GROUPS,
-  DEFAULT_DEPARTMENT_PAGE_PERMISSIONS,
   DEFAULT_DEPARTMENT_PERSON_SETTINGS,
   DEFAULT_MY_PAGE_EDITABLE_FIELDS,
   MBTI_TYPES,
-  saveDepartmentPagePermissions,
   saveDepartmentPersonSettings,
   saveGlobalSchedules,
   saveMyPageEditableFields,
@@ -27,13 +25,11 @@ import {
   saveUserPagePermissions,
   saveUserTaskAliases,
   subscribeAllUserPagePermissions,
-  subscribeDepartmentPagePermissions,
   subscribeDepartmentPersonSettings,
   subscribeGlobalSchedules,
   subscribeMyPageEditableFields,
   subscribeUserProfiles,
   type GlobalSchedule,
-  type DepartmentPagePermissions,
   type DepartmentPersonGroup,
   type DepartmentPersonSettings,
   type MbtiType,
@@ -120,9 +116,6 @@ export default function AdminPage() {
   const [departmentPersonSettings, setDepartmentPersonSettings] = useState<DepartmentPersonSettings>(
     DEFAULT_DEPARTMENT_PERSON_SETTINGS,
   )
-  const [departmentPagePermissions, setDepartmentPagePermissions] = useState<DepartmentPagePermissions>(
-    DEFAULT_DEPARTMENT_PAGE_PERMISSIONS,
-  )
   const [draftEmail, setDraftEmail] = useState("")
   const [draftPermissions, setDraftPermissions] = useState<DraftPermissionMap>({})
   const [draftAliases, setDraftAliases] = useState<DraftAliasMap>({})
@@ -134,14 +127,10 @@ export default function AdminPage() {
     전략기획: "",
     기타: "",
   })
-  const [draftDepartmentPermissions, setDraftDepartmentPermissions] = useState<DepartmentPagePermissions>(
-    DEFAULT_DEPARTMENT_PAGE_PERMISSIONS,
-  )
   const [bulkTargetKey, setBulkTargetKey] = useState<string>(permissionColumns[0]?.id || "myPage")
   const [savingEmail, setSavingEmail] = useState<string | null>(null)
   const [savingAll, setSavingAll] = useState(false)
   const [savingDepartmentPersons, setSavingDepartmentPersons] = useState(false)
-  const [savingDepartmentPermissions, setSavingDepartmentPermissions] = useState(false)
   const [draftGlobalSchedules, setDraftGlobalSchedules] = useState<DraftGlobalSchedule[]>([])
   const [savingGlobalSchedules, setSavingGlobalSchedules] = useState(false)
   const [draftMyPageEditableFields, setDraftMyPageEditableFields] = useState<MyPageEditableFieldsSettings>([
@@ -157,7 +146,6 @@ export default function AdminPage() {
     const unsubscribeProfiles = subscribeUserProfiles(setProfiles)
     const unsubscribePermissions = subscribeAllUserPagePermissions(setPermissionEntries)
     const unsubscribeDepartmentPersons = subscribeDepartmentPersonSettings(setDepartmentPersonSettings)
-    const unsubscribeDepartmentPagePermissions = subscribeDepartmentPagePermissions(setDepartmentPagePermissions)
     const unsubscribeGlobalSchedules = subscribeGlobalSchedules((schedules) => {
       setDraftGlobalSchedules(
         schedules.map((item) => ({
@@ -175,7 +163,6 @@ export default function AdminPage() {
       unsubscribeProfiles()
       unsubscribePermissions()
       unsubscribeDepartmentPersons()
-      unsubscribeDepartmentPagePermissions()
       unsubscribeGlobalSchedules()
       unsubscribeMyPageEditableFields()
     }
@@ -236,54 +223,9 @@ export default function AdminPage() {
     })
   }, [departmentPersonSettings])
 
-  useEffect(() => {
-    setDraftDepartmentPermissions(departmentPagePermissions)
-  }, [departmentPagePermissions])
-
-  useEffect(() => {
-    setDraftPermissions((prev) => {
-      let changed = false
-      const next: DraftPermissionMap = { ...prev }
-
-      rows.forEach((email) => {
-        const department = draftDepartments[email]
-        if (!department || department === "none") return
-
-        const current = next[email] || DEFAULT_PAGE_PERMISSIONS
-        let rowChanged = false
-        const merged = { ...current }
-
-        permissionColumns.forEach((column) => {
-          const allowedByDepartment = column.getValue(draftDepartmentPermissions[department])
-          if (!allowedByDepartment && column.getValue(merged)) {
-            const nextPermissions = column.setValue(merged, false)
-            Object.assign(merged, nextPermissions)
-            rowChanged = true
-          }
-        })
-
-        if (rowChanged) {
-          next[email] = merged
-          changed = true
-        }
-      })
-
-      return changed ? next : prev
-    })
-  }, [draftDepartmentPermissions, draftDepartments, rows])
-
   const handleTogglePermission = (email: string, columnId: string, checked: boolean) => {
     const column = getPermissionColumnById(columnId)
     if (!column) return
-
-    const department = draftDepartments[email]
-    if (department && department !== "none") {
-      const allowedByDepartment = column.getValue(draftDepartmentPermissions[department])
-      if (!allowedByDepartment && checked) {
-        toast.info("부서 권한에서 비활성화된 항목은 개인 권한에서 허용할 수 없습니다.")
-        return
-      }
-    }
 
     setDraftPermissions((prev) => ({
       ...prev,
@@ -300,16 +242,10 @@ export default function AdminPage() {
     setDraftPermissions((prev) => {
       const next = { ...prev }
       filteredRows.forEach((email) => {
-        const department = draftDepartments[email]
-        if (checked && department && department !== "none" && !column.getValue(draftDepartmentPermissions[department])) return
         next[email] = column.setValue(prev[email] || DEFAULT_PAGE_PERMISSIONS, checked)
       })
       return next
     })
-
-    if (checked) {
-      toast.info("부서 권한에서 허용된 계정에만 일괄 허용이 적용됩니다.")
-    }
   }
 
   const handleSaveAllUsers = async () => {
@@ -327,16 +263,6 @@ export default function AdminPage() {
     } finally {
       setSavingAll(false)
     }
-  }
-
-  const handleToggleDepartmentPermission = (group: DepartmentPersonGroup, columnId: string, checked: boolean) => {
-    const column = getPermissionColumnById(columnId)
-    if (!column) return
-
-    setDraftDepartmentPermissions((prev) => ({
-      ...prev,
-      [group]: column.setValue(prev[group], checked),
-    }))
   }
 
   const handleSaveUser = async (email: string) => {
@@ -462,19 +388,6 @@ export default function AdminPage() {
     }
   }
 
-  const handleSaveDepartmentPermissions = async () => {
-    setSavingDepartmentPermissions(true)
-
-    try {
-      await saveDepartmentPagePermissions(draftDepartmentPermissions)
-      toast.success("부서별 페이지 권한이 저장되었습니다.")
-    } catch {
-      toast.error("부서별 페이지 권한 저장에 실패했습니다.")
-    } finally {
-      setSavingDepartmentPermissions(false)
-    }
-  }
-
   const addGlobalScheduleRow = () => {
     const nextId =
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -593,54 +506,6 @@ export default function AdminPage() {
               <Button type="button" onClick={() => void handleSaveDepartmentPersons()} disabled={savingDepartmentPersons}>
                 <Save className="h-4 w-4" />
                 {savingDepartmentPersons ? "저장 중..." : "부서 담당자 저장"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xl">부서별 페이지 권한</CardTitle>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <Table className="min-w-[1300px]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[180px]">부서</TableHead>
-                  {permissionColumns.map((column) => (
-                    <TableHead key={column.id}>{column.label}</TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {DEPARTMENT_PERSON_GROUPS.map((group) => (
-                  <TableRow key={group}>
-                    <TableCell className="font-medium">{group}</TableCell>
-                    {permissionColumns.map((column) => (
-                      <TableCell key={column.id}>
-                        <label className="flex items-center gap-2 text-sm">
-                          <Checkbox
-                            checked={column.getValue(draftDepartmentPermissions[group])}
-                            onCheckedChange={(checked) =>
-                              handleToggleDepartmentPermission(group, column.id, checked === true)
-                            }
-                          />
-                          허용
-                        </label>
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <div className="mt-4 flex justify-end">
-              <Button
-                type="button"
-                onClick={() => void handleSaveDepartmentPermissions()}
-                disabled={savingDepartmentPermissions}
-              >
-                <Save className="h-4 w-4" />
-                {savingDepartmentPermissions ? "저장 중..." : "부서 권한 저장"}
               </Button>
             </div>
           </CardContent>
@@ -926,29 +791,15 @@ export default function AdminPage() {
                           </TableCell>
                           {permissionColumns.map((column) => (
                             <TableCell key={column.id} className="py-2 text-center align-middle">
-                              {(() => {
-                                const disabledByDepartment =
-                                  department !== "none" &&
-                                  !column.getValue(draftDepartmentPermissions[department as DepartmentPersonGroup])
-                                return (
-                                  <div
-                                    className={`mx-auto flex h-8 w-12 items-center justify-center rounded-md ${
-                                      disabledByDepartment ? "bg-slate-100 text-slate-500" : ""
-                                    }`}
-                                    title={disabledByDepartment ? `${column.label} (부서 권한 잠김)` : column.label}
-                                  >
-                                    {disabledByDepartment ? <Lock className="mr-1 h-3.5 w-3.5" /> : null}
-                                    <Checkbox
-                                      checked={column.getValue(permissions)}
-                                      onCheckedChange={(checked) =>
-                                        handleTogglePermission(email, column.id, checked === true)
-                                      }
-                                      disabled={disabledByDepartment}
-                                      title={column.label}
-                                    />
-                                  </div>
-                                )
-                              })()}
+                              <div className="mx-auto flex h-8 w-12 items-center justify-center rounded-md" title={column.label}>
+                                <Checkbox
+                                  checked={column.getValue(permissions)}
+                                  onCheckedChange={(checked) =>
+                                    handleTogglePermission(email, column.id, checked === true)
+                                  }
+                                  title={column.label}
+                                />
+                              </div>
                             </TableCell>
                           ))}
                           <TableCell className="py-2 align-middle">
