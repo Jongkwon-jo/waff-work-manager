@@ -3,6 +3,7 @@
 import { WeeklyWorkBoard, type WeeklyWorkDataSource } from "@/components/weekly-work-board"
 import { subscribeToData as subscribeStrategyData } from "@/lib/firestore-service"
 import { subscribeToData as subscribeFaData } from "@/lib/firestore-service-fa"
+import { subscribeToData as subscribeIctData } from "@/lib/firestore-service-ict"
 
 const ALL_WEEKLY_DATA_SOURCES: WeeklyWorkDataSource[] = [
   {
@@ -23,8 +24,8 @@ const ALL_WEEKLY_DATA_SOURCES: WeeklyWorkDataSource[] = [
     id: "ict",
     label: "ICT",
     departmentGroup: "ICT",
-    managementHref: "/work-management",
-    subscribeToData: subscribeStrategyData,
+    managementHref: "/ict-work-management",
+    subscribeToData: subscribeIctData,
   },
 ]
 

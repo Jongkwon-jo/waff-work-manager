@@ -27,6 +27,9 @@ export type EditableTaskField = (typeof EDITABLE_TASK_FIELD_OPTIONS)[number]["ke
 
 export interface Task {
   id: string
+  sourceSchedule?: "ict" | "strategy"
+  originalTaskId?: string
+  originalProjectId?: string
   displayOrder?: number
   depth?: number
   isHidden?: boolean
@@ -50,6 +53,8 @@ export type ProjectType = "SI" | "R&D" | "S/F" | "공사" | "A/S" | "Etc"
 
 export interface Project {
   id: string
+  sourceSchedule?: "ict" | "strategy"
+  originalProjectId?: string
   displayOrder?: number
   isHidden?: boolean
   name: string
