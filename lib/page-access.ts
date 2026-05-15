@@ -8,6 +8,8 @@ export const PAGE_PERMISSIONS = [
   { key: "faWorkManagement", label: "FA사업부 스케줄", path: "/fa-work-management" },
   { key: "faWorkManagementEdit", label: "FA사업부 스케줄 수정", path: "/fa-work-management" },
   { key: "faWeeklyWork", label: "FA 주간업무로드 현황", path: "/weekly-work" },
+  { key: "ictWorkManagement", label: "ICT 사업부 스케줄", path: "/ict-work-management" },
+  { key: "ictWorkManagementEdit", label: "ICT 사업부 스케줄 수정", path: "/ict-work-management" },
   { key: "ictWeeklyWork", label: "ICT 주간업무로드 현황", path: "/weekly-work" },
   { key: "gptTest", label: "GPT 테스트", path: "/gpt-test" },
   { key: "mbtiPage", label: "MBTI", path: "/mbti" },
@@ -26,6 +28,8 @@ export const DEFAULT_PAGE_PERMISSIONS: UserPagePermissions = {
   faWorkManagement: true,
   faWorkManagementEdit: true,
   faWeeklyWork: true,
+  ictWorkManagement: true,
+  ictWorkManagementEdit: true,
   ictWeeklyWork: true,
   gptTest: true,
   mbtiPage: true,
@@ -67,6 +71,12 @@ export function normalizePermissions(raw?: Partial<Record<string, unknown>>): Us
         : DEFAULT_PAGE_PERMISSIONS.faWorkManagementEdit,
     faWeeklyWork:
       typeof raw?.faWeeklyWork === "boolean" ? raw.faWeeklyWork : DEFAULT_PAGE_PERMISSIONS.faWeeklyWork,
+    ictWorkManagement:
+      typeof raw?.ictWorkManagement === "boolean" ? raw.ictWorkManagement : DEFAULT_PAGE_PERMISSIONS.ictWorkManagement,
+    ictWorkManagementEdit:
+      typeof raw?.ictWorkManagementEdit === "boolean"
+        ? raw.ictWorkManagementEdit
+        : DEFAULT_PAGE_PERMISSIONS.ictWorkManagementEdit,
     ictWeeklyWork:
       typeof raw?.ictWeeklyWork === "boolean" ? raw.ictWeeklyWork : DEFAULT_PAGE_PERMISSIONS.ictWeeklyWork,
     gptTest: typeof raw?.gptTest === "boolean" ? raw.gptTest : DEFAULT_PAGE_PERMISSIONS.gptTest,
@@ -83,6 +93,7 @@ export function resolvePathToPermissionKey(pathname: string): PagePermissionKey 
   if (pathname.startsWith("/work-management/weekly")) return "strategyWeeklyWork"
   if (pathname.startsWith("/work-management")) return "strategyWorkManagement"
   if (pathname.startsWith("/ict-work-management/weekly")) return "ictWeeklyWork"
+  if (pathname.startsWith("/ict-work-management")) return "ictWorkManagement"
   if (pathname.startsWith("/fa-work-management/weekly")) return "faWeeklyWork"
   if (pathname.startsWith("/fa-work-management")) return "faWorkManagement"
   if (pathname.startsWith("/gpt-test")) return "gptTest"

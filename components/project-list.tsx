@@ -194,7 +194,11 @@ export function ProjectList({
                 </div>
                 {canEdit && (
                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                    <AddTaskDialog projectId={project.id} onAddTask={onAddTask} />
+                    <AddTaskDialog
+                      projectId={project.id}
+                      defaultDepartment={defaultTaskDepartment}
+                      onAddTask={onAddTask}
+                    />
                     <EditProjectDialog project={project} onEditProject={onEditProject} pmOptions={pmOptions} />
                     <Button
                       variant="ghost"
@@ -295,6 +299,7 @@ function RecursiveTaskRow({
 }) {
   const [isExpanded, setIsExpanded] = useState(true)
   const hasSubTasks = task.subTasks && task.subTasks.length > 0
+  const depthPrefix = depth >= 3 ? "- " : depth >= 2 ? "• " : ""
 
   return (
     <>
@@ -318,6 +323,7 @@ function RecursiveTaskRow({
               task.status === "완료" && !hasSubTasks ? "text-muted-foreground/50" : "text-card-foreground",
               depth > 0 && "text-xs"
             )} title={task.memo?.trim() ? `${task.task}\n메모: ${task.memo}` : task.task}>
+              {depthPrefix}
               {task.task}
             </span>
 

@@ -788,10 +788,16 @@ export function GanttView({
   }, [projects])
 
   const countHiddenChildren = (task: Task): number =>
-    (task.subTasks || []).reduce((count, child) => count + (hiddenTaskIds.has(child.id) ? 1 : 0), 0)
+    (task.subTasks || []).reduce(
+      (count, child) => count + (hiddenTaskIds.has(child.id) ? 1 : 0) + countHiddenChildren(child),
+      0,
+    )
 
   const countHiddenInProject = (project: Project): number =>
-    project.tasks.reduce((count, task) => count + (hiddenTaskIds.has(task.id) ? 1 : 0), 0)
+    project.tasks.reduce(
+      (count, task) => count + (hiddenTaskIds.has(task.id) ? 1 : 0) + countHiddenChildren(task),
+      0,
+    )
 
   const countHiddenInProjectById = (projectId: string): number => {
     const source = projectById.get(projectId)
@@ -899,6 +905,7 @@ export function GanttView({
               depth + 1,
               nextShowHidden,
             )
+            const hiddenDescendantCount = countHiddenChildren(task)
 
             const matchesStatus =
               statusFilter === "all" ? true : task.status === statusFilter
@@ -910,7 +917,7 @@ export function GanttView({
             const matchesCurrentTask =
               (matchesStatus && matchesDepartment && matchesPerson && matchesSearch) || task.id === highlightedTaskId
 
-            if (!matchesCurrentTask && childRows.length === 0) {
+            if (!matchesCurrentTask && childRows.length === 0 && hiddenDescendantCount === 0) {
               return acc
             }
 
@@ -2505,7 +2512,7 @@ export function GanttView({
                       const isTaskCollapsed = collapsedTaskIds.has(task.id)
                       const barStyle = getStatusBarStyle(task.status)
                       const displayDepth = Math.min(3, Math.max(0, Math.floor(task.depth)))
-                      const depthPrefix = displayDepth >= 2 ? "• " : ""
+                      const depthPrefix = displayDepth >= 3 ? "- " : displayDepth >= 2 ? "• " : ""
                       const depthRowBgClass = getDepthRowBgClass(displayDepth)
                       const isParentTask = task.hasChildren
                       const hasMemo = Boolean(task.memo?.trim())
@@ -3467,6 +3474,7 @@ function MobileGanttView({
             ) : (
               selectedProject.tasks.map((task) => {
                 const displayDepth = Math.min(3, Math.max(0, Math.floor(task.depth)))
+                const depthPrefix = displayDepth >= 3 ? "- " : displayDepth >= 2 ? "• " : ""
                 const depthRowBgClass = getDepthRowBgClass(displayDepth)
                 const barStyle = getStatusBarStyle(task.status)
                 const miniBar = getMiniBarPosition(task.startDate, task.endDate)
@@ -3528,6 +3536,7 @@ function MobileGanttView({
                                       : "text-foreground",
                                 )}
                               >
+                                {depthPrefix}
                                 {task.task}
                               </button>
                             }
@@ -3544,6 +3553,7 @@ function MobileGanttView({
                                   : "text-foreground",
                             )}
                           >
+                            {depthPrefix}
                             {task.task}
                           </span>
                         )}

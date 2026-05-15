@@ -49,6 +49,7 @@ const SOURCE_LABELS: Record<string, string> = {
   "my-page": "마이 워크",
   "work-management": "전략기획 스케줄",
   "fa-work-management": "FA 스케줄",
+  "ict-work-management": "ICT 스케줄",
   gantt: "간트뷰",
   other: "기타",
 }

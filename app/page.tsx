@@ -74,6 +74,16 @@ export default function HomePage() {
       iconBg: "bg-white/60",
     },
     {
+      href: "/ict-work-management",
+      title: "ICT 사업부 스케줄",
+      description: "ICT 전용 업무와 전략기획 ICT 연동 업무를 관리합니다.",
+      icon: Cpu,
+      visible: isAdmin || pagePermissions.ictWorkManagement,
+      tone: "from-sky-50 via-cyan-50/60 to-white",
+      iconColor: "text-sky-500",
+      iconBg: "bg-white/60",
+    },
+    {
       href: "/gpt-test",
       title: "GPT 테스트",
       description: "벡터 스토어와 채팅 기록 기반으로 문서 질의를 테스트합니다.",
