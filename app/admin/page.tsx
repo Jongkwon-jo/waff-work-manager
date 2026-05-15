@@ -238,7 +238,7 @@ function DepartmentOrgEditor({
 
       <div className="grid gap-2">
         {org.teams.map((team, teamIndex) => (
-          <div key={`${team.name}-${teamIndex}`} className="rounded-md bg-white p-2">
+          <div key={`team-${teamIndex}`} className="rounded-md bg-white p-2">
             <div className="mb-2 grid gap-2 sm:grid-cols-[1fr_auto]">
               <Input
                 value={team.name}
@@ -252,7 +252,7 @@ function DepartmentOrgEditor({
             </div>
             <div className="grid gap-2">
               {team.members.map((member, memberIndex) => (
-                <div key={`${team.name}-${memberIndex}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                <div key={`team-${teamIndex}-member-${memberIndex}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
                   <Input
                     value={member.name}
                     onChange={(event) => updateTeamMember(teamIndex, memberIndex, { name: event.target.value })}

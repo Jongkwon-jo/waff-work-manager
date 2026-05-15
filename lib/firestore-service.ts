@@ -236,6 +236,17 @@ function compactObject<T extends Record<string, unknown>>(obj: T): T {
   return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T
 }
 
+function removeUndefinedValues(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(removeUndefinedValues)
+  if (!value || typeof value !== "object") return value
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, entryValue]) => entryValue !== undefined)
+      .map(([key, entryValue]) => [key, removeUndefinedValues(entryValue)]),
+  )
+}
+
 function normalizeMyPageTaskPreferences(raw: unknown): Record<string, MyPageTaskPreference> {
   if (!raw || typeof raw !== "object") return {}
 
@@ -983,7 +994,7 @@ export async function saveDepartmentOrgSettings(settings: DepartmentOrgSettings)
     setDoc(
       orgRef,
       {
-        ...normalized,
+        ...(removeUndefinedValues(normalized) as DepartmentOrgSettings),
         updatedAt: serverTimestamp(),
       },
       { merge: true },
