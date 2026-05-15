@@ -3,10 +3,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import { onAuthStateChanged, type User } from "firebase/auth"
 import {
-  DEFAULT_DEPARTMENT_PAGE_PERMISSIONS,
-  subscribeCurrentUserProfile,
   subscribeCurrentUserPagePermissions,
-  subscribeDepartmentPagePermissions,
   upsertUserProfile,
 } from "@/lib/firestore-service"
 import { auth } from "@/lib/firebase"
@@ -53,57 +50,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPermissionLoading(true)
     void upsertUserProfile(email)
 
-    let userPermissions = DEFAULT_PAGE_PERMISSIONS
-    let userDepartmentPermissions = DEFAULT_PAGE_PERMISSIONS
-    let resolvedDepartment: keyof typeof DEFAULT_DEPARTMENT_PAGE_PERMISSIONS | null = null
-    let hasUserPermissions = false
-    let hasDepartmentPermissions = false
-    let hasProfile = false
-
-    const syncPermissions = () => {
-      if (!hasUserPermissions || !hasDepartmentPermissions || !hasProfile) return
-
-      setPagePermissions({
-        myPage: userPermissions.myPage && userDepartmentPermissions.myPage,
-        strategyWorkManagement: userPermissions.strategyWorkManagement && userDepartmentPermissions.strategyWorkManagement,
-        strategyWorkManagementEdit: userPermissions.strategyWorkManagementEdit && userDepartmentPermissions.strategyWorkManagementEdit,
-        strategyWeeklyWork: userPermissions.strategyWeeklyWork && userDepartmentPermissions.strategyWeeklyWork,
-        faWorkManagement: userPermissions.faWorkManagement && userDepartmentPermissions.faWorkManagement,
-        faWorkManagementEdit: userPermissions.faWorkManagementEdit && userDepartmentPermissions.faWorkManagementEdit,
-        faWeeklyWork: userPermissions.faWeeklyWork && userDepartmentPermissions.faWeeklyWork,
-        ictWeeklyWork: userPermissions.ictWeeklyWork && userDepartmentPermissions.ictWeeklyWork,
-        gptTest: userPermissions.gptTest && userDepartmentPermissions.gptTest,
-        mbtiPage: userPermissions.mbtiPage && userDepartmentPermissions.mbtiPage,
-        recentChangesWidget:
-          userPermissions.recentChangesWidget && userDepartmentPermissions.recentChangesWidget,
-      })
-      setPermissionLoading(false)
-    }
-
-    const unsubscribeProfile = subscribeCurrentUserProfile(email, (profile) => {
-      resolvedDepartment = profile?.department || null
-      userDepartmentPermissions = resolvedDepartment
-        ? DEFAULT_DEPARTMENT_PAGE_PERMISSIONS[resolvedDepartment]
-        : DEFAULT_PAGE_PERMISSIONS
-      hasProfile = true
-      syncPermissions()
-    })
-
-    const unsubscribeDepartmentPermissions = subscribeDepartmentPagePermissions((permissions) => {
-      userDepartmentPermissions = resolvedDepartment ? permissions[resolvedDepartment] : DEFAULT_PAGE_PERMISSIONS
-      hasDepartmentPermissions = true
-      syncPermissions()
-    })
-
     const unsubscribePermissions = subscribeCurrentUserPagePermissions(email, (permissions) => {
-      userPermissions = permissions
-      hasUserPermissions = true
-      syncPermissions()
+      setPagePermissions(permissions)
+      setPermissionLoading(false)
     })
 
     return () => {
-      unsubscribeProfile()
-      unsubscribeDepartmentPermissions()
       unsubscribePermissions()
     }
   }, [user])

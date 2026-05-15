@@ -32,7 +32,6 @@ const HISTORY_COLLECTION = "history"
 const SETTINGS_COLLECTION = "settings"
 const DASHBOARD_PREFERENCES_DOC = "dashboard_preferences"
 const DEPARTMENT_PERSON_SETTINGS_DOC = "department_person_settings"
-const DEPARTMENT_PAGE_PERMISSIONS_DOC = "department_page_permissions"
 const GLOBAL_SCHEDULES_DOC = "global_schedules"
 const MY_PAGE_EDITABLE_FIELDS_DOC = "my_page_editable_fields"
 const USER_PROFILES_COLLECTION = "user_profiles"
@@ -99,7 +98,6 @@ export type UserPagePermissionEntry = {
   updatedAt?: Date
 }
 
-export type DepartmentPagePermissions = Record<DepartmentPersonGroup, UserPagePermissions>
 export type GlobalScheduleType = "holiday" | "annual_leave"
 export type GlobalSchedule = {
   id: string
@@ -186,12 +184,6 @@ export const DEFAULT_DEPARTMENT_PERSON_SETTINGS: DepartmentPersonSettings = {
   기타: [],
 }
 
-export const DEFAULT_DEPARTMENT_PAGE_PERMISSIONS: DepartmentPagePermissions = {
-  ICT: { ...DEFAULT_PAGE_PERMISSIONS },
-  FA: { ...DEFAULT_PAGE_PERMISSIONS },
-  전략기획: { ...DEFAULT_PAGE_PERMISSIONS },
-  기타: { ...DEFAULT_PAGE_PERMISSIONS },
-}
 export const DEFAULT_GANTT_COLLAPSE_STATE: GanttCollapseState = {
   collapsedProjectIds: [],
   collapsedTaskIds: [],
@@ -316,19 +308,6 @@ function normalizeDepartmentPersonSettings(
       ? uniqueTrimmedStrings(raw.전략기획.filter((value): value is string => typeof value === "string"))
       : [],
     기타: Array.isArray(raw?.기타) ? uniqueTrimmedStrings(raw.기타.filter((value): value is string => typeof value === "string")) : [],
-  }
-}
-
-function normalizeDepartmentPagePermissions(
-  raw?: Partial<Record<DepartmentPersonGroup, unknown>>,
-): DepartmentPagePermissions {
-  return {
-    ICT: normalizePermissions((raw?.ICT as Partial<Record<string, unknown>> | undefined) || DEFAULT_PAGE_PERMISSIONS),
-    FA: normalizePermissions((raw?.FA as Partial<Record<string, unknown>> | undefined) || DEFAULT_PAGE_PERMISSIONS),
-    전략기획: normalizePermissions(
-      (raw?.전략기획 as Partial<Record<string, unknown>> | undefined) || DEFAULT_PAGE_PERMISSIONS,
-    ),
-    기타: normalizePermissions((raw?.기타 as Partial<Record<string, unknown>> | undefined) || DEFAULT_PAGE_PERMISSIONS),
   }
 }
 
@@ -1276,19 +1255,6 @@ export function subscribeCurrentUserPagePermissions(
   )
 }
 
-export function subscribeDepartmentPagePermissions(callback: (permissions: DepartmentPagePermissions) => void) {
-  return onSnapshot(
-    doc(db, SETTINGS_COLLECTION, DEPARTMENT_PAGE_PERMISSIONS_DOC),
-    (snapshot) => {
-      const raw = snapshot.data() as Partial<Record<DepartmentPersonGroup, unknown>> | undefined
-      callback(normalizeDepartmentPagePermissions(raw))
-    },
-    (error) => {
-      console.error("Department page permissions snapshot error:", error)
-    },
-  )
-}
-
 export function subscribeAllUserPagePermissions(callback: (entries: UserPagePermissionEntry[]) => void) {
   return onSnapshot(
     collection(db, USER_PAGE_PERMISSIONS_COLLECTION),
@@ -1330,20 +1296,6 @@ export async function saveUserPagePermissions(email: string, permissions: UserPa
     {
       email: normalizedEmail,
       ...normalizePermissions(permissions),
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  )
-}
-
-export async function saveDepartmentPagePermissions(permissions: DepartmentPagePermissions): Promise<void> {
-  await setDoc(
-    doc(db, SETTINGS_COLLECTION, DEPARTMENT_PAGE_PERMISSIONS_DOC),
-    {
-      ICT: normalizePermissions(permissions.ICT),
-      FA: normalizePermissions(permissions.FA),
-      전략기획: normalizePermissions(permissions.전략기획),
-      기타: normalizePermissions(permissions.기타),
       updatedAt: serverTimestamp(),
     },
     { merge: true },

@@ -674,9 +674,24 @@ export default function StrategyWorkManagementPage() {
 
   const jumpToHistoryEntry = (entry: { entityId?: string; entityType?: string }) => {
     if (entry.entityType !== "task" || !entry.entityId) return
+    const taskId = entry.entityId
+    setIsRecentChangesOpen(false)
     setViewMode("gantt")
-    setHighlightedTaskId(entry.entityId)
+    setHighlightedTaskId(null)
+    window.requestAnimationFrame(() => setHighlightedTaskId(taskId))
   }
+
+  useEffect(() => {
+    if (!highlightedTaskId) return
+
+    const clearHighlightOnPrimaryClick = (event: MouseEvent) => {
+      if (event.button !== 0) return
+      setHighlightedTaskId(null)
+    }
+
+    window.addEventListener("mousedown", clearHighlightOnPrimaryClick)
+    return () => window.removeEventListener("mousedown", clearHighlightOnPrimaryClick)
+  }, [highlightedTaskId])
 
   useEffect(() => {
     if (!user || !canViewRecentChanges) {
