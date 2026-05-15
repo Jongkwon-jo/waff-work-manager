@@ -14,10 +14,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { toast } from "sonner"
 import {
   DEPARTMENT_PERSON_GROUPS,
+  DEFAULT_DEPARTMENT_ORG_SETTINGS,
   DEFAULT_DEPARTMENT_PERSON_SETTINGS,
   DEFAULT_MY_PAGE_EDITABLE_FIELDS,
   MBTI_TYPES,
-  saveDepartmentPersonSettings,
+  saveDepartmentOrgSettings,
   saveGlobalSchedules,
   saveMyPageEditableFields,
   saveUserDepartment,
@@ -25,12 +26,14 @@ import {
   saveUserPagePermissions,
   saveUserTaskAliases,
   subscribeAllUserPagePermissions,
+  subscribeDepartmentOrgSettings,
   subscribeDepartmentPersonSettings,
   subscribeGlobalSchedules,
   subscribeMyPageEditableFields,
   subscribeUserProfiles,
   type GlobalSchedule,
   type DepartmentPersonGroup,
+  type DepartmentOrgSettings,
   type DepartmentPersonSettings,
   type MbtiType,
   type MyPageEditableFieldsSettings,
@@ -38,6 +41,7 @@ import {
   type UserProfile,
 } from "@/lib/firestore-service"
 import { EDITABLE_TASK_FIELD_OPTIONS, type EditableTaskField } from "@/lib/data"
+import { getDepartmentOrgPersonNamesFromOrg, type DepartmentOrg, type DepartmentOrgMember } from "@/lib/department-org"
 import {
   DEFAULT_PAGE_PERMISSIONS,
   PAGE_PERMISSIONS,
@@ -108,6 +112,178 @@ const permissionColumns: PermissionColumn[] = PAGE_PERMISSIONS
 
 const getPermissionColumnById = (id: string) => permissionColumns.find((column) => column.id === id)
 
+function DepartmentOrgEditor({
+  org,
+  onChange,
+}: {
+  org: DepartmentOrg
+  onChange: (org: DepartmentOrg) => void
+}) {
+  const updateLeader = (updates: Partial<DepartmentOrgMember>) => {
+    onChange({ ...org, leader: { name: org.leader?.name || "", title: org.leader?.title, ...updates } })
+  }
+
+  const updateAdvisor = (index: number, updates: Partial<DepartmentOrgMember>) => {
+    const advisors = [...(org.advisors || [])]
+    advisors[index] = { ...advisors[index], ...updates }
+    onChange({ ...org, advisors })
+  }
+
+  const addAdvisor = () => {
+    onChange({ ...org, advisors: [...(org.advisors || []), { name: "", title: "" }] })
+  }
+
+  const removeAdvisor = (index: number) => {
+    onChange({ ...org, advisors: (org.advisors || []).filter((_, innerIndex) => innerIndex !== index) })
+  }
+
+  const updateTeam = (teamIndex: number, updates: Partial<DepartmentOrg["teams"][number]>) => {
+    const teams = org.teams.map((team, index) => (index === teamIndex ? { ...team, ...updates } : team))
+    onChange({ ...org, teams })
+  }
+
+  const updateTeamMember = (teamIndex: number, memberIndex: number, updates: Partial<DepartmentOrgMember>) => {
+    const teams = org.teams.map((team, index) => {
+      if (index !== teamIndex) return team
+      const members = team.members.map((member, innerIndex) =>
+        innerIndex === memberIndex ? { ...member, ...updates } : member,
+      )
+      return { ...team, members }
+    })
+    onChange({ ...org, teams })
+  }
+
+  const addTeam = () => {
+    onChange({ ...org, teams: [...org.teams, { name: `팀 ${org.teams.length + 1}`, members: [] }] })
+  }
+
+  const removeTeam = (teamIndex: number) => {
+    onChange({ ...org, teams: org.teams.filter((_, index) => index !== teamIndex) })
+  }
+
+  const addTeamMember = (teamIndex: number) => {
+    const teams = org.teams.map((team, index) =>
+      index === teamIndex ? { ...team, members: [...team.members, { name: "", title: "" }] } : team,
+    )
+    onChange({ ...org, teams })
+  }
+
+  const removeTeamMember = (teamIndex: number, memberIndex: number) => {
+    const teams = org.teams.map((team, index) =>
+      index === teamIndex
+        ? { ...team, members: team.members.filter((_, innerIndex) => innerIndex !== memberIndex) }
+        : team,
+    )
+    onChange({ ...org, teams })
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3 text-xs">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-semibold text-slate-900">{org.label} 조직도</p>
+        <span className="text-[11px] text-slate-500">이름과 직책을 직접 수정할 수 있습니다.</span>
+      </div>
+
+      <div className="rounded-md bg-white p-2">
+        <div className="mb-1 font-semibold text-slate-800">부서장</div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Input
+            value={org.leader?.name || ""}
+            onChange={(event) => updateLeader({ name: event.target.value })}
+            className="h-8 bg-white text-xs"
+            placeholder="이름"
+          />
+          <Input
+            value={org.leader?.title || ""}
+            onChange={(event) => updateLeader({ title: event.target.value })}
+            className="h-8 bg-white text-xs"
+            placeholder="직책"
+          />
+        </div>
+      </div>
+
+      <div className="rounded-md bg-white p-2">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <div className="font-semibold text-slate-800">고문</div>
+          <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={addAdvisor}>
+            추가
+          </Button>
+        </div>
+        {(org.advisors || []).length > 0 ? (
+          <div className="grid gap-2">
+            {(org.advisors || []).map((advisor, index) => (
+              <div key={`advisor-${index}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                <Input
+                  value={advisor.name}
+                  onChange={(event) => updateAdvisor(index, { name: event.target.value })}
+                  className="h-8 bg-white text-xs"
+                  placeholder="이름"
+                />
+                <Input
+                  value={advisor.title || ""}
+                  onChange={(event) => updateAdvisor(index, { title: event.target.value })}
+                  className="h-8 bg-white text-xs"
+                  placeholder="직책"
+                />
+                <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => removeAdvisor(index)}>
+                  삭제
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[11px] text-slate-500">등록된 고문이 없습니다.</p>
+        )}
+      </div>
+
+      <div className="grid gap-2">
+        {org.teams.map((team, teamIndex) => (
+          <div key={`${team.name}-${teamIndex}`} className="rounded-md bg-white p-2">
+            <div className="mb-2 grid gap-2 sm:grid-cols-[1fr_auto]">
+              <Input
+                value={team.name}
+                onChange={(event) => updateTeam(teamIndex, { name: event.target.value })}
+                className="h-8 bg-white text-xs font-semibold"
+                placeholder="팀명"
+              />
+              <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => removeTeam(teamIndex)}>
+                팀 삭제
+              </Button>
+            </div>
+            <div className="grid gap-2">
+              {team.members.map((member, memberIndex) => (
+                <div key={`${team.name}-${memberIndex}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                  <Input
+                    value={member.name}
+                    onChange={(event) => updateTeamMember(teamIndex, memberIndex, { name: event.target.value })}
+                    className="h-8 bg-white text-xs"
+                    placeholder="이름"
+                  />
+                  <Input
+                    value={member.title || ""}
+                    onChange={(event) => updateTeamMember(teamIndex, memberIndex, { title: event.target.value })}
+                    className="h-8 bg-white text-xs"
+                    placeholder="직책"
+                  />
+                  <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => removeTeamMember(teamIndex, memberIndex)}>
+                    삭제
+                  </Button>
+                </div>
+              ))}
+              <Button type="button" variant="outline" size="sm" className="h-8 justify-center text-xs" onClick={() => addTeamMember(teamIndex)}>
+                팀원 추가
+              </Button>
+            </div>
+          </div>
+        ))}
+        <Button type="button" variant="outline" size="sm" className="h-8 justify-center text-xs" onClick={addTeam}>
+          팀 추가
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 
 export default function AdminPage() {
   const { isAdmin } = useAuth()
@@ -116,6 +292,7 @@ export default function AdminPage() {
   const [departmentPersonSettings, setDepartmentPersonSettings] = useState<DepartmentPersonSettings>(
     DEFAULT_DEPARTMENT_PERSON_SETTINGS,
   )
+  const [draftDepartmentOrg, setDraftDepartmentOrg] = useState<DepartmentOrgSettings>(DEFAULT_DEPARTMENT_ORG_SETTINGS)
   const [draftEmail, setDraftEmail] = useState("")
   const [draftPermissions, setDraftPermissions] = useState<DraftPermissionMap>({})
   const [draftAliases, setDraftAliases] = useState<DraftAliasMap>({})
@@ -146,6 +323,7 @@ export default function AdminPage() {
     const unsubscribeProfiles = subscribeUserProfiles(setProfiles)
     const unsubscribePermissions = subscribeAllUserPagePermissions(setPermissionEntries)
     const unsubscribeDepartmentPersons = subscribeDepartmentPersonSettings(setDepartmentPersonSettings)
+    const unsubscribeDepartmentOrg = subscribeDepartmentOrgSettings(setDraftDepartmentOrg)
     const unsubscribeGlobalSchedules = subscribeGlobalSchedules((schedules) => {
       setDraftGlobalSchedules(
         schedules.map((item) => ({
@@ -163,6 +341,7 @@ export default function AdminPage() {
       unsubscribeProfiles()
       unsubscribePermissions()
       unsubscribeDepartmentPersons()
+      unsubscribeDepartmentOrg()
       unsubscribeGlobalSchedules()
       unsubscribeMyPageEditableFields()
     }
@@ -222,6 +401,22 @@ export default function AdminPage() {
       기타: (departmentPersonSettings.기타 || []).join(", "),
     })
   }, [departmentPersonSettings])
+
+  useEffect(() => {
+    setDraftDepartmentPersons({
+      ICT: getDepartmentOrgPersonNamesFromOrg(draftDepartmentOrg.ICT).join(", "),
+      FA: getDepartmentOrgPersonNamesFromOrg(draftDepartmentOrg.FA).join(", "),
+      전략기획: getDepartmentOrgPersonNamesFromOrg(draftDepartmentOrg.전략기획).join(", "),
+      기타: getDepartmentOrgPersonNamesFromOrg(draftDepartmentOrg.기타).join(", "),
+    })
+  }, [draftDepartmentOrg])
+
+  const updateDraftDepartmentOrg = (group: DepartmentPersonGroup, org: DepartmentOrg) => {
+    setDraftDepartmentOrg((prev) => ({
+      ...prev,
+      [group]: org,
+    }))
+  }
 
   const handleTogglePermission = (email: string, columnId: string, checked: boolean) => {
     const column = getPermissionColumnById(columnId)
@@ -330,14 +525,7 @@ export default function AdminPage() {
     setSavingDepartmentPersons(true)
 
     try {
-      const nextSettings: DepartmentPersonSettings = {
-        ICT: draftDepartmentPersons.ICT.split(",").map((value) => value.trim()).filter(Boolean),
-        FA: draftDepartmentPersons.FA.split(",").map((value) => value.trim()).filter(Boolean),
-        전략기획: draftDepartmentPersons.전략기획.split(",").map((value) => value.trim()).filter(Boolean),
-        기타: draftDepartmentPersons.기타.split(",").map((value) => value.trim()).filter(Boolean),
-      }
-
-      await saveDepartmentPersonSettings(nextSettings)
+      const nextSettings = await saveDepartmentOrgSettings(draftDepartmentOrg)
 
       const aliasToProfile = new Map<string, UserProfile>()
       profiles.forEach((profile) => {
@@ -488,12 +676,14 @@ export default function AdminPage() {
               {DEPARTMENT_PERSON_GROUPS.map((group) => (
                 <div key={group} className="space-y-2">
                   <p className="text-sm font-semibold text-foreground">{group}</p>
+                  <DepartmentOrgEditor
+                    org={draftDepartmentOrg[group]}
+                    onChange={(org) => updateDraftDepartmentOrg(group, org)}
+                  />
                   <Textarea
                     value={draftDepartmentPersons[group] || ""}
-                    onChange={(event) =>
-                      setDraftDepartmentPersons((prev) => ({ ...prev, [group]: event.target.value }))
-                    }
-                    className="min-h-24"
+                    readOnly
+                    className="min-h-20 bg-muted/40"
                     placeholder="예) 김철수, 이영희"
                   />
                   <p className="text-xs text-muted-foreground">

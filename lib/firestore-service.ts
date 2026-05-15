@@ -18,6 +18,12 @@ import {
 import type { EditableTaskField, Project, Task } from "./data"
 import { EDITABLE_TASK_FIELD_OPTIONS } from "./data"
 import {
+  DEFAULT_ORG_DEPARTMENT_PERSON_SETTINGS,
+  cloneDepartmentOrgChart,
+  getDepartmentOrgPersonNamesFromOrg,
+  type DepartmentOrg,
+} from "./department-org"
+import {
   DEFAULT_PAGE_PERMISSIONS,
   normalizeEmail,
   normalizePermissions,
@@ -32,6 +38,7 @@ const HISTORY_COLLECTION = "history"
 const SETTINGS_COLLECTION = "settings"
 const DASHBOARD_PREFERENCES_DOC = "dashboard_preferences"
 const DEPARTMENT_PERSON_SETTINGS_DOC = "department_person_settings"
+const DEPARTMENT_ORG_SETTINGS_DOC = "department_org_settings"
 const GLOBAL_SCHEDULES_DOC = "global_schedules"
 const MY_PAGE_EDITABLE_FIELDS_DOC = "my_page_editable_fields"
 const USER_PROFILES_COLLECTION = "user_profiles"
@@ -91,6 +98,7 @@ export type UserProfile = {
 }
 
 export type DepartmentPersonSettings = Record<DepartmentPersonGroup, string[]>
+export type DepartmentOrgSettings = Record<DepartmentPersonGroup, DepartmentOrg>
 
 export type UserPagePermissionEntry = {
   email: string
@@ -178,11 +186,13 @@ export function isUserOwnerOfTask(task: Pick<Task, "person">, aliases: string[])
 }
 
 export const DEFAULT_DEPARTMENT_PERSON_SETTINGS: DepartmentPersonSettings = {
-  ICT: [],
-  FA: [],
-  전략기획: [],
-  기타: [],
+  ICT: [...DEFAULT_ORG_DEPARTMENT_PERSON_SETTINGS.ICT],
+  FA: [...DEFAULT_ORG_DEPARTMENT_PERSON_SETTINGS.FA],
+  전략기획: [...DEFAULT_ORG_DEPARTMENT_PERSON_SETTINGS.전략기획],
+  기타: [...DEFAULT_ORG_DEPARTMENT_PERSON_SETTINGS.기타],
 }
+
+export const DEFAULT_DEPARTMENT_ORG_SETTINGS: DepartmentOrgSettings = cloneDepartmentOrgChart()
 
 export const DEFAULT_GANTT_COLLAPSE_STATE: GanttCollapseState = {
   collapsedProjectIds: [],
@@ -302,12 +312,90 @@ function normalizeDepartmentPersonSettings(
   raw?: Partial<Record<DepartmentPersonGroup, unknown>>,
 ): DepartmentPersonSettings {
   return {
-    ICT: Array.isArray(raw?.ICT) ? uniqueTrimmedStrings(raw.ICT.filter((value): value is string => typeof value === "string")) : [],
-    FA: Array.isArray(raw?.FA) ? uniqueTrimmedStrings(raw.FA.filter((value): value is string => typeof value === "string")) : [],
+    ICT: Array.isArray(raw?.ICT)
+      ? uniqueTrimmedStrings(raw.ICT.filter((value): value is string => typeof value === "string"))
+      : [...DEFAULT_DEPARTMENT_PERSON_SETTINGS.ICT],
+    FA: Array.isArray(raw?.FA)
+      ? uniqueTrimmedStrings(raw.FA.filter((value): value is string => typeof value === "string"))
+      : [...DEFAULT_DEPARTMENT_PERSON_SETTINGS.FA],
     전략기획: Array.isArray(raw?.전략기획)
       ? uniqueTrimmedStrings(raw.전략기획.filter((value): value is string => typeof value === "string"))
-      : [],
-    기타: Array.isArray(raw?.기타) ? uniqueTrimmedStrings(raw.기타.filter((value): value is string => typeof value === "string")) : [],
+      : [...DEFAULT_DEPARTMENT_PERSON_SETTINGS.전략기획],
+    기타: Array.isArray(raw?.기타)
+      ? uniqueTrimmedStrings(raw.기타.filter((value): value is string => typeof value === "string"))
+      : [...DEFAULT_DEPARTMENT_PERSON_SETTINGS.기타],
+  }
+}
+
+function normalizeOrgMember(raw: unknown) {
+  if (!raw || typeof raw !== "object") return undefined
+  const candidate = raw as Record<string, unknown>
+  const name = toStringOrEmpty(candidate.name)
+  if (!name) return undefined
+  const title = toStringOrEmpty(candidate.title)
+  return title ? { name, title } : { name }
+}
+
+function normalizeDepartmentOrg(raw: unknown, fallback: DepartmentOrg): DepartmentOrg {
+  if (!raw || typeof raw !== "object") {
+    return {
+      ...fallback,
+      leader: fallback.leader ? { ...fallback.leader } : undefined,
+      advisors: fallback.advisors?.map((member) => ({ ...member })) || [],
+      teams: fallback.teams.map((team) => ({
+        ...team,
+        members: team.members.map((member) => ({ ...member })),
+      })),
+    }
+  }
+
+  const candidate = raw as Record<string, unknown>
+  const leader = normalizeOrgMember(candidate.leader) || fallback.leader
+  const advisors = Array.isArray(candidate.advisors)
+    ? candidate.advisors.map(normalizeOrgMember).filter((member): member is NonNullable<typeof member> => Boolean(member))
+    : fallback.advisors?.map((member) => ({ ...member })) || []
+  const teams = Array.isArray(candidate.teams)
+    ? candidate.teams
+        .map((entry, index) => {
+          if (!entry || typeof entry !== "object") return null
+          const team = entry as Record<string, unknown>
+          const fallbackTeam = fallback.teams[index]
+          const name = toStringOrEmpty(team.name) || fallbackTeam?.name || `팀 ${index + 1}`
+          const members = Array.isArray(team.members)
+            ? team.members.map(normalizeOrgMember).filter((member): member is NonNullable<typeof member> => Boolean(member))
+            : fallbackTeam?.members.map((member) => ({ ...member })) || []
+          return { name, members }
+        })
+        .filter((team): team is DepartmentOrg["teams"][number] => Boolean(team))
+    : fallback.teams.map((team) => ({
+        ...team,
+        members: team.members.map((member) => ({ ...member })),
+      }))
+
+  return {
+    group: fallback.group,
+    label: toStringOrEmpty(candidate.label) || fallback.label,
+    leader: leader ? { ...leader } : undefined,
+    advisors,
+    teams,
+  }
+}
+
+function normalizeDepartmentOrgSettings(raw?: Partial<Record<DepartmentPersonGroup, unknown>>): DepartmentOrgSettings {
+  return {
+    ICT: normalizeDepartmentOrg(raw?.ICT, DEFAULT_DEPARTMENT_ORG_SETTINGS.ICT),
+    FA: normalizeDepartmentOrg(raw?.FA, DEFAULT_DEPARTMENT_ORG_SETTINGS.FA),
+    전략기획: normalizeDepartmentOrg(raw?.전략기획, DEFAULT_DEPARTMENT_ORG_SETTINGS.전략기획),
+    기타: normalizeDepartmentOrg(raw?.기타, DEFAULT_DEPARTMENT_ORG_SETTINGS.기타),
+  }
+}
+
+function getDepartmentPersonSettingsFromOrgSettings(settings: DepartmentOrgSettings): DepartmentPersonSettings {
+  return {
+    ICT: getDepartmentOrgPersonNamesFromOrg(settings.ICT),
+    FA: getDepartmentOrgPersonNamesFromOrg(settings.FA),
+    전략기획: getDepartmentOrgPersonNamesFromOrg(settings.전략기획),
+    기타: getDepartmentOrgPersonNamesFromOrg(settings.기타),
   }
 }
 
@@ -869,6 +957,41 @@ export async function saveDepartmentPersonSettings(settings: DepartmentPersonSet
     },
     { merge: true },
   )
+}
+
+export function subscribeDepartmentOrgSettings(callback: (settings: DepartmentOrgSettings) => void) {
+  const settingsRef = doc(db, SETTINGS_COLLECTION, DEPARTMENT_ORG_SETTINGS_DOC)
+  return onSnapshot(
+    settingsRef,
+    (snapshot) => {
+      const raw = snapshot.data() as Partial<Record<DepartmentPersonGroup, unknown>> | undefined
+      callback(normalizeDepartmentOrgSettings(raw))
+    },
+    (error) => {
+      console.error("Department org settings snapshot error:", error)
+      callback(normalizeDepartmentOrgSettings())
+    },
+  )
+}
+
+export async function saveDepartmentOrgSettings(settings: DepartmentOrgSettings): Promise<DepartmentPersonSettings> {
+  const normalized = normalizeDepartmentOrgSettings(settings)
+  const orgRef = doc(db, SETTINGS_COLLECTION, DEPARTMENT_ORG_SETTINGS_DOC)
+  const personSettings = getDepartmentPersonSettingsFromOrgSettings(normalized)
+
+  await Promise.all([
+    setDoc(
+      orgRef,
+      {
+        ...normalized,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    ),
+    saveDepartmentPersonSettings(personSettings),
+  ])
+
+  return personSettings
 }
 
 export function subscribeMyPageEditableFields(callback: (fields: MyPageEditableFieldsSettings) => void) {
