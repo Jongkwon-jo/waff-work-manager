@@ -26,16 +26,20 @@ import {
   subscribeGanttLeftPanelWidth,
   addHistoryEntry,
   fetchHistoryEntries,
+  fetchNotificationHistoryEntries,
   rollbackHistoryEntry,
   deleteHistoryEntry,
   type ChangeHistoryEntry,
 } from "@/lib/firestore-service-ict"
 import {
+  DEFAULT_DEPARTMENT_ORG_SETTINGS,
   saveSeenRecentChangeIds,
   saveUserHiddenOwnerOptions,
   subscribeCurrentUserProfile,
+  subscribeDepartmentOrgSettings,
   subscribeGlobalSchedules,
   subscribeUserProfiles,
+  type DepartmentOrgSettings,
   type GlobalSchedule,
   type UserProfile,
 } from "@/lib/firestore-service"
@@ -53,6 +57,12 @@ import { Button } from "@/components/ui/button"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { toast } from "sonner"
 import { RecentChangesWidget } from "@/components/recent-changes-widget"
+import {
+  getLedDepartmentGroupsForAliases,
+  getUserAliasesForChangeNotifications,
+  hasChangeNotificationScope,
+  isTaskChangeNotificationEntry,
+} from "@/lib/recent-change-visibility"
 
 export default function IctWorkManagementPage() {
   const { user, loading: authLoading, isAdmin, pagePermissions } = useAuth()
@@ -79,9 +89,11 @@ export default function IctWorkManagementPage() {
   const [ganttLeftPanelWidth, setGanttLeftPanelWidth] = useState<number | null>(null)
   const [ganttDetailPanelWidth, setGanttDetailPanelWidth] = useState<number | null>(null)
   const [defaultTaskPerson, setDefaultTaskPerson] = useState("")
+  const [currentTaskAliases, setCurrentTaskAliases] = useState<string[]>([])
   const [hiddenOwnerOptions, setHiddenOwnerOptions] = useState<string[]>([])
   const [userProfiles, setUserProfiles] = useState<UserProfile[]>([])
   const [seenRecentChangeIds, setSeenRecentChangeIds] = useState<string[]>([])
+  const [departmentOrgSettings, setDepartmentOrgSettings] = useState<DepartmentOrgSettings>(DEFAULT_DEPARTMENT_ORG_SETTINGS)
   const [globalSchedules, setGlobalSchedules] = useState<GlobalSchedule[]>([])
   const [operationInProgress, setOperationInProgress] = useState<"copy" | "delete" | null>(null)
   const deferredSearchQuery = useDeferredValue(searchQuery)
@@ -111,11 +123,20 @@ export default function IctWorkManagementPage() {
   }, [user])
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !canEdit) {
       setUserProfiles([])
       return
     }
     const unsubscribe = subscribeUserProfiles(setUserProfiles)
+    return () => unsubscribe()
+  }, [user, canEdit])
+
+  useEffect(() => {
+    if (!user) {
+      setDepartmentOrgSettings(DEFAULT_DEPARTMENT_ORG_SETTINGS)
+      return
+    }
+    const unsubscribe = subscribeDepartmentOrgSettings(setDepartmentOrgSettings)
     return () => unsubscribe()
   }, [user])
 
@@ -186,6 +207,7 @@ export default function IctWorkManagementPage() {
   useEffect(() => {
     if (!user?.email) {
       setDefaultTaskPerson("")
+      setCurrentTaskAliases([])
       setHiddenOwnerOptions([])
       setSeenRecentChangeIds([])
       return
@@ -194,6 +216,7 @@ export default function IctWorkManagementPage() {
     const unsubscribe = subscribeCurrentUserProfile(user.email, (profile) => {
       const accountDefaultPerson = (profile?.taskAliases || [])[0]?.trim() || ""
       setDefaultTaskPerson(accountDefaultPerson)
+      setCurrentTaskAliases(profile?.taskAliases || [])
       setHiddenOwnerOptions(profile?.hiddenOwnerOptions || [])
       setSeenRecentChangeIds(profile?.seenRecentChangeIds || [])
     })
@@ -262,6 +285,7 @@ export default function IctWorkManagementPage() {
       await addHistoryEntry({
         ...entry,
         actorEmail: user.email,
+        actorName: defaultTaskPerson || undefined,
         source: entry.source || "ict-work-management",
       })
       if (options?.refreshHistory ?? true) {
@@ -647,25 +671,30 @@ export default function IctWorkManagementPage() {
   )
 
   const currentUserEmail = (user?.email || "").trim().toLowerCase()
-  const pmProjectIds = useMemo(() => {
-    if (!currentUserEmail) return new Set<string>()
-    return new Set(
-      projectList
-        .filter((project) => (project.pmEmail || "").trim().toLowerCase() === currentUserEmail)
-        .map((project) => project.id),
-    )
-  }, [currentUserEmail, projectList])
+  const changeNotificationAliases = useMemo(
+    () =>
+      getUserAliasesForChangeNotifications(
+        userProfiles,
+        currentUserEmail,
+        currentTaskAliases.length > 0 ? currentTaskAliases : [defaultTaskPerson],
+      ),
+    [currentTaskAliases, currentUserEmail, defaultTaskPerson, userProfiles],
+  )
+  const ledDepartmentGroups = useMemo(
+    () => getLedDepartmentGroupsForAliases(changeNotificationAliases, departmentOrgSettings),
+    [changeNotificationAliases, departmentOrgSettings],
+  )
 
   const canViewAllRecentChanges = isAdmin || pagePermissions.recentChangesWidget
-  const canViewRecentChanges = canViewAllRecentChanges || pmProjectIds.size > 0
+  const canRollbackRecentChanges = isAdmin
+  const canViewRecentChanges =
+    canViewAllRecentChanges || hasChangeNotificationScope(changeNotificationAliases, ledDepartmentGroups)
 
   const loadVisibleHistoryEntries = async () => {
-    const entries = await fetchHistoryEntries(20)
-    if (canViewAllRecentChanges) return entries
-    return entries.filter((entry) => {
-      if (entry.projectId && pmProjectIds.has(entry.projectId)) return true
-      if (entry.entityType === "project" && entry.entityId && pmProjectIds.has(entry.entityId)) return true
-      return false
+    if (canViewAllRecentChanges) return fetchHistoryEntries(50)
+    return fetchNotificationHistoryEntries(50, {
+      personKeys: changeNotificationAliases,
+      departmentGroups: Array.from(ledDepartmentGroups),
     })
   }
 
@@ -683,7 +712,7 @@ export default function IctWorkManagementPage() {
   const visibleUnreadChangeCount = useMemo(() => {
     const seen = new Set(seenRecentChangeIds)
     return visibleHistoryEntries.filter((entry) => {
-      if (entry.entityType !== "task" || entry.action !== "update") return false
+      if (!isTaskChangeNotificationEntry(entry)) return false
       if (currentUserEmail && (entry.actorEmail || "").trim().toLowerCase() === currentUserEmail) return false
       return !seen.has(entry.id)
     }).length
@@ -728,7 +757,7 @@ export default function IctWorkManagementPage() {
     return () => {
       disposed = true
     }
-  }, [user, canViewRecentChanges, canViewAllRecentChanges, pmProjectIds])
+  }, [user, canViewRecentChanges, canViewAllRecentChanges, changeNotificationAliases, ledDepartmentGroups])
 
   const handleAddProject = async (newProject: Project) => {
     try {
@@ -1708,7 +1737,7 @@ export default function IctWorkManagementPage() {
                 <RecentChangesWidget
                   loadEntries={loadVisibleHistoryEntries}
                   rollbackEntry={
-                    canViewAllRecentChanges
+                    canRollbackRecentChanges
                       ? async (entry) => {
                           await rollbackHistoryEntry(entry as ChangeHistoryEntry)
                           await deleteHistoryEntry(entry.id)
