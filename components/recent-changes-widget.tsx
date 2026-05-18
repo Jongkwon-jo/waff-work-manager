@@ -12,6 +12,7 @@ export interface RecentChangeEntry {
   entityType: string
   action: string
   actorEmail?: string
+  actorName?: string
   entityId?: string
   projectId?: string
   before?: Record<string, unknown>
@@ -67,6 +68,16 @@ const formatRelativeTime = (date?: Date): string => {
   const diffDay = Math.floor(diffHour / 24)
   if (diffDay < 7) return `${diffDay}일 전`
   return date.toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" })
+}
+
+const formatTimelineTime = (date?: Date): string => {
+  if (!date) return ""
+  return date.toLocaleString("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
 }
 
 const formatValueForDiff = (value: unknown): string => {
@@ -133,7 +144,18 @@ const computeDiffFields = (entry: RecentChangeEntry): Array<{ key: string; befor
   return diffs
 }
 
-const formatActorName = (email?: string) => {
+const getEntryTime = (entry: RecentChangeEntry): number => entry.createdAt?.getTime() || 0
+
+const getTaskTitleFromEntry = (entry: RecentChangeEntry): string => {
+  const afterTitle = typeof entry.after?.task === "string" ? entry.after.task.trim() : ""
+  const beforeTitle = typeof entry.before?.task === "string" ? entry.before.task.trim() : ""
+  return afterTitle || beforeTitle
+}
+
+const formatActorName = (entry: RecentChangeEntry) => {
+  const actorName = entry.actorName?.trim()
+  if (actorName) return actorName
+  const email = entry.actorEmail
   if (!email) return "알 수 없음"
   const local = email.split("@")[0] || email
   return local
@@ -145,7 +167,7 @@ export function RecentChangesWidget({
   projects,
   currentUserEmail,
   onJump,
-  refreshIntervalMs = 60_000,
+  refreshIntervalMs = 0,
   defaultOpen = false,
   title = "최근 사용자 변경",
   description = "사용자가 마이 워크 등에서 직접 편집한 업무를 확인합니다.",
@@ -172,8 +194,8 @@ export function RecentChangesWidget({
   }, [loadEntries])
 
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    if (isOpen) void refresh()
+  }, [isOpen, refresh])
 
   useEffect(() => {
     if (defaultOpen) setIsOpen(true)
@@ -189,12 +211,12 @@ export function RecentChangesWidget({
   }, [])
 
   useEffect(() => {
-    if (!refreshIntervalMs || refreshIntervalMs <= 0) return
+    if (!isOpen || !refreshIntervalMs || refreshIntervalMs <= 0) return
     const id = window.setInterval(() => {
       void refresh()
     }, refreshIntervalMs)
     return () => window.clearInterval(id)
-  }, [refresh, refreshIntervalMs])
+  }, [isOpen, refresh, refreshIntervalMs])
 
   const filteredEntries = useMemo(() => {
     const normalizedCurrent = (currentUserEmail || "").trim().toLowerCase()
@@ -206,6 +228,33 @@ export function RecentChangesWidget({
       return true
     })
   }, [entries, currentUserEmail])
+
+  const groupedEntries = useMemo(() => {
+    const groups = new Map<string, RecentChangeEntry[]>()
+    filteredEntries.forEach((entry) => {
+      const key = entry.entityId
+        ? `${entry.source || "unknown"}:${entry.entityId}`
+        : entry.id
+      const existing = groups.get(key)
+      if (existing) existing.push(entry)
+      else groups.set(key, [entry])
+    })
+
+    return Array.from(groups.entries())
+      .map(([key, groupEntries]) => {
+        const sortedEntries = groupEntries.slice().sort((a, b) => getEntryTime(a) - getEntryTime(b))
+        const latestEntry = sortedEntries[sortedEntries.length - 1]
+        const context = lookupTaskContext(projects, latestEntry.projectId, latestEntry.entityId)
+        return {
+          key,
+          entries: sortedEntries,
+          latestEntry,
+          projectName: context?.projectName || "",
+          taskTitle: context?.taskTitle || getTaskTitleFromEntry(latestEntry) || "업무 정보 없음",
+        }
+      })
+      .sort((a, b) => getEntryTime(b.latestEntry) - getEntryTime(a.latestEntry))
+  }, [filteredEntries, projects])
 
   const newCount = useMemo(
     () => filteredEntries.reduce((acc, entry) => (seenIds.has(entry.id) ? acc : acc + 1), 0),
@@ -282,53 +331,31 @@ export function RecentChangesWidget({
               {emptyMessage}
             </p>
           ) : (
-            <ul className="space-y-1.5">
-              {filteredEntries.slice(0, 12).map((entry) => {
-                const context = lookupTaskContext(projects, entry.projectId, entry.entityId)
-                const diffs = computeDiffFields(entry)
-                const sourceLabel = entry.source ? SOURCE_LABELS[entry.source] || entry.source : null
+            <ul className="max-h-[calc(100vh-13rem)] space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable] sm:max-h-[480px]">
+              {groupedEntries.map((group) => {
                 return (
                   <li
-                    key={entry.id}
-                    onClick={onJump ? () => onJump(entry) : undefined}
+                    key={group.key}
+                    onClick={onJump ? () => onJump(group.latestEntry) : undefined}
                     className={cn(
                       "rounded-lg border border-amber-100 bg-white px-3 py-2 text-xs shadow-sm",
                       onJump && "cursor-pointer transition-colors hover:border-amber-300 hover:bg-amber-50",
                     )}
                   >
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-semibold text-slate-800">{formatActorName(entry.actorEmail)}</span>
-                      <span className="text-slate-500">{getActionLabel(entry)}</span>
-                      {sourceLabel && (
-                        <Badge variant="outline" className="border-sky-200 bg-sky-50 text-[10px] text-sky-700">
-                          {sourceLabel}
-                        </Badge>
-                      )}
-                      <span className="ml-auto text-[10px] text-slate-400">{formatRelativeTime(entry.createdAt)}</span>
-                    </div>
-                    {context && (
-                      <div className="mt-1 flex items-center gap-1 text-slate-700">
-                        <span className="text-slate-500">{context.projectName}</span>
-                        <ArrowRight className="h-3 w-3 text-slate-400" />
-                        <span className="font-medium">{context.taskTitle}</span>
-                      </div>
-                    )}
-                    {diffs.length > 0 && (
-                      <ul className="mt-1 space-y-0.5">
-                        {diffs.slice(0, 4).map((diff) => (
-                          <li key={diff.key} className="text-[11px] text-slate-600">
-                            <span className="font-medium text-slate-700">{FIELD_LABELS[diff.key] || diff.key}: </span>
-                            <span className="text-slate-400 line-through">{formatValueForDiff(diff.before)}</span>
-                            <span className="mx-1 text-slate-400">→</span>
-                            <span className="text-slate-800">{formatValueForDiff(diff.after)}</span>
-                          </li>
-                        ))}
-                        {diffs.length > 4 && (
-                          <li className="text-[10px] text-slate-400">… {diffs.length - 4}개 항목 추가 변경</li>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex min-w-0 flex-1 items-center gap-1 text-slate-700">
+                        {group.projectName && (
+                          <>
+                            <span className="truncate text-slate-500">{group.projectName}</span>
+                            <ArrowRight className="h-3 w-3 shrink-0 text-slate-400" />
+                          </>
                         )}
-                      </ul>
-                    )}
-                    <div className="mt-2 flex items-center justify-end gap-1">
+                        <span className="truncate font-semibold text-slate-900">{group.taskTitle}</span>
+                      </div>
+                      <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[10px] text-amber-800">
+                        {group.entries.length}건
+                      </Badge>
+                      <span className="text-[10px] text-slate-400">{formatRelativeTime(group.latestEntry.createdAt)}</span>
                       {onJump && (
                         <Button
                           type="button"
@@ -337,35 +364,70 @@ export function RecentChangesWidget({
                           className="h-6 px-2 text-[10px]"
                           onClick={(event) => {
                             event.stopPropagation()
-                            onJump(entry)
+                            onJump(group.latestEntry)
                           }}
                         >
                           이동
                         </Button>
                       )}
-                      {rollbackEntry && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-6 px-2 text-[10px]"
-                          disabled={rollingBackId === entry.id}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            void handleRollback(entry)
-                          }}
-                        >
-                          <RotateCcw className="h-3 w-3" />
-                          롤백
-                        </Button>
-                      )}
                     </div>
+                    <ul className="mt-2 space-y-2 border-l border-amber-100 pl-3">
+                      {group.entries.map((entry) => {
+                        const diffs = computeDiffFields(entry)
+                        const sourceLabel = entry.source ? SOURCE_LABELS[entry.source] || entry.source : null
+                        return (
+                          <li key={entry.id} className="relative">
+                            <span className="absolute -left-[17px] top-1.5 h-2 w-2 rounded-full border border-amber-200 bg-white" />
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-semibold text-slate-800">{formatActorName(entry)}</span>
+                              <span className="text-slate-500">{getActionLabel(entry)}</span>
+                              {sourceLabel && (
+                                <Badge variant="outline" className="border-sky-200 bg-sky-50 text-[10px] text-sky-700">
+                                  {sourceLabel}
+                                </Badge>
+                              )}
+                              <span className="ml-auto text-[10px] text-slate-400">{formatTimelineTime(entry.createdAt)}</span>
+                            </div>
+                            {diffs.length > 0 && (
+                              <ul className="mt-1 space-y-0.5">
+                                {diffs.slice(0, 4).map((diff) => (
+                                  <li key={diff.key} className="text-[11px] text-slate-600">
+                                    <span className="font-medium text-slate-700">{FIELD_LABELS[diff.key] || diff.key}: </span>
+                                    <span className="text-slate-400 line-through">{formatValueForDiff(diff.before)}</span>
+                                    <span className="mx-1 text-slate-400">→</span>
+                                    <span className="text-slate-800">{formatValueForDiff(diff.after)}</span>
+                                  </li>
+                                ))}
+                                {diffs.length > 4 && (
+                                  <li className="text-[10px] text-slate-400">… {diffs.length - 4}개 항목 추가 변경</li>
+                                )}
+                              </ul>
+                            )}
+                            {rollbackEntry && (
+                              <div className="mt-1 flex items-center justify-end">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 px-2 text-[10px]"
+                                  disabled={rollingBackId === entry.id}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    void handleRollback(entry)
+                                  }}
+                                >
+                                  <RotateCcw className="h-3 w-3" />
+                                  롤백
+                                </Button>
+                              </div>
+                            )}
+                          </li>
+                        )
+                      })}
+                    </ul>
                   </li>
                 )
               })}
-              {filteredEntries.length > 12 && (
-                <li className="text-center text-[10px] text-amber-700/70">… 최신 12건만 표시 중 (전체 {filteredEntries.length}건)</li>
-              )}
             </ul>
           )}
         </div>
