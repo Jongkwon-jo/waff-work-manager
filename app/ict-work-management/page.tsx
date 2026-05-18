@@ -234,6 +234,21 @@ export default function IctWorkManagementPage() {
       createdAt: project.createdAt,
     })
 
+  const isLinkedStrategyProject = (project: Project) =>
+    project.sourceSchedule === "strategy" && project.id.startsWith("strategy:")
+
+  const isOnlyProjectVisibilityChanged = (beforeProject: Project | undefined, updatedProject: Project) => {
+    if (!beforeProject) return false
+    return (
+      beforeProject.isHidden !== updatedProject.isHidden &&
+      beforeProject.name === updatedProject.name &&
+      beforeProject.type === updatedProject.type &&
+      beforeProject.period === updatedProject.period &&
+      beforeProject.pmEmail === updatedProject.pmEmail &&
+      beforeProject.displayOrder === updatedProject.displayOrder
+    )
+  }
+
   const flattenTaskRecords = (tasks: Task[]): Array<{ id: string; data: Record<string, unknown> }> =>
     tasks.flatMap((task) => [{ id: task.id, data: serializeTaskData(task) }, ...flattenTaskRecords(task.subTasks || [])])
 
@@ -787,7 +802,11 @@ export default function IctWorkManagementPage() {
     try {
       const beforeProject = projectList.find((p) => p.id === updatedProject.id)
       const { id, tasks, ...projectData } = updatedProject
-      await updateProjectInDB(id, projectData)
+      const updates =
+        isLinkedStrategyProject(updatedProject) && isOnlyProjectVisibilityChanged(beforeProject, updatedProject)
+          ? { isHidden: updatedProject.isHidden }
+          : projectData
+      await updateProjectInDB(id, updates)
       await recordHistory({
         entityType: "project",
         action: "update",

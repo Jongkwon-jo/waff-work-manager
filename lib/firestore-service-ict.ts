@@ -1,9 +1,12 @@
 ﻿import { db } from "./firebase"
 import {
   addDoc,
+  arrayRemove,
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -35,6 +38,8 @@ const TASKS_COLLECTION = "ict_tasks"
 const HISTORY_COLLECTION = "ict_history"
 const SETTINGS_COLLECTION = "ict_settings"
 const DASHBOARD_PREFERENCES_DOC = "ict_dashboard_preferences"
+const LINKED_STRATEGY_PROJECT_VISIBILITY_DOC = "ict_linked_strategy_project_visibility"
+const HIDDEN_LINKED_STRATEGY_PROJECT_IDS_FIELD = "hiddenLinkedStrategyProjectIds"
 const STRATEGY_PROJECTS_COLLECTION = "projects"
 const STRATEGY_TASKS_COLLECTION = "tasks"
 const USER_PROFILES_COLLECTION = "user_profiles"
@@ -158,6 +163,10 @@ function stripSourcePrefixFromRecord(value: Record<string, unknown>): Record<str
 
 function uniqueTrimmedStrings(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
+}
+
+function normalizeHiddenLinkedStrategyProjectIds(value: unknown): string[] {
+  return Array.isArray(value) ? uniqueTrimmedStrings(value.filter((item): item is string => typeof item === "string")) : []
 }
 
 function normalizeGanttCollapseState(
@@ -288,7 +297,12 @@ function isIctTask(raw: any) {
   return toStringOrEmpty(raw?.department).toUpperCase().includes("ICT")
 }
 
-function buildStrategyIctProjectTree(strategyProjects: any[], strategyTasks: any[]): Project[] {
+function buildStrategyIctProjectTree(
+  strategyProjects: any[],
+  strategyTasks: any[],
+  hiddenLinkedStrategyProjectIds: string[] = [],
+): Project[] {
+  const hiddenProjectIdSet = new Set(hiddenLinkedStrategyProjectIds.map((id) => stripStrategyId(id) || id))
   const taskById = new Map<string, any>()
   strategyTasks.forEach((task) => {
     const id = toStringOrEmpty(task.id)
@@ -332,7 +346,7 @@ function buildStrategyIctProjectTree(strategyProjects: any[], strategyTasks: any
     .map((project) => ({
       ...project,
       id: `${STRATEGY_SOURCE_PREFIX}${toStringOrEmpty(project.id)}`,
-      isHidden: false,
+      isHidden: hiddenProjectIdSet.has(toStringOrEmpty(project.id)),
       originalProjectId: toStringOrEmpty(project.id),
       sourceSchedule: "strategy",
     }))
@@ -345,8 +359,12 @@ function buildIctScheduleProjectTree(
   ictTasks: any[],
   strategyProjects: any[],
   strategyTasks: any[],
+  hiddenLinkedStrategyProjectIds: string[] = [],
 ): Project[] {
-  return [...buildProjectTree(ictProjects, ictTasks), ...buildStrategyIctProjectTree(strategyProjects, strategyTasks)]
+  return [
+    ...buildProjectTree(ictProjects, ictTasks),
+    ...buildStrategyIctProjectTree(strategyProjects, strategyTasks, hiddenLinkedStrategyProjectIds),
+  ]
 }
 
 export function subscribeToData(callback: (projects: Project[]) => void) {
@@ -354,14 +372,24 @@ export function subscribeToData(callback: (projects: Project[]) => void) {
   const tasksQuery = collection(db, TASKS_COLLECTION)
   const strategyProjectsQuery = collection(db, STRATEGY_PROJECTS_COLLECTION)
   const strategyTasksQuery = collection(db, STRATEGY_TASKS_COLLECTION)
+  const linkedStrategyVisibilityRef = doc(db, SETTINGS_COLLECTION, LINKED_STRATEGY_PROJECT_VISIBILITY_DOC)
 
   let ictProjects: any[] = []
   let ictTasks: any[] = []
   let strategyProjects: any[] = []
   let strategyTasks: any[] = []
+  let hiddenLinkedStrategyProjectIds: string[] = []
 
   const updateAndNotify = () => {
-    callback(buildIctScheduleProjectTree(ictProjects, ictTasks, strategyProjects, strategyTasks))
+    callback(
+      buildIctScheduleProjectTree(
+        ictProjects,
+        ictTasks,
+        strategyProjects,
+        strategyTasks,
+        hiddenLinkedStrategyProjectIds,
+      ),
+    )
   }
 
   const unsubscribeProjects = onSnapshot(
@@ -435,11 +463,25 @@ export function subscribeToData(callback: (projects: Project[]) => void) {
     },
   )
 
+  const unsubscribeLinkedStrategyVisibility = onSnapshot(
+    linkedStrategyVisibilityRef,
+    (snapshot) => {
+      hiddenLinkedStrategyProjectIds = normalizeHiddenLinkedStrategyProjectIds(
+        snapshot.data()?.[HIDDEN_LINKED_STRATEGY_PROJECT_IDS_FIELD],
+      )
+      updateAndNotify()
+    },
+    (error) => {
+      console.error("Linked strategy project visibility snapshot error:", error)
+    },
+  )
+
   return () => {
     unsubscribeProjects()
     unsubscribeTasks()
     unsubscribeStrategyProjects()
     unsubscribeStrategyTasks()
+    unsubscribeLinkedStrategyVisibility()
   }
 }
 
@@ -448,6 +490,7 @@ export async function fetchProjectsWithTasks(): Promise<Project[]> {
   const tasksSnapshot = await getDocs(collection(db, TASKS_COLLECTION))
   const strategyProjectsSnapshot = await getDocs(collection(db, STRATEGY_PROJECTS_COLLECTION))
   const strategyTasksSnapshot = await getDocs(collection(db, STRATEGY_TASKS_COLLECTION))
+  const linkedStrategyVisibilitySnapshot = await getDoc(doc(db, SETTINGS_COLLECTION, LINKED_STRATEGY_PROJECT_VISIBILITY_DOC))
 
   const projectsData = projectsSnapshot.docs.map((docSnap) => ({
     ...docSnap.data(),
@@ -481,7 +524,17 @@ export async function fetchProjectsWithTasks(): Promise<Project[]> {
     sourceSchedule: "strategy",
   }))
 
-  return buildIctScheduleProjectTree(projectsData, tasksData, strategyProjectsData, strategyTasksData)
+  const hiddenLinkedStrategyProjectIds = normalizeHiddenLinkedStrategyProjectIds(
+    linkedStrategyVisibilitySnapshot.data()?.[HIDDEN_LINKED_STRATEGY_PROJECT_IDS_FIELD],
+  )
+
+  return buildIctScheduleProjectTree(
+    projectsData,
+    tasksData,
+    strategyProjectsData,
+    strategyTasksData,
+    hiddenLinkedStrategyProjectIds,
+  )
 }
 
 export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Promise<string> {
@@ -493,8 +546,40 @@ export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Pr
   return `${ICT_SOURCE_PREFIX}${docRef.id}`
 }
 
+async function updateLinkedStrategyProjectVisibility(projectId: string, isHidden: boolean): Promise<void> {
+  const sourceProjectId = stripStrategyId(projectId) || projectId
+  const visibilityRef = doc(db, SETTINGS_COLLECTION, LINKED_STRATEGY_PROJECT_VISIBILITY_DOC)
+  await setDoc(
+    visibilityRef,
+    {
+      [HIDDEN_LINKED_STRATEGY_PROJECT_IDS_FIELD]: isHidden
+        ? arrayUnion(sourceProjectId)
+        : arrayRemove(sourceProjectId),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+function isLinkedStrategyProjectVisibilityHistoryEntry(entry: HistoryEntryInput | ChangeHistoryEntry) {
+  return (
+    entry.entityType === "project" &&
+    entry.action === "update" &&
+    isStrategyId(entry.entityId) &&
+    typeof entry.before?.isHidden === "boolean" &&
+    typeof entry.after?.isHidden === "boolean"
+  )
+}
+
 export async function updateProjectInDB(projectId: string, updates: Partial<Project>): Promise<void> {
   if (isStrategyId(projectId)) {
+    const updateKeys = Object.keys(updates).filter(
+      (key) => !["id", "tasks", "sourceSchedule", "originalProjectId"].includes(key),
+    )
+    if (updateKeys.length === 1 && updateKeys[0] === "isHidden" && typeof updates.isHidden === "boolean") {
+      await updateLinkedStrategyProjectVisibility(projectId, updates.isHidden)
+      return
+    }
     throw new Error("Linked strategy projects cannot be edited from ICT schedule.")
   }
   const projectRef = doc(db, PROJECTS_COLLECTION, stripIctId(projectId) || projectId)
@@ -562,6 +647,20 @@ export async function updateTaskOrdersInDB(taskIds: string[]): Promise<void> {
 
 export async function addHistoryEntry(entry: HistoryEntryInput): Promise<string> {
   const actorEmail = toOptionalString(entry.actorEmail)
+  if (isLinkedStrategyProjectVisibilityHistoryEntry(entry)) {
+    const payload = compactObject({
+      ...entry,
+      linkedStrategyProject: true,
+      entityId: stripStrategyId(entry.entityId),
+      projectId: stripStrategyId(entry.projectId),
+      before: entry.before ? stripSourcePrefixFromRecord(entry.before) : undefined,
+      after: entry.after ? stripSourcePrefixFromRecord(entry.after) : undefined,
+      actorEmail: actorEmail ? normalizeEmail(actorEmail) : undefined,
+      createdAt: serverTimestamp(),
+    })
+    const docRef = await addDoc(collection(db, HISTORY_COLLECTION), payload)
+    return `${ICT_SOURCE_PREFIX}${docRef.id}`
+  }
   if (isStrategyId(entry.entityId) || isStrategyId(entry.projectId)) {
     const strategyEntry = {
       ...entry,
@@ -606,13 +705,14 @@ export async function fetchHistoryEntries(limitCount = 30, actorEmail?: string):
 
   const entries = snapshot.docs.map((docSnap) => {
     const raw = docSnap.data() as any
+    const entityPrefix = raw?.linkedStrategyProject ? STRATEGY_SOURCE_PREFIX : ICT_SOURCE_PREFIX
     return {
       id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
       entityType: (toStringOrEmpty(raw?.entityType) as HistoryEntityType) || "batch",
       action: (toStringOrEmpty(raw?.action) as HistoryActionType) || "batch_update",
       actorEmail: toOptionalString(raw?.actorEmail),
-      entityId: toOptionalString(raw?.entityId) ? `${ICT_SOURCE_PREFIX}${toStringOrEmpty(raw?.entityId)}` : undefined,
-      projectId: toOptionalString(raw?.projectId) ? `${ICT_SOURCE_PREFIX}${toStringOrEmpty(raw?.projectId)}` : undefined,
+      entityId: toOptionalString(raw?.entityId) ? `${entityPrefix}${toStringOrEmpty(raw?.entityId)}` : undefined,
+      projectId: toOptionalString(raw?.projectId) ? `${entityPrefix}${toStringOrEmpty(raw?.projectId)}` : undefined,
       before: (raw?.before as Record<string, unknown> | undefined) || undefined,
       after: (raw?.after as Record<string, unknown> | undefined) || undefined,
       batch: Array.isArray(raw?.batch)
@@ -686,6 +786,11 @@ async function rollbackSingle(entry: ChangeHistoryEntry): Promise<void> {
 }
 
 export async function rollbackHistoryEntry(entry: ChangeHistoryEntry): Promise<void> {
+  if (isLinkedStrategyProjectVisibilityHistoryEntry(entry) && entry.entityId) {
+    await updateLinkedStrategyProjectVisibility(entry.entityId, Boolean(entry.before?.isHidden))
+    return
+  }
+
   if (isStrategyId(entry.id) || isStrategyId(entry.entityId) || isStrategyId(entry.projectId)) {
     await rollbackStrategyHistoryEntry({
       ...entry,

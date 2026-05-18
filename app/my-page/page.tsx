@@ -491,7 +491,13 @@ export default function MyPage() {
     }
   }
 
+  const expandPanel = (panel: MyPagePanel) => {
+    setExpandedPanels((prev) => (prev.includes(panel) ? prev : [...prev, panel]))
+  }
+
   const toggleProjectStatusFilter = (status: ProjectStatusFilter) => {
+    expandPanel("project")
+    setIsProjectActiveCollapsed(false)
     setSelectedProjectStatus((prev) => (prev === status ? null : status))
   }
 
@@ -623,7 +629,16 @@ export default function MyPage() {
   }
 
   const togglePersonalMemo = (id: string) => {
-    setExpandedPersonalMemoIds((prev) => (prev.includes(id) ? prev.filter((memoId) => memoId !== id) : [...prev, id]))
+    setExpandedPersonalMemoIds((prev) => {
+      const expanding = !prev.includes(id)
+      if (expanding) {
+        const task = personalTasks.find((item) => item.id === id)
+        expandPanel("personal")
+        if (task?.checked) setIsPersonalCompletedCollapsed(false)
+        else setIsPersonalActiveCollapsed(false)
+      }
+      return expanding ? [...prev, id] : prev.filter((memoId) => memoId !== id)
+    })
   }
 
   const reorderPersonal = (dragged: string, target: string, position: "before" | "after" = "before") => {
@@ -678,6 +693,12 @@ export default function MyPage() {
 
   const toggleProjectGroupCollapsed = (groupKey: string) => {
     setCollapsedProjectGroups((prev) => {
+      const expanding = Boolean(prev[groupKey])
+      if (expanding) {
+        expandPanel("project")
+        if (groupKey.startsWith("hidden-")) setIsProjectHiddenCollapsed(false)
+        else setIsProjectActiveCollapsed(false)
+      }
       const next = { ...prev, [groupKey]: !prev[groupKey] }
       if (user?.email) {
         void saveMyPageCollapsedProjectGroups(user.email, next)
@@ -1149,7 +1170,10 @@ export default function MyPage() {
                       <div className="space-y-2">
                         <button
                           type="button"
-                          onClick={() => setIsTodayActiveCollapsed((prev) => !prev)}
+                          onClick={() => {
+                            if (isTodayActiveCollapsed) expandPanel("today")
+                            setIsTodayActiveCollapsed((prev) => !prev)
+                          }}
                           className="flex items-center gap-1 text-xs font-semibold text-slate-500"
                         >
                           <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", isTodayActiveCollapsed && "-rotate-90")} />
@@ -1166,7 +1190,10 @@ export default function MyPage() {
                       <div className="border-t border-dashed border-slate-300 pt-3">
                         <button
                           type="button"
-                          onClick={() => setIsTodayCompletedCollapsed((prev) => !prev)}
+                          onClick={() => {
+                            if (isTodayCompletedCollapsed) expandPanel("today")
+                            setIsTodayCompletedCollapsed((prev) => !prev)
+                          }}
                           className="mb-2 flex items-center gap-1 text-xs font-semibold text-slate-500"
                         >
                           <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", isTodayCompletedCollapsed && "-rotate-90")} />
@@ -1230,7 +1257,10 @@ export default function MyPage() {
                     <div className="space-y-1">
                       <button
                         type="button"
-                        onClick={() => setIsProjectActiveCollapsed((prev) => !prev)}
+                        onClick={() => {
+                          if (isProjectActiveCollapsed) expandPanel("project")
+                          setIsProjectActiveCollapsed((prev) => !prev)
+                        }}
                         className="flex items-center gap-1 text-xs font-semibold text-slate-500"
                       >
                         <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", isProjectActiveCollapsed && "-rotate-90")} />
@@ -1266,7 +1296,10 @@ export default function MyPage() {
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                         <button
                           type="button"
-                          onClick={() => setIsProjectHiddenCollapsed((prev) => !prev)}
+                          onClick={() => {
+                            if (isProjectHiddenCollapsed) expandPanel("project")
+                            setIsProjectHiddenCollapsed((prev) => !prev)
+                          }}
                           className="flex items-center gap-1 text-xs font-semibold text-slate-500"
                           aria-label={isProjectHiddenCollapsed ? "숨긴 업무 펼치기" : "숨긴 업무 접기"}
                         >
@@ -1351,7 +1384,10 @@ export default function MyPage() {
                     <div className="space-y-2">
                       <button
                         type="button"
-                        onClick={() => setIsPersonalActiveCollapsed((prev) => !prev)}
+                        onClick={() => {
+                          if (isPersonalActiveCollapsed) expandPanel("personal")
+                          setIsPersonalActiveCollapsed((prev) => !prev)
+                        }}
                         className="flex items-center gap-1 text-xs font-semibold text-slate-500"
                       >
                         <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", isPersonalActiveCollapsed && "-rotate-90")} />
@@ -1362,7 +1398,10 @@ export default function MyPage() {
                     <div className="border-t border-dashed border-slate-300 pt-3">
                       <button
                         type="button"
-                        onClick={() => setIsPersonalCompletedCollapsed((prev) => !prev)}
+                        onClick={() => {
+                          if (isPersonalCompletedCollapsed) expandPanel("personal")
+                          setIsPersonalCompletedCollapsed((prev) => !prev)
+                        }}
                         className="mb-2 flex items-center gap-1 text-xs font-semibold text-slate-500"
                       >
                         <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", isPersonalCompletedCollapsed && "-rotate-90")} />

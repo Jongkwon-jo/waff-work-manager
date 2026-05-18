@@ -173,6 +173,14 @@ function getTaskBarSpan(task: Task, weekStart: Date, weekEnd: Date) {
   }
 }
 
+function shouldShowWeeklyProject(
+  project: Project,
+  source: WeeklyWorkDataSource,
+  selectedDepartment: DepartmentPersonGroup | "all",
+) {
+  return !(selectedDepartment === "all" && source.id === "ict" && project.sourceSchedule === "strategy")
+}
+
 function getOrgPersonOrder(
   person: string,
   orgChart: DepartmentOrgSettings,
@@ -444,6 +452,7 @@ export function WeeklyWorkBoard({
       .flatMap((source) =>
         (projectsBySource[source.id] || [])
           .filter((project) => !project.isHidden)
+          .filter((project) => shouldShowWeeklyProject(project, source, selectedDepartment))
           .flatMap((project) =>
             flattenLeafTasksWithAncestors(project.tasks)
               .filter(({ task }) => !task.isHidden)
@@ -860,11 +869,11 @@ export function WeeklyWorkBoard({
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
                                     <div className="flex items-start gap-1.5">
-	                                      <ProjectTypeBadge type={project.projectType} />
-	                                      <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-	                                        {project.departmentLabel}
-	                                      </Badge>
-	                                      <div className="min-w-0">
+                                      <ProjectTypeBadge type={project.projectType} />
+                                      <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                                        {project.departmentLabel}
+                                      </Badge>
+                                      <div className="min-w-0">
                                         <span className="block truncate text-[13px] font-semibold leading-4 text-slate-900">{project.projectName}</span>
                                         {project.subProjectName && (
                                           <div className="mt-0.5 truncate text-[10px] leading-4 text-slate-500">하위: {project.subProjectName}</div>
@@ -1106,11 +1115,11 @@ export function WeeklyWorkBoard({
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
                                     <div className="flex items-start gap-1.5">
-	                                      <ProjectTypeBadge type={project.projectType} />
-	                                      <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-	                                        {project.departmentLabel}
-	                                      </Badge>
-	                                      <div className="min-w-0">
+                                      <ProjectTypeBadge type={project.projectType} />
+                                      <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                                        {project.departmentLabel}
+                                      </Badge>
+                                      <div className="min-w-0">
                                         <div className="truncate text-xs font-semibold leading-4 text-slate-900">{project.projectName}</div>
                                         {project.subProjectName && (
                                           <div className="mt-0.5 truncate text-[10px] leading-4 text-slate-500">하위: {project.subProjectName}</div>
