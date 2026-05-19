@@ -230,6 +230,7 @@ export function WeeklyWorkBoard({
   const [profileDepartment, setProfileDepartment] = useState<DepartmentPersonGroup | "">("")
   const [profileDefaultPerson, setProfileDefaultPerson] = useState("")
   const [profilePersonalTasks, setProfilePersonalTasks] = useState<MyPagePersonalTask[]>([])
+  const [isProfileLoaded, setIsProfileLoaded] = useState(false)
   const [selectedTaskItem, setSelectedTaskItem] = useState<WeeklyTaskItem | null>(null)
   const [selectedProjectMemo, setSelectedProjectMemo] = useState<ProjectMemoDialogPayload | null>(null)
   const [currentWeekAnchor, setCurrentWeekAnchor] = useState(() => new Date())
@@ -242,16 +243,6 @@ export function WeeklyWorkBoard({
   )
   const hasAppliedProfileDepartmentRef = useRef(false)
   const hasAppliedProfileDefaultRef = useRef(false)
-
-  useEffect(() => {
-    setProjectsBySource({})
-    const unsubscribes = dataSources.map((source) =>
-      source.subscribeToData((projects) => {
-        setProjectsBySource((prev) => ({ ...prev, [source.id]: projects }))
-      }),
-    )
-    return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
-  }, [dataSources])
 
   useEffect(() => {
     const unsubscribe = subscribeDepartmentPersonSettings(setDepartmentPersonSettings)
@@ -273,15 +264,20 @@ export function WeeklyWorkBoard({
     setProfileDepartment("")
     setProfileDefaultPerson("")
     setProfilePersonalTasks([])
+    setIsProfileLoaded(false)
     hasAppliedProfileDepartmentRef.current = false
     hasAppliedProfileDefaultRef.current = false
-    if (!email) return
+    if (!email) {
+      setIsProfileLoaded(true)
+      return
+    }
 
     const unsubscribe = subscribeCurrentUserProfile(email, (profile) => {
       setProfileDepartment(profile?.department || "")
       const preferred = (profile?.taskAliases || [])[0]?.trim() || ""
       setProfileDefaultPerson(preferred)
       setProfilePersonalTasks(profile?.myPagePersonalTasks || [])
+      setIsProfileLoaded(true)
     })
     return () => unsubscribe()
   }, [user?.email])
@@ -323,12 +319,27 @@ export function WeeklyWorkBoard({
   }, [departmentOptions, selectedDepartment])
 
   const selectedDataSources = useMemo(
-    () =>
-      selectedDepartment === "all"
+    () => {
+      if (user?.email && !isProfileLoaded) return []
+      return selectedDepartment === "all"
         ? dataSources
-        : dataSources.filter((source) => source.departmentGroup === selectedDepartment),
-    [dataSources, selectedDepartment],
+        : dataSources.filter((source) => source.departmentGroup === selectedDepartment)
+    },
+    [dataSources, isProfileLoaded, selectedDepartment, user?.email],
   )
+
+  useEffect(() => {
+    const allowedSourceIds = new Set(selectedDataSources.map((source) => source.id))
+    setProjectsBySource((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([sourceId]) => allowedSourceIds.has(sourceId))),
+    )
+    const unsubscribes = selectedDataSources.map((source) =>
+      source.subscribeToData((projects) => {
+        setProjectsBySource((prev) => ({ ...prev, [source.id]: projects }))
+      }),
+    )
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
+  }, [selectedDataSources])
 
   const allAllowedPersons = useMemo(
     () => {

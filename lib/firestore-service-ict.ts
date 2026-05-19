@@ -32,6 +32,11 @@ import {
   type PagePermissionKey,
   type UserPagePermissions,
 } from "./page-access"
+import {
+  buildHistoryNotificationFields,
+  buildPersonKeys,
+  type HistoryNotificationFilter,
+} from "./history-notification"
 
 const PROJECTS_COLLECTION = "ict_projects"
 const TASKS_COLLECTION = "ict_tasks"
@@ -83,6 +88,7 @@ export interface ChangeHistoryEntry {
   entityType: HistoryEntityType
   action: HistoryActionType
   actorEmail?: string
+  actorName?: string
   entityId?: string
   projectId?: string
   before?: Record<string, unknown>
@@ -90,6 +96,8 @@ export interface ChangeHistoryEntry {
   batch?: HistoryBatchItem[]
   createdAt?: Date
   source?: HistorySource
+  notificationPersonKeys?: string[]
+  notificationDepartmentGroups?: string[]
 }
 
 export type HistoryEntryInput = Omit<ChangeHistoryEntry, "id" | "createdAt">
@@ -647,6 +655,7 @@ export async function updateTaskOrdersInDB(taskIds: string[]): Promise<void> {
 
 export async function addHistoryEntry(entry: HistoryEntryInput): Promise<string> {
   const actorEmail = toOptionalString(entry.actorEmail)
+  const notificationFields = buildHistoryNotificationFields(entry)
   if (isLinkedStrategyProjectVisibilityHistoryEntry(entry)) {
     const payload = compactObject({
       ...entry,
@@ -656,6 +665,9 @@ export async function addHistoryEntry(entry: HistoryEntryInput): Promise<string>
       before: entry.before ? stripSourcePrefixFromRecord(entry.before) : undefined,
       after: entry.after ? stripSourcePrefixFromRecord(entry.after) : undefined,
       actorEmail: actorEmail ? normalizeEmail(actorEmail) : undefined,
+      actorName: toOptionalString(entry.actorName),
+      notificationPersonKeys: notificationFields.notificationPersonKeys,
+      notificationDepartmentGroups: notificationFields.notificationDepartmentGroups,
       createdAt: serverTimestamp(),
     })
     const docRef = await addDoc(collection(db, HISTORY_COLLECTION), payload)
@@ -692,75 +704,171 @@ export async function addHistoryEntry(entry: HistoryEntryInput): Promise<string>
       after: item.after ? stripSourcePrefixFromRecord(item.after) : undefined,
     })),
     actorEmail: actorEmail ? normalizeEmail(actorEmail) : undefined,
+    actorName: toOptionalString(entry.actorName),
+    notificationPersonKeys: notificationFields.notificationPersonKeys,
+    notificationDepartmentGroups: notificationFields.notificationDepartmentGroups,
     createdAt: serverTimestamp(),
   })
   const docRef = await addDoc(collection(db, HISTORY_COLLECTION), payload)
   return `${ICT_SOURCE_PREFIX}${docRef.id}`
 }
 
-export async function fetchHistoryEntries(limitCount = 30, actorEmail?: string): Promise<ChangeHistoryEntry[]> {
-  const historyQ = query(collection(db, HISTORY_COLLECTION), orderBy("createdAt", "desc"), limit(Math.max(limitCount * 5, limitCount)))
-  const strategyHistoryQ = query(collection(db, "history"), orderBy("createdAt", "desc"), limit(Math.max(limitCount * 5, limitCount)))
-  const [snapshot, strategySnapshot] = await Promise.all([getDocs(historyQ), getDocs(strategyHistoryQ)])
+function mapIctHistoryDoc(docSnap: { id: string; data: () => any }): ChangeHistoryEntry {
+  const raw = docSnap.data()
+  const entityPrefix = raw?.linkedStrategyProject ? STRATEGY_SOURCE_PREFIX : ICT_SOURCE_PREFIX
+  return {
+    id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
+    entityType: (toStringOrEmpty(raw?.entityType) as HistoryEntityType) || "batch",
+    action: (toStringOrEmpty(raw?.action) as HistoryActionType) || "batch_update",
+    actorEmail: toOptionalString(raw?.actorEmail),
+    actorName: toOptionalString(raw?.actorName),
+    entityId: toOptionalString(raw?.entityId) ? `${entityPrefix}${toStringOrEmpty(raw?.entityId)}` : undefined,
+    projectId: toOptionalString(raw?.projectId) ? `${entityPrefix}${toStringOrEmpty(raw?.projectId)}` : undefined,
+    before: (raw?.before as Record<string, unknown> | undefined) || undefined,
+    after: (raw?.after as Record<string, unknown> | undefined) || undefined,
+    batch: Array.isArray(raw?.batch)
+      ? raw.batch.map((item: HistoryBatchItem) => ({
+          ...item,
+          entityId: `${entityPrefix}${item.entityId}`,
+        }))
+      : undefined,
+    createdAt: raw?.createdAt?.toDate?.() || undefined,
+    source: (toOptionalString(raw?.source) as HistorySource | undefined) || undefined,
+    notificationPersonKeys: Array.isArray(raw?.notificationPersonKeys)
+      ? raw.notificationPersonKeys.filter((value: unknown): value is string => typeof value === "string")
+      : [],
+    notificationDepartmentGroups: Array.isArray(raw?.notificationDepartmentGroups)
+      ? raw.notificationDepartmentGroups.filter((value: unknown): value is string => typeof value === "string")
+      : [],
+  }
+}
 
-  const entries = snapshot.docs.map((docSnap) => {
-    const raw = docSnap.data() as any
-    const entityPrefix = raw?.linkedStrategyProject ? STRATEGY_SOURCE_PREFIX : ICT_SOURCE_PREFIX
-    return {
-      id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
-      entityType: (toStringOrEmpty(raw?.entityType) as HistoryEntityType) || "batch",
-      action: (toStringOrEmpty(raw?.action) as HistoryActionType) || "batch_update",
-      actorEmail: toOptionalString(raw?.actorEmail),
-      entityId: toOptionalString(raw?.entityId) ? `${entityPrefix}${toStringOrEmpty(raw?.entityId)}` : undefined,
-      projectId: toOptionalString(raw?.projectId) ? `${entityPrefix}${toStringOrEmpty(raw?.projectId)}` : undefined,
-      before: (raw?.before as Record<string, unknown> | undefined) || undefined,
-      after: (raw?.after as Record<string, unknown> | undefined) || undefined,
-      batch: Array.isArray(raw?.batch)
-        ? raw.batch.map((item: HistoryBatchItem) => ({
-            ...item,
-            entityId: `${ICT_SOURCE_PREFIX}${item.entityId}`,
-          }))
-        : undefined,
-      createdAt: raw?.createdAt?.toDate?.() || undefined,
-      source: (toOptionalString(raw?.source) as HistorySource | undefined) || undefined,
-    }
-  })
-  const strategyEntries = strategySnapshot.docs
-    .map((docSnap) => {
-      const raw = docSnap.data() as any
-      return {
-        id: `${STRATEGY_SOURCE_PREFIX}${docSnap.id}`,
-        entityType: (toStringOrEmpty(raw?.entityType) as HistoryEntityType) || "batch",
-        action: (toStringOrEmpty(raw?.action) as HistoryActionType) || "batch_update",
-        actorEmail: toOptionalString(raw?.actorEmail),
-        entityId: toOptionalString(raw?.entityId) ? `${STRATEGY_SOURCE_PREFIX}${toStringOrEmpty(raw?.entityId)}` : undefined,
-        projectId: toOptionalString(raw?.projectId) ? `${STRATEGY_SOURCE_PREFIX}${toStringOrEmpty(raw?.projectId)}` : undefined,
-        before: (raw?.before as Record<string, unknown> | undefined) || undefined,
-        after: (raw?.after as Record<string, unknown> | undefined) || undefined,
-        batch: Array.isArray(raw?.batch)
-          ? raw.batch.map((item: HistoryBatchItem) => ({
-              ...item,
-              entityId: `${STRATEGY_SOURCE_PREFIX}${item.entityId}`,
-            }))
-          : undefined,
-        createdAt: raw?.createdAt?.toDate?.() || undefined,
-        source: (toOptionalString(raw?.source) as HistorySource | undefined) || undefined,
-      } satisfies ChangeHistoryEntry
-    })
-    .filter((entry) => entry.source === "ict-work-management")
+function mapStrategyHistoryDoc(docSnap: { id: string; data: () => any }): ChangeHistoryEntry {
+  const raw = docSnap.data()
+  return {
+    id: `${STRATEGY_SOURCE_PREFIX}${docSnap.id}`,
+    entityType: (toStringOrEmpty(raw?.entityType) as HistoryEntityType) || "batch",
+    action: (toStringOrEmpty(raw?.action) as HistoryActionType) || "batch_update",
+    actorEmail: toOptionalString(raw?.actorEmail),
+    actorName: toOptionalString(raw?.actorName),
+    entityId: toOptionalString(raw?.entityId) ? `${STRATEGY_SOURCE_PREFIX}${toStringOrEmpty(raw?.entityId)}` : undefined,
+    projectId: toOptionalString(raw?.projectId) ? `${STRATEGY_SOURCE_PREFIX}${toStringOrEmpty(raw?.projectId)}` : undefined,
+    before: (raw?.before as Record<string, unknown> | undefined) || undefined,
+    after: (raw?.after as Record<string, unknown> | undefined) || undefined,
+    batch: Array.isArray(raw?.batch)
+      ? raw.batch.map((item: HistoryBatchItem) => ({
+          ...item,
+          entityId: `${STRATEGY_SOURCE_PREFIX}${item.entityId}`,
+        }))
+      : undefined,
+    createdAt: raw?.createdAt?.toDate?.() || undefined,
+    source: (toOptionalString(raw?.source) as HistorySource | undefined) || undefined,
+    notificationPersonKeys: Array.isArray(raw?.notificationPersonKeys)
+      ? raw.notificationPersonKeys.filter((value: unknown): value is string => typeof value === "string")
+      : [],
+    notificationDepartmentGroups: Array.isArray(raw?.notificationDepartmentGroups)
+      ? raw.notificationDepartmentGroups.filter((value: unknown): value is string => typeof value === "string")
+      : [],
+  }
+}
 
-  const mergedEntries = [...entries, ...strategyEntries].sort((a, b) => {
-    const timeA = a.createdAt?.getTime?.() || 0
-    const timeB = b.createdAt?.getTime?.() || 0
-    return timeB - timeA
-  })
-
-  if (!actorEmail) return mergedEntries.slice(0, limitCount)
-
-  const normalizedActorEmail = normalizeEmail(actorEmail)
-  return mergedEntries
-    .filter((entry) => normalizeEmail(entry.actorEmail || "") === normalizedActorEmail)
+function mergeHistoryEntries(entries: ChangeHistoryEntry[], limitCount: number) {
+  const byId = new Map<string, ChangeHistoryEntry>()
+  entries.forEach((entry) => byId.set(entry.id, entry))
+  return Array.from(byId.values())
+    .sort((a, b) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0))
     .slice(0, limitCount)
+}
+
+export async function fetchHistoryEntries(limitCount = 30, actorEmail?: string): Promise<ChangeHistoryEntry[]> {
+  const normalizedActorEmail = actorEmail ? normalizeEmail(actorEmail) : ""
+  const ictHistoryQ = normalizedActorEmail
+    ? query(
+        collection(db, HISTORY_COLLECTION),
+        where("actorEmail", "==", normalizedActorEmail),
+        orderBy("createdAt", "desc"),
+        limit(limitCount),
+      )
+    : query(collection(db, HISTORY_COLLECTION), orderBy("createdAt", "desc"), limit(limitCount))
+  const strategyHistoryQ = normalizedActorEmail
+    ? query(
+        collection(db, "history"),
+        where("source", "==", "ict-work-management"),
+        where("actorEmail", "==", normalizedActorEmail),
+        orderBy("createdAt", "desc"),
+        limit(limitCount),
+      )
+    : query(
+        collection(db, "history"),
+        where("source", "==", "ict-work-management"),
+        orderBy("createdAt", "desc"),
+        limit(limitCount),
+      )
+  const [snapshot, strategySnapshot] = await Promise.all([getDocs(ictHistoryQ), getDocs(strategyHistoryQ)])
+  return mergeHistoryEntries(
+    [...snapshot.docs.map(mapIctHistoryDoc), ...strategySnapshot.docs.map(mapStrategyHistoryDoc)],
+    limitCount,
+  )
+}
+
+export async function fetchNotificationHistoryEntries(
+  limitCount = 30,
+  filter: HistoryNotificationFilter = {},
+): Promise<ChangeHistoryEntry[]> {
+  const personKeys = buildPersonKeys(filter.personKeys || []).slice(0, 30)
+  const departmentGroups = (filter.departmentGroups || []).slice(0, 30)
+  const historyQueries: Array<{ source: "ict" | "strategy"; query: any }> = []
+
+  if (personKeys.length > 0) {
+    historyQueries.push({
+      source: "ict",
+      query: query(
+        collection(db, HISTORY_COLLECTION),
+        where("notificationPersonKeys", "array-contains-any", personKeys),
+        orderBy("createdAt", "desc"),
+        limit(limitCount),
+      ),
+    })
+    historyQueries.push({
+      source: "strategy",
+      query: query(
+        collection(db, "history"),
+        where("source", "==", "ict-work-management"),
+        where("notificationPersonKeys", "array-contains-any", personKeys),
+        orderBy("createdAt", "desc"),
+        limit(limitCount),
+      ),
+    })
+  }
+
+  if (departmentGroups.length > 0) {
+    historyQueries.push({
+      source: "ict",
+      query: query(
+        collection(db, HISTORY_COLLECTION),
+        where("notificationDepartmentGroups", "array-contains-any", departmentGroups),
+        orderBy("createdAt", "desc"),
+        limit(limitCount),
+      ),
+    })
+    historyQueries.push({
+      source: "strategy",
+      query: query(
+        collection(db, "history"),
+        where("source", "==", "ict-work-management"),
+        where("notificationDepartmentGroups", "array-contains-any", departmentGroups),
+        orderBy("createdAt", "desc"),
+        limit(limitCount),
+      ),
+    })
+  }
+
+  if (historyQueries.length === 0) return []
+  const snapshots = await Promise.all(historyQueries.map((item) => getDocs(item.query)))
+  const entries = snapshots.flatMap((snapshot, index) =>
+    snapshot.docs.map(historyQueries[index].source === "strategy" ? mapStrategyHistoryDoc : mapIctHistoryDoc),
+  )
+  return mergeHistoryEntries(entries, limitCount)
 }
 
 function getCollectionForEntity(entityType: "project" | "task") {

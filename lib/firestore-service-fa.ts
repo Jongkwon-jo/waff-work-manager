@@ -24,6 +24,11 @@ import {
   type PagePermissionKey,
   type UserPagePermissions,
 } from "./page-access"
+import {
+  buildHistoryNotificationFields,
+  buildPersonKeys,
+  type HistoryNotificationFilter,
+} from "./history-notification"
 
 const PROJECTS_COLLECTION = "fa_projects"
 const TASKS_COLLECTION = "fa_tasks"
@@ -69,6 +74,7 @@ export interface ChangeHistoryEntry {
   entityType: HistoryEntityType
   action: HistoryActionType
   actorEmail?: string
+  actorName?: string
   entityId?: string
   projectId?: string
   before?: Record<string, unknown>
@@ -76,6 +82,8 @@ export interface ChangeHistoryEntry {
   batch?: HistoryBatchItem[]
   createdAt?: Date
   source?: HistorySource
+  notificationPersonKeys?: string[]
+  notificationDepartmentGroups?: string[]
 }
 
 export type HistoryEntryInput = Omit<ChangeHistoryEntry, "id" | "createdAt">
@@ -358,41 +366,94 @@ export async function updateTaskOrdersInDB(taskIds: string[]): Promise<void> {
 
 export async function addHistoryEntry(entry: HistoryEntryInput): Promise<string> {
   const actorEmail = toOptionalString(entry.actorEmail)
+  const notificationFields = buildHistoryNotificationFields(entry)
   const payload = compactObject({
     ...entry,
     actorEmail: actorEmail ? normalizeEmail(actorEmail) : undefined,
+    actorName: toOptionalString(entry.actorName),
+    notificationPersonKeys: notificationFields.notificationPersonKeys,
+    notificationDepartmentGroups: notificationFields.notificationDepartmentGroups,
     createdAt: serverTimestamp(),
   })
   const docRef = await addDoc(collection(db, HISTORY_COLLECTION), payload)
   return docRef.id
 }
 
+function mapHistoryDoc(docSnap: { id: string; data: () => any }): ChangeHistoryEntry {
+  const raw = docSnap.data()
+  return {
+    id: docSnap.id,
+    entityType: (toStringOrEmpty(raw?.entityType) as HistoryEntityType) || "batch",
+    action: (toStringOrEmpty(raw?.action) as HistoryActionType) || "batch_update",
+    actorEmail: toOptionalString(raw?.actorEmail),
+    actorName: toOptionalString(raw?.actorName),
+    entityId: toOptionalString(raw?.entityId),
+    projectId: toOptionalString(raw?.projectId),
+    before: (raw?.before as Record<string, unknown> | undefined) || undefined,
+    after: (raw?.after as Record<string, unknown> | undefined) || undefined,
+    batch: (raw?.batch as HistoryBatchItem[] | undefined) || undefined,
+    createdAt: raw?.createdAt?.toDate?.() || undefined,
+    source: (toOptionalString(raw?.source) as HistorySource | undefined) || undefined,
+    notificationPersonKeys: Array.isArray(raw?.notificationPersonKeys)
+      ? raw.notificationPersonKeys.filter((value: unknown): value is string => typeof value === "string")
+      : [],
+    notificationDepartmentGroups: Array.isArray(raw?.notificationDepartmentGroups)
+      ? raw.notificationDepartmentGroups.filter((value: unknown): value is string => typeof value === "string")
+      : [],
+  }
+}
+
 export async function fetchHistoryEntries(limitCount = 30, actorEmail?: string): Promise<ChangeHistoryEntry[]> {
-  const historyQ = query(collection(db, HISTORY_COLLECTION), orderBy("createdAt", "desc"), limit(Math.max(limitCount * 5, limitCount)))
+  const normalizedActorEmail = actorEmail ? normalizeEmail(actorEmail) : ""
+  const historyQ = normalizedActorEmail
+    ? query(
+        collection(db, HISTORY_COLLECTION),
+        where("actorEmail", "==", normalizedActorEmail),
+        orderBy("createdAt", "desc"),
+        limit(limitCount),
+      )
+    : query(collection(db, HISTORY_COLLECTION), orderBy("createdAt", "desc"), limit(limitCount))
   const snapshot = await getDocs(historyQ)
+  return snapshot.docs.map(mapHistoryDoc)
+}
 
-  const entries = snapshot.docs.map((docSnap) => {
-    const raw = docSnap.data() as any
-    return {
-      id: docSnap.id,
-      entityType: (toStringOrEmpty(raw?.entityType) as HistoryEntityType) || "batch",
-      action: (toStringOrEmpty(raw?.action) as HistoryActionType) || "batch_update",
-      actorEmail: toOptionalString(raw?.actorEmail),
-      entityId: toOptionalString(raw?.entityId),
-      projectId: toOptionalString(raw?.projectId),
-      before: (raw?.before as Record<string, unknown> | undefined) || undefined,
-      after: (raw?.after as Record<string, unknown> | undefined) || undefined,
-      batch: (raw?.batch as HistoryBatchItem[] | undefined) || undefined,
-      createdAt: raw?.createdAt?.toDate?.() || undefined,
-      source: (toOptionalString(raw?.source) as HistorySource | undefined) || undefined,
-    }
+export async function fetchNotificationHistoryEntries(
+  limitCount = 30,
+  filter: HistoryNotificationFilter = {},
+): Promise<ChangeHistoryEntry[]> {
+  const personKeys = buildPersonKeys(filter.personKeys || []).slice(0, 30)
+  const departmentGroups = (filter.departmentGroups || []).slice(0, 30)
+  const historyQueries: any[] = []
+
+  if (personKeys.length > 0) {
+    historyQueries.push(
+      query(
+        collection(db, HISTORY_COLLECTION),
+        where("notificationPersonKeys", "array-contains-any", personKeys),
+        orderBy("createdAt", "desc"),
+        limit(limitCount),
+      ),
+    )
+  }
+  if (departmentGroups.length > 0) {
+    historyQueries.push(
+      query(
+        collection(db, HISTORY_COLLECTION),
+        where("notificationDepartmentGroups", "array-contains-any", departmentGroups),
+        orderBy("createdAt", "desc"),
+        limit(limitCount),
+      ),
+    )
+  }
+  if (historyQueries.length === 0) return []
+
+  const snapshots = await Promise.all(historyQueries.map((historyQ) => getDocs(historyQ)))
+  const byId = new Map<string, ChangeHistoryEntry>()
+  snapshots.forEach((snapshot) => {
+    snapshot.docs.forEach((docSnap) => byId.set(docSnap.id, mapHistoryDoc(docSnap)))
   })
-
-  if (!actorEmail) return entries.slice(0, limitCount)
-
-  const normalizedActorEmail = normalizeEmail(actorEmail)
-  return entries
-    .filter((entry) => normalizeEmail(entry.actorEmail || "") === normalizedActorEmail)
+  return Array.from(byId.values())
+    .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0))
     .slice(0, limitCount)
 }
 

@@ -33,9 +33,11 @@ import { CategoryBadge, ProjectTypeBadge, StatusBadge } from "@/components/statu
 import { toast } from "sonner"
 import {
   addHistoryEntry as addStrategyHistoryEntry,
+  DEFAULT_DEPARTMENT_ORG_SETTINGS,
   DEFAULT_MY_PAGE_EDITABLE_FIELDS,
   deleteHistoryEntry as deleteStrategyHistoryEntry,
   fetchHistoryEntries as fetchStrategyHistoryEntries,
+  fetchNotificationHistoryEntries as fetchStrategyNotificationHistoryEntries,
   isUserOwnerOfTask,
   rollbackHistoryEntry as rollbackStrategyHistoryEntry,
   saveMyPageMemo,
@@ -43,9 +45,11 @@ import {
   saveMyPagePersonalTasks,
   saveMyPageTaskPreferences,
   subscribeCurrentUserProfile,
+  subscribeDepartmentOrgSettings,
   subscribeMyPageEditableFields,
   subscribeToData as subscribeStrategyData,
   updateTaskInDB as updateStrategyTaskInDB,
+  type DepartmentOrgSettings,
   type MyPageEditableFieldsSettings,
   type MyPagePersonalTask,
   type MyPageTaskPreference,
@@ -54,6 +58,7 @@ import {
   addHistoryEntry as addFaHistoryEntry,
   deleteHistoryEntry as deleteFaHistoryEntry,
   fetchHistoryEntries as fetchFaHistoryEntries,
+  fetchNotificationHistoryEntries as fetchFaNotificationHistoryEntries,
   rollbackHistoryEntry as rollbackFaHistoryEntry,
   subscribeToData as subscribeFaData,
   updateTaskInDB as updateFaTaskInDB,
@@ -62,6 +67,10 @@ import type { Project, Task, TaskStatus } from "@/lib/data"
 import { EditTaskDialog } from "@/components/edit-task-dialog"
 import { RecentChangesWidget, type RecentChangeEntry } from "@/components/recent-changes-widget"
 import { cn } from "@/lib/utils"
+import {
+  getLedDepartmentGroupsForAliases,
+  hasChangeNotificationScope,
+} from "@/lib/recent-change-visibility"
 
 type GroupedProject = {
   id: string
@@ -271,6 +280,7 @@ export default function MyPage() {
   const [expandedPanels, setExpandedPanels] = useState<MyPagePanel[]>([])
   const [myMemo, setMyMemo] = useState("")
   const [isSavingMemo, setIsSavingMemo] = useState(false)
+  const [departmentOrgSettings, setDepartmentOrgSettings] = useState<DepartmentOrgSettings>(DEFAULT_DEPARTMENT_ORG_SETTINGS)
   const [editableFieldsConfig, setEditableFieldsConfig] = useState<MyPageEditableFieldsSettings>([
     ...DEFAULT_MY_PAGE_EDITABLE_FIELDS,
   ])
@@ -279,10 +289,12 @@ export default function MyPage() {
     const unsubscribeStrategy = subscribeStrategyData(setStrategyProjects)
     const unsubscribeFa = subscribeFaData(setFaProjects)
     const unsubscribeEditableFields = subscribeMyPageEditableFields(setEditableFieldsConfig)
+    const unsubscribeDepartmentOrgSettings = subscribeDepartmentOrgSettings(setDepartmentOrgSettings)
     return () => {
       unsubscribeStrategy()
       unsubscribeFa()
       unsubscribeEditableFields()
+      unsubscribeDepartmentOrgSettings()
     }
   }, [])
 
@@ -318,47 +330,28 @@ export default function MyPage() {
     return [...toGrouped(strategyProjects, "전략사업부"), ...toGrouped(faProjects, "FA 사업부")]
   }, [aliases, strategyProjects, faProjects, taskPreferences])
 
-  const currentUserEmail = (user?.email || "").trim().toLowerCase()
-  const strategyPmProjectIds = useMemo(
-    () =>
-      new Set(
-        strategyProjects
-          .filter((project) => (project.pmEmail || "").trim().toLowerCase() === currentUserEmail)
-          .map((project) => project.id),
-      ),
-    [currentUserEmail, strategyProjects],
-  )
-  const faPmProjectIds = useMemo(
-    () =>
-      new Set(
-        faProjects
-          .filter((project) => (project.pmEmail || "").trim().toLowerCase() === currentUserEmail)
-          .map((project) => project.id),
-      ),
-    [currentUserEmail, faProjects],
+  const ledDepartmentGroups = useMemo(
+    () => getLedDepartmentGroupsForAliases(aliases, departmentOrgSettings),
+    [aliases, departmentOrgSettings],
   )
   const canViewAllRecentChanges = isAdmin || pagePermissions.recentChangesWidget
+  const canRollbackRecentChanges = isAdmin
   const canViewRecentChanges =
-    canViewAllRecentChanges || strategyPmProjectIds.size > 0 || faPmProjectIds.size > 0
+    canViewAllRecentChanges || hasChangeNotificationScope(aliases, ledDepartmentGroups)
 
   const loadVisibleRecentChanges = async (): Promise<RecentChangeEntry[]> => {
-    const [strategyEntries, faEntries] = await Promise.all([
-      fetchStrategyHistoryEntries(30),
-      fetchFaHistoryEntries(30),
-    ])
-
-    const filterByPm = (entry: RecentChangeEntry, pmProjectIds: Set<string>) => {
-      if (entry.projectId && pmProjectIds.has(entry.projectId)) return true
-      if (entry.entityType === "project" && entry.entityId && pmProjectIds.has(entry.entityId)) return true
-      return false
+    const historyFilter = {
+      personKeys: aliases,
+      departmentGroups: Array.from(ledDepartmentGroups),
     }
-
-    const visibleStrategy = canViewAllRecentChanges
-      ? strategyEntries
-      : strategyEntries.filter((entry) => filterByPm(entry, strategyPmProjectIds))
-    const visibleFa = canViewAllRecentChanges
-      ? faEntries
-      : faEntries.filter((entry) => filterByPm(entry, faPmProjectIds))
+    const [visibleStrategy, visibleFa] = await Promise.all(
+      canViewAllRecentChanges
+        ? [fetchStrategyHistoryEntries(50), fetchFaHistoryEntries(50)]
+        : [
+            fetchStrategyNotificationHistoryEntries(50, historyFilter),
+            fetchFaNotificationHistoryEntries(50, historyFilter),
+          ],
+    )
 
     return [
       ...visibleStrategy.map((entry) => ({
@@ -377,7 +370,7 @@ export default function MyPage() {
   }
 
   const rollbackVisibleRecentChange = async (entry: RecentChangeEntry) => {
-    if (!canViewAllRecentChanges) return
+    if (!canRollbackRecentChanges) return
     if (entry.id.startsWith("fa:")) {
       const rawId = entry.id.replace(/^fa:/, "")
       await rollbackFaHistoryEntry({ ...entry, id: rawId } as never)
@@ -566,6 +559,7 @@ export default function MyPage() {
           before: serializeTaskForHistory(item.task),
           after: serializeTaskForHistory(merged),
           actorEmail: user.email,
+          actorName: aliases[0] || user.email.split("@")[0] || undefined,
           source: "my-page",
         })
       } catch (historyError) {
@@ -1139,7 +1133,7 @@ export default function MyPage() {
           <section id="recent-changes" className="scroll-mt-6">
             <RecentChangesWidget
               loadEntries={loadVisibleRecentChanges}
-              rollbackEntry={canViewAllRecentChanges ? rollbackVisibleRecentChange : undefined}
+              rollbackEntry={canRollbackRecentChanges ? rollbackVisibleRecentChange : undefined}
               projects={[...strategyProjects, ...faProjects]}
               currentUserEmail={user?.email || undefined}
               title="최근 사용자 변경"
