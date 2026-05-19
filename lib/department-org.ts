@@ -133,6 +133,55 @@ export function getDepartmentOrgPersonNamesFromOrg(org: DepartmentOrg): string[]
   return Array.from(new Set(names.map((name) => name.trim())))
 }
 
+function normalizeOrgName(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function aliasesMatchOrgName(name: string | undefined, aliases: string[]): boolean {
+  const normalizedName = normalizeOrgName(name || "")
+  if (!normalizedName) return false
+  return aliases.some((rawAlias) => {
+    const alias = normalizeOrgName(rawAlias)
+    if (!alias) return false
+    return normalizedName === alias || normalizedName.includes(alias) || alias.includes(normalizedName)
+  })
+}
+
+/**
+ * Persons whose tasks the given user should see by default on the weekly board.
+ * - Department leader (org.leader) → every named person in that department
+ * - Team lead (member with title "팀장") → all members of that team
+ * - Anyone else → an empty set (caller falls back to the user's own aliases)
+ */
+export function getTeamScopePersonsForAliases(
+  aliases: string[],
+  orgChart: Record<OrgDepartmentGroup, DepartmentOrg>,
+): string[] {
+  const cleanedAliases = aliases.map((value) => value.trim()).filter(Boolean)
+  if (cleanedAliases.length === 0) return []
+
+  const persons = new Set<string>()
+
+  ;(Object.values(orgChart) as DepartmentOrg[]).forEach((org) => {
+    if (aliasesMatchOrgName(org.leader?.name, cleanedAliases)) {
+      getDepartmentOrgPersonNamesFromOrg(org).forEach((name) => persons.add(name))
+      return
+    }
+    org.teams.forEach((team) => {
+      const isTeamLead = team.members.some(
+        (member) => member.title === "팀장" && aliasesMatchOrgName(member.name, cleanedAliases),
+      )
+      if (isTeamLead) {
+        team.members.forEach((member) => {
+          if (member.name?.trim()) persons.add(member.name.trim())
+        })
+      }
+    })
+  })
+
+  return Array.from(persons)
+}
+
 export function getOrgTeamForPerson(
   person: string,
   preferredGroup?: OrgDepartmentGroup,

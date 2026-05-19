@@ -28,8 +28,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { CategoryBadge, ProjectTypeBadge, StatusBadge } from "@/components/status-badge"
 import type { Project, Task } from "@/lib/data"
-import { UNCLASSIFIED_TEAM_NAME, getOrgTeamForPerson } from "@/lib/department-org"
-import { cn } from "@/lib/utils"
+import { UNCLASSIFIED_TEAM_NAME, getOrgTeamForPerson, getTeamScopePersonsForAliases } from "@/lib/department-org"
+import { cn, keepIfShallowEqual } from "@/lib/utils"
 import { toast } from "sonner"
 import { CalendarDays, ChevronLeft, ChevronRight, Home, LogOut, Users } from "lucide-react"
 
@@ -231,6 +231,7 @@ export function WeeklyWorkBoard({
   const [hasUserSelectedPersonScope, setHasUserSelectedPersonScope] = useState(false)
   const [profileDepartment, setProfileDepartment] = useState<DepartmentPersonGroup | "">("")
   const [profileDefaultPerson, setProfileDefaultPerson] = useState("")
+  const [profileTaskAliases, setProfileTaskAliases] = useState<string[]>([])
   const [profilePersonalTasks, setProfilePersonalTasks] = useState<MyPagePersonalTask[]>([])
   const [isProfileLoaded, setIsProfileLoaded] = useState(false)
   const [selectedTaskItem, setSelectedTaskItem] = useState<WeeklyTaskItem | null>(null)
@@ -265,6 +266,7 @@ export function WeeklyWorkBoard({
     const email = user?.email || ""
     setProfileDepartment("")
     setProfileDefaultPerson("")
+    setProfileTaskAliases([])
     setProfilePersonalTasks([])
     setIsProfileLoaded(false)
     setHasUserSelectedPersonScope(false)
@@ -277,8 +279,10 @@ export function WeeklyWorkBoard({
 
     const unsubscribe = subscribeCurrentUserProfile(email, (profile) => {
       setProfileDepartment(profile?.department || "")
-      const preferred = (profile?.taskAliases || [])[0]?.trim() || ""
+      const aliases = (profile?.taskAliases || []).map((value) => value.trim()).filter(Boolean)
+      const preferred = aliases[0] || ""
       setProfileDefaultPerson(preferred)
+      setProfileTaskAliases((prev) => keepIfShallowEqual(prev, aliases))
       setProfilePersonalTasks(profile?.myPagePersonalTasks || [])
       setIsProfileLoaded(true)
     })
@@ -393,10 +397,23 @@ export function WeeklyWorkBoard({
 
   const allowedPersonSet = useMemo(() => new Set(allowedPersons), [allowedPersons])
 
+  const teamScopePersons = useMemo(
+    () => {
+      const aliases = profileTaskAliases.length > 0 ? profileTaskAliases : profileDefaultPerson ? [profileDefaultPerson] : []
+      return getTeamScopePersonsForAliases(aliases, departmentOrgSettings)
+    },
+    [departmentOrgSettings, profileDefaultPerson, profileTaskAliases],
+  )
+
   useEffect(() => {
-    const scopedPersons =
-      selectedPerson === "all" && profileDefaultPerson && !hasUserSelectedPersonScope
+    const defaultScope = teamScopePersons.length > 0
+      ? teamScopePersons
+      : profileDefaultPerson
         ? [profileDefaultPerson]
+        : []
+    const scopedPersons =
+      selectedPerson === "all" && defaultScope.length > 0 && !hasUserSelectedPersonScope
+        ? defaultScope
         : selectedPerson === "all"
           ? allowedPersons
           : [selectedPerson]
@@ -422,7 +439,7 @@ export function WeeklyWorkBoard({
           }),
     )
     return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
-  }, [allowedPersons, hasUserSelectedPersonScope, profileDefaultPerson, selectedDataSources, selectedPerson])
+  }, [allowedPersons, hasUserSelectedPersonScope, profileDefaultPerson, selectedDataSources, selectedPerson, teamScopePersons])
 
   const weeklyTasks = useMemo<WeeklyTaskItem[]>(() => {
     const profilePerson = profileDefaultPerson || user?.email?.split("@")[0] || "개인"

@@ -4,7 +4,16 @@
       "Bash(xargs wc -l)",
       "PowerShell(pnpm install 2>&1 | Tee-Object -Variable installLog; Write-Output \"===EXIT=$LASTEXITCODE===\")",
       "Bash(ls -la .env* 2>/dev/null; ls -la ../../../.env* 2>/dev/null)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(ls ../../../node_modules/next/package.json 2>&1 || echo \"not in parent\")",
+      "Bash(pnpm install *)",
+      "Bash(ls -a .env* 2>&1 | head -5; echo \"---\"; ls -a ../../../ | grep -i env)",
+      "Bash(cp ../../../.env.local .env.local)",
+      "Bash(git check-ignore *)",
+      "Bash(git add *)",
+      "Bash(gh auth *)",
+      "Bash(python -c \"import firebase_admin; print\\('installed'\\)\")",
+      "Bash(python scripts/backfill_task_person_keys.py --service-account \"C:\\\\Users\\\\User\\\\Downloads\\\\waff-work-manager-firebase-adminsdk-fbsvc-2cd6669f86.json\")"
     ]
   }
 }
