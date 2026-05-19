@@ -21,6 +21,7 @@ interface ProjectListProps {
   defaultTaskDepartment?: string
   searchQuery: string
   canEdit?: boolean
+  canDeleteTask?: (task: Task) => boolean
   pmOptions?: ProjectPmOption[]
   onAddTask: (task: Task) => void
   onEditTask: (task: Task) => void
@@ -37,6 +38,7 @@ export function ProjectList({
   defaultTaskDepartment = "전략",
   searchQuery,
   canEdit = true,
+  canDeleteTask,
   pmOptions = [],
   onAddTask,
   onEditTask,
@@ -263,6 +265,7 @@ export function ProjectList({
                           depth={0}
                           defaultTaskDepartment={defaultTaskDepartment}
                           canEdit={canEdit}
+                          canDeleteTask={canDeleteTask}
                           onEditTask={onEditTask}
                           onDeleteTask={onDeleteTask}
                           onAddTask={onAddTask}
@@ -285,6 +288,7 @@ function RecursiveTaskRow({
   depth,
   defaultTaskDepartment = "전략",
   canEdit = true,
+  canDeleteTask,
   onEditTask,
   onDeleteTask,
   onAddTask,
@@ -293,6 +297,7 @@ function RecursiveTaskRow({
   depth: number
   defaultTaskDepartment?: string
   canEdit?: boolean
+  canDeleteTask?: (task: Task) => boolean
   onEditTask: (task: Task) => void
   onDeleteTask: (taskId: string, projectId: string) => void
   onAddTask: (task: Task) => void
@@ -300,6 +305,7 @@ function RecursiveTaskRow({
   const [isExpanded, setIsExpanded] = useState(true)
   const hasSubTasks = task.subTasks && task.subTasks.length > 0
   const depthPrefix = depth >= 3 ? "- " : depth >= 2 ? "• " : ""
+  const canDelete = canEdit || canDeleteTask?.(task) === true
 
   return (
     <>
@@ -356,21 +362,23 @@ function RecursiveTaskRow({
           <span className="text-[10px] tabular-nums text-muted-foreground">{task.manDays > 0 ? `${task.manDays}일` : "-"}</span>
         </td>
         <td className="px-2 py-2.5 text-center">
-          {canEdit && (
+          {(canEdit || canDelete) && (
             <div className="flex items-center justify-center gap-1">
-              <EditTaskDialog task={task} onEditTask={onEditTask} defaultDepartment={defaultTaskDepartment} />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                onClick={() => {
-                  if (confirm("이 업무(하위 업무 포함)를 삭제하시겠습니까?")) {
-                    onDeleteTask(task.id, task.projectId)
-                  }
-                }}
-              >
-                <Trash2 className="h-3 w-3" />
-              </Button>
+              {canEdit && <EditTaskDialog task={task} onEditTask={onEditTask} defaultDepartment={defaultTaskDepartment} />}
+              {canDelete && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                  onClick={() => {
+                    if (confirm("이 업무(하위 업무 포함)를 삭제하시겠습니까?")) {
+                      onDeleteTask(task.id, task.projectId)
+                    }
+                  }}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              )}
             </div>
           )}
         </td>
@@ -383,6 +391,7 @@ function RecursiveTaskRow({
             depth={depth + 1}
             defaultTaskDepartment={defaultTaskDepartment}
             canEdit={canEdit}
+            canDeleteTask={canDeleteTask}
             onEditTask={onEditTask}
             onDeleteTask={onDeleteTask}
             onAddTask={onAddTask}

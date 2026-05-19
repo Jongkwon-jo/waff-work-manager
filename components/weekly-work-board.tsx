@@ -86,6 +86,7 @@ export type WeeklyWorkDataSource = {
   departmentGroup: DepartmentPersonGroup
   managementHref: string
   subscribeToData: (callback: (projects: Project[]) => void) => () => void
+  subscribeScopedToData?: (personKeys: string[], callback: (projects: Project[]) => void) => () => void
 }
 
 function getWeeklyStatusBarClass(status: Task["status"]) {
@@ -227,6 +228,7 @@ export function WeeklyWorkBoard({
   const [selectedDepartment, setSelectedDepartment] = useState<DepartmentPersonGroup | "all">("all")
   const [selectedTeam, setSelectedTeam] = useState("all")
   const [selectedPerson, setSelectedPerson] = useState("all")
+  const [hasUserSelectedPersonScope, setHasUserSelectedPersonScope] = useState(false)
   const [profileDepartment, setProfileDepartment] = useState<DepartmentPersonGroup | "">("")
   const [profileDefaultPerson, setProfileDefaultPerson] = useState("")
   const [profilePersonalTasks, setProfilePersonalTasks] = useState<MyPagePersonalTask[]>([])
@@ -265,6 +267,7 @@ export function WeeklyWorkBoard({
     setProfileDefaultPerson("")
     setProfilePersonalTasks([])
     setIsProfileLoaded(false)
+    setHasUserSelectedPersonScope(false)
     hasAppliedProfileDepartmentRef.current = false
     hasAppliedProfileDefaultRef.current = false
     if (!email) {
@@ -328,19 +331,6 @@ export function WeeklyWorkBoard({
     [dataSources, isProfileLoaded, selectedDepartment, user?.email],
   )
 
-  useEffect(() => {
-    const allowedSourceIds = new Set(selectedDataSources.map((source) => source.id))
-    setProjectsBySource((prev) =>
-      Object.fromEntries(Object.entries(prev).filter(([sourceId]) => allowedSourceIds.has(sourceId))),
-    )
-    const unsubscribes = selectedDataSources.map((source) =>
-      source.subscribeToData((projects) => {
-        setProjectsBySource((prev) => ({ ...prev, [source.id]: projects }))
-      }),
-    )
-    return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
-  }, [selectedDataSources])
-
   const allAllowedPersons = useMemo(
     () => {
       const people = selectedDataSources.flatMap((source) => departmentPersonSettings[source.departmentGroup] || [])
@@ -402,6 +392,37 @@ export function WeeklyWorkBoard({
   )
 
   const allowedPersonSet = useMemo(() => new Set(allowedPersons), [allowedPersons])
+
+  useEffect(() => {
+    const scopedPersons =
+      selectedPerson === "all" && profileDefaultPerson && !hasUserSelectedPersonScope
+        ? [profileDefaultPerson]
+        : selectedPerson === "all"
+          ? allowedPersons
+          : [selectedPerson]
+    const queryPersons = scopedPersons.filter((person) => person && person !== "all")
+    const allowedSourceIds = new Set(selectedDataSources.map((source) => source.id))
+
+    setProjectsBySource((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([sourceId]) => allowedSourceIds.has(sourceId))),
+    )
+
+    if (queryPersons.length === 0) {
+      setProjectsBySource({})
+      return
+    }
+
+    const unsubscribes = selectedDataSources.map((source) =>
+      source.subscribeScopedToData
+        ? source.subscribeScopedToData(queryPersons, (projects) => {
+            setProjectsBySource((prev) => ({ ...prev, [source.id]: projects }))
+          })
+        : source.subscribeToData((projects) => {
+        setProjectsBySource((prev) => ({ ...prev, [source.id]: projects }))
+          }),
+    )
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
+  }, [allowedPersons, hasUserSelectedPersonScope, profileDefaultPerson, selectedDataSources, selectedPerson])
 
   const weeklyTasks = useMemo<WeeklyTaskItem[]>(() => {
     const profilePerson = profileDefaultPerson || user?.email?.split("@")[0] || "개인"
@@ -780,7 +801,13 @@ export function WeeklyWorkBoard({
                     ))}
                   </SelectContent>
                 </Select>
-	              <Select value={selectedPerson} onValueChange={setSelectedPerson}>
+	              <Select
+                  value={selectedPerson}
+                  onValueChange={(value) => {
+                    setHasUserSelectedPersonScope(true)
+                    setSelectedPerson(value)
+                  }}
+                >
 	                <SelectTrigger className="h-10 w-full bg-white">
 	                  <SelectValue placeholder="담당자 선택" />
 	                </SelectTrigger>

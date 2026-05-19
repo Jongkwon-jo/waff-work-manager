@@ -2,8 +2,11 @@
 
 import { WeeklyWorkBoard, type WeeklyWorkDataSource } from "@/components/weekly-work-board"
 import { subscribeToData as subscribeStrategyData } from "@/lib/firestore-service"
+import { subscribeProjectsWithTasksByPersonKeys as subscribeStrategyScopedData } from "@/lib/firestore-service"
 import { subscribeToData as subscribeFaData } from "@/lib/firestore-service-fa"
+import { subscribeProjectsWithTasksByPersonKeys as subscribeFaScopedData } from "@/lib/firestore-service-fa"
 import { subscribeToData as subscribeIctData } from "@/lib/firestore-service-ict"
+import { subscribeProjectsWithTasksByPersonKeys as subscribeIctScopedData } from "@/lib/firestore-service-ict"
 
 const ALL_WEEKLY_DATA_SOURCES: WeeklyWorkDataSource[] = [
   {
@@ -12,6 +15,7 @@ const ALL_WEEKLY_DATA_SOURCES: WeeklyWorkDataSource[] = [
     departmentGroup: "전략기획",
     managementHref: "/work-management",
     subscribeToData: subscribeStrategyData,
+    subscribeScopedToData: subscribeStrategyScopedData,
   },
   {
     id: "fa",
@@ -19,6 +23,7 @@ const ALL_WEEKLY_DATA_SOURCES: WeeklyWorkDataSource[] = [
     departmentGroup: "FA",
     managementHref: "/fa-work-management",
     subscribeToData: subscribeFaData,
+    subscribeScopedToData: subscribeFaScopedData,
   },
   {
     id: "ict",
@@ -26,6 +31,7 @@ const ALL_WEEKLY_DATA_SOURCES: WeeklyWorkDataSource[] = [
     departmentGroup: "ICT",
     managementHref: "/ict-work-management",
     subscribeToData: subscribeIctData,
+    subscribeScopedToData: subscribeIctScopedData,
   },
 ]
 

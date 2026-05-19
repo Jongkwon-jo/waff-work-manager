@@ -55,6 +55,7 @@ interface GanttViewProps {
   pmOptions?: ProjectPmOption[]
   searchQuery: string
   canEdit?: boolean
+  canDeleteTask?: (task: Task) => boolean
   onAddProject: (project: Project) => void
   onEditProject: (project: Project) => void
   onAddTask: (task: Task) => void
@@ -389,6 +390,7 @@ export function GanttView({
   pmOptions = [],
   searchQuery,
   canEdit = true,
+  canDeleteTask,
   onAddProject,
   onEditProject,
   onAddTask,
@@ -448,6 +450,7 @@ export function GanttView({
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(700)
   const [isDetailColumnsOpen, setIsDetailColumnsOpen] = useState(false)
+  const canDeleteTaskItem = useCallback((task: Task) => canEdit || canDeleteTask?.(task) === true, [canEdit, canDeleteTask])
   const [recentlyAddedTaskId, setRecentlyAddedTaskId] = useState<string | null>(null)
   const [timelineScrollLeft, setTimelineScrollLeft] = useState(0)
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
@@ -1962,6 +1965,7 @@ export function GanttView({
         setDisplayMonthDate={setDisplayMonthDate}
         handleDisplayMonthMove={handleDisplayMonthMove}
         canEdit={canEdit}
+        canDeleteTask={canDeleteTaskItem}
         onAddProject={onAddProject}
         onEditProject={onEditProject}
         onEditTask={onEditTask}
@@ -2840,7 +2844,7 @@ export function GanttView({
                                   />
                                 )}
 
-                                {canEdit && (
+                                {canDeleteTaskItem(task) && (
                                   <Button
                                     variant="ghost"
                                     size="icon"
@@ -3105,6 +3109,7 @@ interface MobileGanttViewProps {
   setDisplayMonthDate: (date: Date) => void
   handleDisplayMonthMove: (offset: number) => void
   canEdit: boolean
+  canDeleteTask: (task: Task) => boolean
   onAddProject: (project: Project) => void
   onEditProject: (project: Project) => void
   onEditTask: (task: Task) => void
@@ -3140,6 +3145,7 @@ function MobileGanttView({
   setDisplayMonthDate,
   handleDisplayMonthMove,
   canEdit,
+  canDeleteTask,
   onAddProject,
   onEditProject,
   onEditTask,
@@ -3589,6 +3595,22 @@ function MobileGanttView({
                         >
                           {task.status}
                         </span>
+                      )}
+                      {canDeleteTask(task) && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            if (confirm("이 업무(하위 업무 포함)를 삭제하시겠습니까?")) {
+                              onDeleteTask(task.id, task.projectId)
+                            }
+                          }}
+                          aria-label="업무 삭제"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       )}
                     </div>
 

@@ -47,7 +47,7 @@ import {
   subscribeCurrentUserProfile,
   subscribeDepartmentOrgSettings,
   subscribeMyPageEditableFields,
-  subscribeToData as subscribeStrategyData,
+  subscribeProjectsWithTasksByPersonKeys as subscribeStrategyProjectsByPersonKeys,
   updateTaskInDB as updateStrategyTaskInDB,
   type DepartmentOrgSettings,
   type MyPageEditableFieldsSettings,
@@ -60,7 +60,7 @@ import {
   fetchHistoryEntries as fetchFaHistoryEntries,
   fetchNotificationHistoryEntries as fetchFaNotificationHistoryEntries,
   rollbackHistoryEntry as rollbackFaHistoryEntry,
-  subscribeToData as subscribeFaData,
+  subscribeProjectsWithTasksByPersonKeys as subscribeFaProjectsByPersonKeys,
   updateTaskInDB as updateFaTaskInDB,
 } from "@/lib/firestore-service-fa"
 import type { Project, Task, TaskStatus } from "@/lib/data"
@@ -111,6 +111,7 @@ const serializeTaskForHistory = (task: Task) => {
     category: task.category,
     department: task.department,
     person: task.person,
+    personKeys: task.personKeys,
     startDate: task.startDate,
     endDate: task.endDate,
     status: task.status,
@@ -286,13 +287,9 @@ export default function MyPage() {
   ])
 
   useEffect(() => {
-    const unsubscribeStrategy = subscribeStrategyData(setStrategyProjects)
-    const unsubscribeFa = subscribeFaData(setFaProjects)
     const unsubscribeEditableFields = subscribeMyPageEditableFields(setEditableFieldsConfig)
     const unsubscribeDepartmentOrgSettings = subscribeDepartmentOrgSettings(setDepartmentOrgSettings)
     return () => {
-      unsubscribeStrategy()
-      unsubscribeFa()
       unsubscribeEditableFields()
       unsubscribeDepartmentOrgSettings()
     }
@@ -309,6 +306,21 @@ export default function MyPage() {
     })
     return () => unsubscribe()
   }, [user])
+
+  useEffect(() => {
+    if (!user?.email || aliases.length === 0) {
+      setStrategyProjects([])
+      setFaProjects([])
+      return
+    }
+
+    const unsubscribeStrategy = subscribeStrategyProjectsByPersonKeys(aliases, setStrategyProjects)
+    const unsubscribeFa = subscribeFaProjectsByPersonKeys(aliases, setFaProjects)
+    return () => {
+      unsubscribeStrategy()
+      unsubscribeFa()
+    }
+  }, [aliases, user?.email])
 
   const groupedProjects = useMemo<GroupedProject[]>(() => {
     const toGrouped = (projects: Project[], departmentPage: GroupedProject["departmentPage"]) =>
