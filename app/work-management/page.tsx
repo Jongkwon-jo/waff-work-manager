@@ -50,7 +50,7 @@ import { ProjectList } from "@/components/project-list"
 import { GanttView } from "@/components/gantt-view"
 import { ProjectCardView } from "@/components/project-card-view"
 import { Bell, CalendarDays, Building2, Home, List, BarChart3, LayoutGrid, RotateCcw, History, ChevronDown, ChevronRight, LogOut, UserRoundSearch } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn, keepIfShallowEqual } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { toast } from "sonner"
@@ -222,11 +222,11 @@ export default function StrategyWorkManagementPage() {
     const unsubscribe = subscribeCurrentUserProfile(user.email, (profile) => {
       const accountDefaultPerson = (profile?.taskAliases || [])[0]?.trim() || ""
       setDefaultTaskPerson(accountDefaultPerson)
-      setCurrentTaskAliases(profile?.taskAliases || [])
+      setCurrentTaskAliases((prev) => keepIfShallowEqual(prev, profile?.taskAliases || []))
       setCurrentProfileEmail(normalizedProfileEmail)
       setIsCurrentProfileReady(true)
-      setHiddenOwnerOptions(profile?.hiddenOwnerOptions || [])
-      setSeenRecentChangeIds(profile?.seenRecentChangeIds || [])
+      setHiddenOwnerOptions((prev) => keepIfShallowEqual(prev, profile?.hiddenOwnerOptions || []))
+      setSeenRecentChangeIds((prev) => keepIfShallowEqual(prev, profile?.seenRecentChangeIds || []))
     })
 
     return () => unsubscribe()
