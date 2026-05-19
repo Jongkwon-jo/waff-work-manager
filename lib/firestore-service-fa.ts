@@ -4,6 +4,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -29,6 +30,7 @@ import {
   buildPersonKeys,
   type HistoryNotificationFilter,
 } from "./history-notification"
+import { buildTaskPersonKeys, buildTaskPersonKeysFromValues } from "./task-person-keys"
 
 const PROJECTS_COLLECTION = "fa_projects"
 const TASKS_COLLECTION = "fa_tasks"
@@ -177,6 +179,9 @@ function normalizeTask(raw: any): Task {
     task: toStringOrEmpty(raw?.task) || toStringOrEmpty(raw?.name) || "이름 없음",
     memo: toOptionalString(raw?.memo) ?? toOptionalString(raw?.note) ?? toOptionalString(raw?.notes),
     person: toStringOrEmpty(raw?.person),
+    personKeys: Array.isArray(raw?.personKeys)
+      ? raw.personKeys.filter((value: unknown): value is string => typeof value === "string")
+      : buildTaskPersonKeys(toStringOrEmpty(raw?.person)),
     department: toStringOrEmpty(raw?.department),
     status: normalizeTaskStatus(toStringOrEmpty(raw?.status)),
     category: (toStringOrEmpty(raw?.category) as Task["category"]) || "일반",
@@ -195,6 +200,8 @@ function normalizeTask(raw: any): Task {
             uploadedBy: toOptionalString(raw.completionPhoto.uploadedBy),
           }
         : undefined,
+    createdByEmail: toOptionalString(raw?.createdByEmail ?? raw?.created_by_email),
+    createdByName: toOptionalString(raw?.createdByName ?? raw?.created_by_name),
     isSubTask: Boolean(raw?.isSubTask ?? raw?.is_sub_task ?? parentId),
     isHidden: toBooleanOr(raw?.isHidden ?? raw?.is_hidden, false),
     displayOrder: toNumberOr(raw?.displayOrder, Number.MAX_SAFE_INTEGER),
@@ -252,6 +259,216 @@ function buildProjectTree(projectsData: any[], allTasksData: any[]): Project[] {
       createdAt: projectData.createdAt?.toDate?.() || new Date(0),
     } as Project
   })
+}
+
+function chunkValues<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let i = 0; i < values.length; i += size) chunks.push(values.slice(i, i + size))
+  return chunks
+}
+
+async function fetchParentTaskChain(tasksById: Map<string, any>) {
+  const pendingParentIds = new Set<string>()
+  tasksById.forEach((task) => {
+    const parentId = toOptionalString(task.parentId)
+    if (parentId && !tasksById.has(parentId)) pendingParentIds.add(parentId)
+  })
+
+  while (pendingParentIds.size > 0) {
+    const parentId = pendingParentIds.values().next().value as string
+    pendingParentIds.delete(parentId)
+    if (tasksById.has(parentId)) continue
+
+    const parentSnap = await getDoc(doc(db, TASKS_COLLECTION, parentId))
+    if (!parentSnap.exists()) continue
+
+    const parentTask: any = { ...parentSnap.data(), id: parentSnap.id }
+    tasksById.set(parentSnap.id, parentTask)
+
+    const nextParentId = toOptionalString(parentTask.parentId)
+    if (nextParentId && !tasksById.has(nextParentId)) pendingParentIds.add(nextParentId)
+  }
+}
+
+async function fetchProjectsForTasks(tasks: any[]) {
+  const projectIds = Array.from(new Set(tasks.map((task) => toStringOrEmpty(task.projectId)).filter(Boolean)))
+  const projectsData = await Promise.all(
+    projectIds.map(async (projectId) => {
+      const projectSnap = await getDoc(doc(db, PROJECTS_COLLECTION, projectId))
+      return projectSnap.exists() ? { ...projectSnap.data(), id: projectSnap.id } : null
+    }),
+  )
+  return projectsData.filter((project): project is any => Boolean(project))
+}
+
+export function subscribeProjectsWithTasksByPersonKeys(
+  personKeys: string[],
+  callback: (projects: Project[]) => void,
+) {
+  const queryKeys = buildTaskPersonKeysFromValues(personKeys).slice(0, 300)
+  if (queryKeys.length === 0) {
+    callback([])
+    return () => {}
+  }
+
+  const chunks = chunkValues(queryKeys, 30)
+  const taskGroups = new Map<number, any[]>()
+  let disposed = false
+
+  const notify = async () => {
+    const tasksById = new Map<string, any>()
+    taskGroups.forEach((tasks) => {
+      tasks.forEach((task) => tasksById.set(task.id, task))
+    })
+
+    await fetchParentTaskChain(tasksById)
+    const allTasks = Array.from(tasksById.values())
+    const projectsData = await fetchProjectsForTasks(allTasks)
+    if (!disposed) callback(buildProjectTree(projectsData, allTasks))
+  }
+
+  const unsubscribes = chunks.map((chunk, index) =>
+    onSnapshot(
+      query(collection(db, TASKS_COLLECTION), where("personKeys", "array-contains-any", chunk)),
+      (snapshot) => {
+        taskGroups.set(index, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+        void notify().catch((error) => {
+          console.error("Scoped FA data snapshot error:", error)
+          if (!disposed) callback([])
+        })
+      },
+      (error) => {
+        console.error("Scoped FA tasks snapshot error:", error)
+      },
+    ),
+  )
+
+  return () => {
+    disposed = true
+    unsubscribes.forEach((unsubscribe) => unsubscribe())
+  }
+}
+
+export type ScheduleScopeOptions = {
+  personKeys?: string[]
+  pmEmail?: string
+  includeAll?: boolean
+}
+
+export function subscribeProjectsWithTasksByScheduleScope(
+  scope: ScheduleScopeOptions,
+  callback: (projects: Project[]) => void,
+) {
+  if (scope.includeAll) return subscribeToData(callback)
+
+  const queryKeys = buildTaskPersonKeysFromValues(scope.personKeys || []).slice(0, 300)
+  const normalizedPmEmail = normalizeEmail(scope.pmEmail || "")
+  if (queryKeys.length === 0 && !normalizedPmEmail) {
+    callback([])
+    return () => {}
+  }
+
+  const taskGroups = new Map<string, any[]>()
+  const pmProjectsById = new Map<string, any>()
+  let pmTaskUnsubscribes: Array<() => void> = []
+  let disposed = false
+  let notifyToken = 0
+
+  const notify = async () => {
+    const currentToken = ++notifyToken
+    const tasksById = new Map<string, any>()
+    taskGroups.forEach((tasks) => {
+      tasks.forEach((task) => tasksById.set(task.id, task))
+    })
+
+    await fetchParentTaskChain(tasksById)
+    const allTasks = Array.from(tasksById.values())
+    const relatedProjects = await fetchProjectsForTasks(allTasks)
+    const projectsById = new Map<string, any>()
+    relatedProjects.forEach((project) => projectsById.set(toStringOrEmpty(project.id), project))
+    pmProjectsById.forEach((project, projectId) => projectsById.set(projectId, project))
+
+    if (!disposed && currentToken === notifyToken) {
+      callback(buildProjectTree(Array.from(projectsById.values()), allTasks))
+    }
+  }
+
+  const resetPmTaskSubscriptions = (projectIds: string[]) => {
+    pmTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+    pmTaskUnsubscribes = []
+    Array.from(taskGroups.keys())
+      .filter((key) => key.startsWith("pm:"))
+      .forEach((key) => taskGroups.delete(key))
+
+    const chunks = chunkValues(projectIds, 30)
+    if (chunks.length === 0) {
+      void notify().catch((error) => {
+        console.error("Schedule PM FA data snapshot error:", error)
+        if (!disposed) callback([])
+      })
+      return
+    }
+
+    pmTaskUnsubscribes = chunks.map((chunk, index) =>
+      onSnapshot(
+        query(collection(db, TASKS_COLLECTION), where("projectId", "in", chunk)),
+        (snapshot) => {
+          taskGroups.set(`pm:${index}`, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+          void notify().catch((error) => {
+            console.error("Schedule PM FA data snapshot error:", error)
+            if (!disposed) callback([])
+          })
+        },
+        (error) => {
+          console.error("Schedule PM FA tasks snapshot error:", error)
+        },
+      ),
+    )
+  }
+
+  const unsubscribes: Array<() => void> = []
+
+  chunkValues(queryKeys, 30).forEach((chunk, index) => {
+    unsubscribes.push(
+      onSnapshot(
+        query(collection(db, TASKS_COLLECTION), where("personKeys", "array-contains-any", chunk)),
+        (snapshot) => {
+          taskGroups.set(`person:${index}`, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+          void notify().catch((error) => {
+            console.error("Schedule assignee FA data snapshot error:", error)
+            if (!disposed) callback([])
+          })
+        },
+        (error) => {
+          console.error("Schedule assignee FA tasks snapshot error:", error)
+        },
+      ),
+    )
+  })
+
+  if (normalizedPmEmail) {
+    unsubscribes.push(
+      onSnapshot(
+        query(collection(db, PROJECTS_COLLECTION), where("pmEmail", "==", normalizedPmEmail)),
+        (snapshot) => {
+          pmProjectsById.clear()
+          snapshot.docs.forEach((docSnap) => {
+            pmProjectsById.set(docSnap.id, { ...docSnap.data(), id: docSnap.id })
+          })
+          resetPmTaskSubscriptions(snapshot.docs.map((docSnap) => docSnap.id))
+        },
+        (error) => {
+          console.error("Schedule PM FA projects snapshot error:", error)
+        },
+      ),
+    )
+  }
+
+  return () => {
+    disposed = true
+    unsubscribes.forEach((unsubscribe) => unsubscribe())
+    pmTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+  }
 }
 
 export function subscribeToData(callback: (projects: Project[]) => void) {
@@ -333,6 +550,7 @@ export async function deleteProjectFromDB(projectId: string): Promise<void> {
 export async function addTaskToDB(task: Omit<Task, "id">): Promise<string> {
   const docRef = await addDoc(collection(db, TASKS_COLLECTION), {
     ...task,
+    personKeys: buildTaskPersonKeys(task.person || ""),
     displayOrder: typeof task.displayOrder === "number" ? task.displayOrder : Date.now(),
   })
   return docRef.id
@@ -340,7 +558,11 @@ export async function addTaskToDB(task: Omit<Task, "id">): Promise<string> {
 
 export async function updateTaskInDB(taskId: string, updates: Omit<Partial<Task>, "parentId"> & { parentId?: string | null }): Promise<void> {
   const taskRef = doc(db, TASKS_COLLECTION, taskId)
-  await updateDoc(taskRef, updates)
+  const payload = {
+    ...updates,
+    ...(typeof updates.person === "string" ? { personKeys: buildTaskPersonKeys(updates.person) } : {}),
+  }
+  await updateDoc(taskRef, payload)
 }
 
 export async function deleteTaskFromDB(taskId: string): Promise<void> {

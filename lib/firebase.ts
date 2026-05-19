@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
@@ -16,7 +16,20 @@ const firebaseConfig = {
 // Initialize Firebase (Singleton pattern for Next.js)
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+const db =
+  typeof window === "undefined"
+    ? getFirestore(app)
+    : (() => {
+        try {
+          return initializeFirestore(app, {
+            localCache: persistentLocalCache({
+              tabManager: persistentMultipleTabManager(),
+            }),
+          });
+        } catch {
+          return getFirestore(app);
+        }
+      })();
 const storage = getStorage(app);
 
 export { app, auth, db, storage };

@@ -85,6 +85,22 @@ def parse_bool(value: str) -> Optional[bool]:
     raise ValueError(f"Invalid bool value: {value}")
 
 
+def build_task_person_keys(person: str) -> List[str]:
+    keys = set()
+    for raw_value in person.split(","):
+        normalized = " ".join(raw_value.strip().lower().split())
+        if not normalized:
+            continue
+        keys.add(normalized)
+        keys.add(normalized.replace(" ", ""))
+        if "@" in normalized:
+            local = normalized.split("@", 1)[0]
+            keys.add(local)
+            keys.add(" ".join(local.replace(".", " ").replace("_", " ").replace("-", " ").split()))
+            keys.add(local.replace(".", "").replace("_", "").replace("-", "").replace(" ", ""))
+    return sorted(k for k in keys if k)
+
+
 def load_rows(file_path: pathlib.Path) -> List[RowItem]:
     suffix = file_path.suffix.lower()
 
@@ -212,6 +228,7 @@ def import_data(db, rows: List[RowItem]) -> None:
             "category": v["task_category"] or "일반",
             "department": v["task_department"] or "전략",
             "person": v["task_person"] or "",
+            "personKeys": build_task_person_keys(v["task_person"] or ""),
             "startDate": v["task_start_date"] or "01월 01일",
             "endDate": v["task_end_date"] or "01월 01일",
             "status": v["task_status"] or "대기",

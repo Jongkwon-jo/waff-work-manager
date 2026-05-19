@@ -7,7 +7,7 @@ import { signOut } from "firebase/auth"
 import type { Project, ProjectPmOption, Task, TaskStatus } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import {
-  subscribeToData,
+  subscribeProjectsWithTasksByScheduleScope,
   addProjectToDB,
   updateProjectInDB,
   deleteProjectFromDB,
@@ -36,7 +36,7 @@ import {
   saveUserHiddenOwnerOptions,
   subscribeCurrentUserProfile,
   subscribeDepartmentOrgSettings,
-  subscribeUserProfiles,
+  fetchUserProfiles,
   saveSeenRecentChangeIds,
   subscribeGlobalSchedules,
   type DepartmentOrgSettings,
@@ -90,27 +90,15 @@ export default function FaWorkManagementPage() {
   const [ganttDetailPanelWidth, setGanttDetailPanelWidth] = useState<number | null>(null)
   const [defaultTaskPerson, setDefaultTaskPerson] = useState("")
   const [currentTaskAliases, setCurrentTaskAliases] = useState<string[]>([])
+  const [currentProfileEmail, setCurrentProfileEmail] = useState("")
+  const [isCurrentProfileReady, setIsCurrentProfileReady] = useState(false)
   const [hiddenOwnerOptions, setHiddenOwnerOptions] = useState<string[]>([])
   const [userProfiles, setUserProfiles] = useState<UserProfile[]>([])
   const [seenRecentChangeIds, setSeenRecentChangeIds] = useState<string[]>([])
   const [departmentOrgSettings, setDepartmentOrgSettings] = useState<DepartmentOrgSettings>(DEFAULT_DEPARTMENT_ORG_SETTINGS)
+  const [isDepartmentOrgReady, setIsDepartmentOrgReady] = useState(false)
   const [globalSchedules, setGlobalSchedules] = useState<GlobalSchedule[]>([])
   const deferredSearchQuery = useDeferredValue(searchQuery)
-
-  useEffect(() => {
-    if (!user) {
-      setProjectList([])
-      setLoading(false)
-      return
-    }
-
-    setLoading(true)
-    const unsubscribe = subscribeToData((data) => {
-      setProjectList(data)
-      setLoading(false)
-    })
-    return () => unsubscribe()
-  }, [user])
 
   useEffect(() => {
     if (!user) {
@@ -126,16 +114,31 @@ export default function FaWorkManagementPage() {
       setUserProfiles([])
       return
     }
-    const unsubscribe = subscribeUserProfiles(setUserProfiles)
-    return () => unsubscribe()
+    let disposed = false
+    void fetchUserProfiles()
+      .then((profiles) => {
+        if (!disposed) setUserProfiles(profiles)
+      })
+      .catch((error) => {
+        console.error("User profiles fetch failed:", error)
+        if (!disposed) setUserProfiles([])
+      })
+    return () => {
+      disposed = true
+    }
   }, [user, canEdit])
 
   useEffect(() => {
     if (!user) {
       setDepartmentOrgSettings(DEFAULT_DEPARTMENT_ORG_SETTINGS)
+      setIsDepartmentOrgReady(false)
       return
     }
-    const unsubscribe = subscribeDepartmentOrgSettings(setDepartmentOrgSettings)
+    setIsDepartmentOrgReady(false)
+    const unsubscribe = subscribeDepartmentOrgSettings((settings) => {
+      setDepartmentOrgSettings(settings)
+      setIsDepartmentOrgReady(true)
+    })
     return () => unsubscribe()
   }, [user])
 
@@ -202,15 +205,22 @@ export default function FaWorkManagementPage() {
     if (!user?.email) {
       setDefaultTaskPerson("")
       setCurrentTaskAliases([])
+      setCurrentProfileEmail("")
+      setIsCurrentProfileReady(false)
       setHiddenOwnerOptions([])
       setSeenRecentChangeIds([])
       return
     }
 
+    const normalizedProfileEmail = user.email.trim().toLowerCase()
+    setCurrentProfileEmail("")
+    setIsCurrentProfileReady(false)
     const unsubscribe = subscribeCurrentUserProfile(user.email, (profile) => {
       const accountDefaultPerson = (profile?.taskAliases || [])[0]?.trim() || ""
       setDefaultTaskPerson(accountDefaultPerson)
       setCurrentTaskAliases(profile?.taskAliases || [])
+      setCurrentProfileEmail(normalizedProfileEmail)
+      setIsCurrentProfileReady(true)
       setHiddenOwnerOptions(profile?.hiddenOwnerOptions || [])
       setSeenRecentChangeIds(profile?.seenRecentChangeIds || [])
     })
@@ -230,10 +240,13 @@ export default function FaWorkManagementPage() {
       category: task.category,
       department: task.department,
       person: task.person,
+      personKeys: task.personKeys,
       startDate: task.startDate,
       endDate: task.endDate,
       status: task.status,
       manDays: task.manDays,
+      createdByEmail: task.createdByEmail,
+      createdByName: task.createdByName,
       isSubTask: task.isSubTask,
       isHidden: task.isHidden,
       depth: task.depth,
@@ -253,6 +266,15 @@ export default function FaWorkManagementPage() {
 
   const flattenTaskRecords = (tasks: Task[]): Array<{ id: string; data: Record<string, unknown> }> =>
     tasks.flatMap((task) => [{ id: task.id, data: serializeTaskData(task) }, ...flattenTaskRecords(task.subTasks || [])])
+
+  const isTaskCreatedByCurrentUser = (task?: Task) => {
+    const currentEmail = user?.email?.trim().toLowerCase()
+    if (!currentEmail || !task) return false
+    if (task.createdByEmail?.trim().toLowerCase() === currentEmail) return true
+    return historyEntries.some(
+      (entry) => entry.entityType === "task" && entry.action === "create" && entry.entityId === task.id,
+    )
+  }
 
   const recordHistory = async (entry: Omit<ChangeHistoryEntry, "id" | "createdAt">) => {
     try {
@@ -656,6 +678,75 @@ export default function FaWorkManagementPage() {
     () => getLedDepartmentGroupsForAliases(changeNotificationAliases, departmentOrgSettings),
     [changeNotificationAliases, departmentOrgSettings],
   )
+  const scheduleScopeAliases = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...currentTaskAliases,
+            defaultTaskPerson,
+            currentUserEmail,
+            currentUserEmail.split("@")[0] || "",
+            user?.displayName || "",
+          ]
+            .map((value) => value.trim())
+            .filter(Boolean),
+        ),
+      ),
+    [currentTaskAliases, currentUserEmail, defaultTaskPerson, user?.displayName],
+  )
+  const ledScheduleDepartmentGroups = useMemo(
+    () => getLedDepartmentGroupsForAliases(scheduleScopeAliases, departmentOrgSettings),
+    [departmentOrgSettings, scheduleScopeAliases],
+  )
+  const canViewFullSchedule = isAdmin || ledScheduleDepartmentGroups.has("FA")
+  const emptyStateTitle = canViewFullSchedule ? "표시할 데이터가 없습니다" : "조회 가능한 업무가 없습니다"
+  const emptyStateDescription = canViewFullSchedule
+    ? "새로운 프로젝트를 추가하여 업무 관리를 시작해 보세요."
+    : "PM 또는 업무 담당자로 지정된 업무만 표시됩니다."
+
+  useEffect(() => {
+    if (!user) {
+      setProjectList([])
+      setLoading(false)
+      return
+    }
+    if (!currentUserEmail) {
+      setProjectList([])
+      setLoading(false)
+      return
+    }
+
+    const isProfileForCurrentUser = Boolean(currentUserEmail) && currentProfileEmail === currentUserEmail
+    if (!canViewFullSchedule && (!isCurrentProfileReady || !isProfileForCurrentUser || !isDepartmentOrgReady)) {
+      setProjectList([])
+      setLoading(true)
+      return
+    }
+
+    setLoading(true)
+    const unsubscribe = subscribeProjectsWithTasksByScheduleScope(
+      {
+        includeAll: canViewFullSchedule,
+        personKeys: scheduleScopeAliases,
+        pmEmail: currentUserEmail,
+      },
+      (data) => {
+        setProjectList(data)
+        setLoading(false)
+      },
+    )
+
+    return () => unsubscribe()
+  }, [
+    user,
+    canViewFullSchedule,
+    currentProfileEmail,
+    currentUserEmail,
+    isCurrentProfileReady,
+    isDepartmentOrgReady,
+    scheduleScopeAliases,
+  ])
 
   const canViewAllRecentChanges = isAdmin || pagePermissions.recentChangesWidget
   const canRollbackRecentChanges = isAdmin
@@ -712,7 +803,7 @@ export default function FaWorkManagementPage() {
   }, [highlightedTaskId])
 
   useEffect(() => {
-    if (!user || !canViewRecentChanges) {
+    if (!user || !canViewRecentChanges || !isRecentChangesOpen) {
       setVisibleHistoryEntries([])
       return
     }
@@ -729,7 +820,7 @@ export default function FaWorkManagementPage() {
     return () => {
       disposed = true
     }
-  }, [user, canViewRecentChanges, canViewAllRecentChanges, changeNotificationAliases, ledDepartmentGroups])
+  }, [user, canViewRecentChanges, canViewAllRecentChanges, changeNotificationAliases, ledDepartmentGroups, isRecentChangesOpen])
 
   const handleAddProject = async (newProject: Project) => {
     try {
@@ -847,6 +938,8 @@ export default function FaWorkManagementPage() {
     const taskWithDepth: Task = {
       ...newTask,
       depth: computedDepth,
+      createdByEmail: user?.email?.trim().toLowerCase() || undefined,
+      createdByName: defaultTaskPerson || undefined,
       subTasks: newTask.subTasks || [],
     }
 
@@ -932,6 +1025,10 @@ export default function FaWorkManagementPage() {
   const handleDeleteTask = async (taskId: string, projectId: string) => {
     try {
       const beforeTask = allTasksFlat.find((t) => t.id === taskId)
+      if (!canEdit && !isTaskCreatedByCurrentUser(beforeTask)) {
+        toast.error("작성자 본인의 업무만 삭제할 수 있습니다.")
+        return
+      }
       await deleteTaskFromDB(taskId)
       if (beforeTask) {
         await recordHistory({
@@ -987,7 +1084,15 @@ export default function FaWorkManagementPage() {
     if (uniqueIds.length === 0) return
 
     const taskMap = new Map(allTasksFlat.map((task) => [task.id, task]))
-    const selectedSet = new Set(uniqueIds.filter((id) => taskMap.has(id)))
+    const allowedIds = uniqueIds.filter((id) => {
+      const task = taskMap.get(id)
+      return Boolean(task && (canEdit || isTaskCreatedByCurrentUser(task)))
+    })
+    if (allowedIds.length === 0) {
+      toast.error("작성자 본인의 업무만 삭제할 수 있습니다.")
+      return
+    }
+    const selectedSet = new Set(allowedIds)
     const rootIds = Array.from(selectedSet).filter((id) => {
       let parentId = taskMap.get(id)?.parentId
       while (parentId) {
@@ -1061,6 +1166,8 @@ export default function FaWorkManagementPage() {
           ...(taskData as Record<string, unknown>),
           parentId: resolvedParentId,
           isSubTask: Boolean(resolvedParentId),
+          createdByEmail: user?.email?.trim().toLowerCase() || undefined,
+          createdByName: defaultTaskPerson || undefined,
         }) as Omit<Task, "id">
 
         if (sanitizedTaskData.parentId === undefined) {
@@ -1606,8 +1713,8 @@ export default function FaWorkManagementPage() {
             {projectList.length === 0 ? (
               <div className="flex h-[40vh] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/50 text-center p-8">
                 <Building2 className="h-10 w-10 text-muted-foreground/50 mb-4" />
-                <h3 className="text-lg font-semibold">표시할 데이터가 없습니다</h3>
-                <p className="text-sm text-muted-foreground mt-2">새로운 프로젝트를 추가하여 업무 관리를 시작해 보세요.</p>
+                <h3 className="text-lg font-semibold">{emptyStateTitle}</h3>
+                <p className="text-sm text-muted-foreground mt-2">{emptyStateDescription}</p>
               </div>
             ) : viewMode === "list" ? (
               <ProjectList
@@ -1618,6 +1725,7 @@ export default function FaWorkManagementPage() {
                 defaultTaskDepartment="FA"
                 searchQuery={deferredSearchQuery}
                 canEdit={canEdit}
+                canDeleteTask={isTaskCreatedByCurrentUser}
                 pmOptions={pmOptions}
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
@@ -1643,6 +1751,7 @@ export default function FaWorkManagementPage() {
                 pmOptions={pmOptions}
                 searchQuery={deferredSearchQuery}
                 canEdit={canEdit}
+                canDeleteTask={isTaskCreatedByCurrentUser}
                 onAddProject={handleAddProject}
                 onEditProject={handleEditProject}
                 onAddTask={handleAddTask}

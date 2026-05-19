@@ -40,11 +40,14 @@ export interface Task {
   category: TaskCategory
   department: string
   person: string
+  personKeys?: string[]
   startDate: string
   endDate: string
   status: TaskStatus
   manDays: number
   completionPhoto?: TaskCompletionPhoto
+  createdByEmail?: string
+  createdByName?: string
   isSubTask?: boolean
   subTasks?: Task[]
 }
