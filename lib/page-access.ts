@@ -13,6 +13,7 @@ export const PAGE_PERMISSIONS = [
   { key: "ictWeeklyWork", label: "ICT 주간업무로드 현황", path: "/weekly-work" },
   { key: "gptTest", label: "GPT 테스트", path: "/gpt-test" },
   { key: "mbtiPage", label: "MBTI", path: "/mbti" },
+  { key: "dailyReport", label: "Daily Report", path: "/daily-report" },
   { key: "recentChangesWidget", label: "최근 사용자 변경 위젯", path: "" },
 ] as const
 
@@ -33,6 +34,7 @@ export const DEFAULT_PAGE_PERMISSIONS: UserPagePermissions = {
   ictWeeklyWork: true,
   gptTest: true,
   mbtiPage: true,
+  dailyReport: false,
   recentChangesWidget: false,
 }
 
@@ -81,6 +83,8 @@ export function normalizePermissions(raw?: Partial<Record<string, unknown>>): Us
       typeof raw?.ictWeeklyWork === "boolean" ? raw.ictWeeklyWork : DEFAULT_PAGE_PERMISSIONS.ictWeeklyWork,
     gptTest: typeof raw?.gptTest === "boolean" ? raw.gptTest : DEFAULT_PAGE_PERMISSIONS.gptTest,
     mbtiPage: typeof raw?.mbtiPage === "boolean" ? raw.mbtiPage : DEFAULT_PAGE_PERMISSIONS.mbtiPage,
+    dailyReport:
+      typeof raw?.dailyReport === "boolean" ? raw.dailyReport : DEFAULT_PAGE_PERMISSIONS.dailyReport,
     recentChangesWidget:
       typeof raw?.recentChangesWidget === "boolean"
         ? raw.recentChangesWidget
@@ -98,6 +102,7 @@ export function resolvePathToPermissionKey(pathname: string): PagePermissionKey 
   if (pathname.startsWith("/fa-work-management")) return "faWorkManagement"
   if (pathname.startsWith("/gpt-test")) return "gptTest"
   if (pathname.startsWith("/mbti")) return "mbtiPage"
+  if (pathname.startsWith("/daily-report")) return "dailyReport"
   return null
 }
 

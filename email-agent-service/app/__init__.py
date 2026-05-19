@@ -1,1 +1,0 @@
-"""Email agent FastAPI service."""

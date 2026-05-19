@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs wc -l)",
+      "PowerShell(pnpm install 2>&1 | Tee-Object -Variable installLog; Write-Output \"===EXIT=$LASTEXITCODE===\")",
+      "Bash(ls -la .env* 2>/dev/null; ls -la ../../../.env* 2>/dev/null)",
+      "mcp__Claude_Preview__preview_start"
+    ]
+  }
+}
