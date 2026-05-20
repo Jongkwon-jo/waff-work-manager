@@ -3991,26 +3991,39 @@ function OwnerMultiSelect({
   onChange: (value: string) => void
 }) {
   const [newOwner, setNewOwner] = useState("")
-  const selected = parseOwners(value)
-  const allOptions = Array.from(new Set([...options, ...selected])).filter(Boolean)
+  const [selected, setSelected] = useState<string[]>(() => parseOwners(value))
+  const allOptions = useMemo(
+    () => Array.from(new Set([...options, ...selected])).filter(Boolean),
+    [options, selected],
+  )
+
+  useEffect(() => {
+    setSelected(parseOwners(value))
+  }, [value])
+
+  const commitSelectedOwners = (owners: string[]) => {
+    const nextSelected = parseOwners(joinOwners(owners))
+    setSelected(nextSelected)
+    onChange(joinOwners(nextSelected))
+  }
 
   const toggleOwner = (owner: string) => {
     const selectedSet = new Set(selected)
     if (selectedSet.has(owner)) selectedSet.delete(owner)
     else selectedSet.add(owner)
-    onChange(joinOwners(Array.from(selectedSet)))
+    commitSelectedOwners(Array.from(selectedSet))
   }
 
   const removeOwner = (owner: string) => {
     const selectedSet = new Set(selected)
     selectedSet.delete(owner)
-    onChange(joinOwners(Array.from(selectedSet)))
+    commitSelectedOwners(Array.from(selectedSet))
   }
 
   const addCustomOwner = () => {
     const trimmed = newOwner.trim()
     if (!trimmed) return
-    onChange(joinOwners([...selected, trimmed]))
+    commitSelectedOwners([...selected, trimmed])
     setNewOwner("")
   }
 
