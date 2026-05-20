@@ -489,6 +489,7 @@ export function subscribeProjectsWithTasksByPersonKeys(
   const chunks = chunkValues(queryKeys, 30)
   const ictTaskGroups = new Map<number, any[]>()
   const strategyTaskGroups = new Map<number, any[]>()
+  let hiddenLinkedStrategyProjectIds: string[] = []
   let disposed = false
 
   const notify = async () => {
@@ -498,7 +499,7 @@ export function subscribeProjectsWithTasksByPersonKeys(
 
     const strategyTasksById = new Map<string, any>()
     strategyTaskGroups.forEach((tasks) => tasks.forEach((task) => strategyTasksById.set(task.id, task)))
-    await fetchParentTaskChain(strategyTasksById, STRATEGY_TASKS_COLLECTION, STRATEGY_SOURCE_PREFIX)
+    await fetchRawParentTaskChain(strategyTasksById, STRATEGY_TASKS_COLLECTION)
 
     const ictTasks = Array.from(ictTasksById.values())
     const strategyTasks = Array.from(strategyTasksById.values())
@@ -510,18 +511,32 @@ export function subscribeProjectsWithTasksByPersonKeys(
     const strategyProjects = await fetchProjectsForTaskIds(
       strategyTasks.map((task) => toStringOrEmpty(task.projectId)),
       STRATEGY_PROJECTS_COLLECTION,
-      STRATEGY_SOURCE_PREFIX,
     )
 
-    if (!disposed) callback(buildProjectTree([...ictProjects, ...strategyProjects], [...ictTasks, ...strategyTasks]))
+    if (!disposed) {
+      callback(buildIctScheduleProjectTree(ictProjects, ictTasks, strategyProjects, strategyTasks, hiddenLinkedStrategyProjectIds))
+    }
   }
 
-  const unsubscribes = chunks.flatMap((chunk, index) => {
+  const unsubscribes: Array<() => void> = [
+    onSnapshot(
+      doc(db, SETTINGS_COLLECTION, LINKED_STRATEGY_PROJECT_VISIBILITY_DOC),
+      (snapshot) => {
+        hiddenLinkedStrategyProjectIds = normalizeHiddenLinkedStrategyProjectIds(
+          snapshot.data()?.[HIDDEN_LINKED_STRATEGY_PROJECT_IDS_FIELD],
+        )
+        void notify().catch((error) => console.error("Scoped ICT visibility snapshot error:", error))
+      },
+      (error) => console.error("Scoped ICT visibility snapshot error:", error),
+    ),
+  ]
+
+  chunks.forEach((chunk, index) => {
     const ictConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
     if (!includeHidden) ictConstraints.push(where("isHidden", "==", false))
     const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
     if (!includeHidden) strategyConstraints.push(where("isHidden", "==", false))
-    return [
+    unsubscribes.push(
       onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...ictConstraints),
         (snapshot) => {
@@ -548,23 +563,13 @@ export function subscribeProjectsWithTasksByPersonKeys(
             index,
             snapshot.docs
               .filter((docSnap) => isIctTask(docSnap.data()))
-              .map((docSnap) => ({
-                ...docSnap.data(),
-                id: `${STRATEGY_SOURCE_PREFIX}${docSnap.id}`,
-                parentId: toOptionalString(docSnap.data().parentId)
-                  ? `${STRATEGY_SOURCE_PREFIX}${toStringOrEmpty(docSnap.data().parentId)}`
-                  : undefined,
-                projectId: `${STRATEGY_SOURCE_PREFIX}${toStringOrEmpty(docSnap.data().projectId)}`,
-                sourceSchedule: "strategy",
-                originalTaskId: docSnap.id,
-                originalProjectId: toStringOrEmpty(docSnap.data().projectId),
-              })),
+              .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })),
           )
           void notify().catch((error) => console.error("Scoped linked strategy data snapshot error:", error))
         },
         (error) => console.error("Scoped linked strategy tasks snapshot error:", error),
       ),
-    ]
+    )
   })
 
   return () => {
@@ -576,6 +581,7 @@ export function subscribeProjectsWithTasksByPersonKeys(
 export type ScheduleScopeOptions = {
   personKeys?: string[]
   pmEmail?: string
+  creatorEmail?: string
   includeAll?: boolean
   includeHidden?: boolean
 }
@@ -589,7 +595,8 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
   const queryKeys = buildTaskPersonKeysFromValues(scope.personKeys || []).slice(0, 300)
   const normalizedPmEmail = normalizeEmail(scope.pmEmail || "")
-  if (queryKeys.length === 0 && !normalizedPmEmail) {
+  const normalizedCreatorEmail = normalizeEmail(scope.creatorEmail || "")
+  if (queryKeys.length === 0 && !normalizedPmEmail && !normalizedCreatorEmail) {
     callback([])
     return () => {}
   }
@@ -787,6 +794,48 @@ export function subscribeProjectsWithTasksByScheduleScope(
       ),
     )
   })
+
+  if (normalizedCreatorEmail) {
+    unsubscribes.push(
+      onSnapshot(
+        query(collection(db, TASKS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail)),
+        (snapshot) => {
+          ictTaskGroups.set(
+            "creator",
+            snapshot.docs.map(mapIctTaskDoc).filter((task) => includeHidden || !toBooleanOr(task.isHidden, false)),
+          )
+          void notify().catch((error) => {
+            console.error("Schedule creator ICT data snapshot error:", error)
+            if (!disposed) callback([])
+          })
+        },
+        (error) => {
+          console.error("Schedule creator ICT tasks snapshot error:", error)
+        },
+      ),
+      onSnapshot(
+        query(collection(db, STRATEGY_TASKS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail)),
+        (snapshot) => {
+          strategyTaskGroups.set(
+            "creator",
+            snapshot.docs
+              .filter((docSnap) => {
+                const data = docSnap.data()
+                return isIctTask(data) && (includeHidden || !toBooleanOr(data.isHidden, false))
+              })
+              .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })),
+          )
+          void notify().catch((error) => {
+            console.error("Schedule creator linked strategy data snapshot error:", error)
+            if (!disposed) callback([])
+          })
+        },
+        (error) => {
+          console.error("Schedule creator linked strategy tasks snapshot error:", error)
+        },
+      ),
+    )
+  }
 
   if (normalizedPmEmail) {
     const ictProjectConstraints: any[] = [where("pmEmail", "==", normalizedPmEmail)]

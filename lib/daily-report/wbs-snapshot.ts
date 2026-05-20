@@ -33,12 +33,15 @@ export interface SlimSnapshot {
     truncated: number;
     aliasFiltered: boolean;
     aliases: string[];
+    windowDays: number;
+    sinceIso: string | null;
   };
 }
 
 export interface BuildSlimSnapshotOptions {
   aliases?: string[];
   maxTotalTasks?: number;
+  windowDays?: number;
 }
 
 const flattenTasks = (tasks: Task[] | undefined): Task[] => {
@@ -58,20 +61,23 @@ const isRelevantTask = (
   task: Task,
   todayIso: string,
   aliases: string[],
+  windowDays: number,
 ): boolean => {
   if (task.isHidden) return false;
   // 사용자 alias 가 주어졌으면 그 사용자가 담당자(person)로 들어간 태스크만 통과
   if (aliases.length > 0 && !personMatchesAliases(task.person, aliases)) {
     return false;
   }
+  if (!isTaskInWindow(task, todayIso, windowDays)) return false;
+
+  const startDate = normalizeDateToIso(task.startDate, todayIso);
   const status = task.status;
   if (status === "완료") {
-    // 최근 7일 이내 완료만 reference 후보로 유지
-    return !task.endDate || task.endDate >= addDaysIso(todayIso, -7);
+    return true;
   }
   if (status === "예정") {
-    // 60일 이내 시작 예정만 (먼 미래는 제외)
-    return !task.startDate || task.startDate <= addDaysIso(todayIso, 60);
+    // 전체 기간 조회일 때만 먼 미래 예정 업무를 제한한다.
+    return !startDate || windowDays > 0 || startDate <= addDaysIso(todayIso, 60);
   }
   // 진행 / 보류 / 미정 → 모두 유지
   return true;
@@ -104,6 +110,37 @@ const normalizeDateToIso = (
   return "";
 };
 
+const normalizeWindowDays = (value: unknown): number => {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return 30;
+  const rounded = Math.floor(parsed);
+  if (rounded <= 0) return 0;
+  return Math.min(365, rounded);
+};
+
+const getWindowSinceIso = (todayIso: string, windowDays: number): string | null =>
+  windowDays > 0 ? addDaysIso(todayIso, -windowDays + 1) : null;
+
+const isTaskInWindow = (
+  task: Task,
+  todayIso: string,
+  windowDays: number,
+): boolean => {
+  const sinceIso = getWindowSinceIso(todayIso, windowDays);
+  if (!sinceIso) return true;
+
+  const startDate = normalizeDateToIso(task.startDate, todayIso);
+  const endDate = normalizeDateToIso(task.endDate, todayIso);
+  if (startDate && endDate) {
+    const from = startDate <= endDate ? startDate : endDate;
+    const to = startDate <= endDate ? endDate : startDate;
+    return to >= sinceIso && from <= todayIso;
+  }
+
+  const singleDate = endDate || startDate;
+  return Boolean(singleDate && singleDate >= sinceIso && singleDate <= todayIso);
+};
+
 const toSlimTask = (task: Task, todayIso: string): SlimTask => ({
   id: task.id,
   title: task.task ?? "",
@@ -120,10 +157,11 @@ const toSlimProject = (
   project: Project,
   todayIso: string,
   aliases: string[],
+  windowDays: number,
 ): SlimProject | null => {
   if (project.isHidden) return null;
   const flat = flattenTasks(project.tasks);
-  const filtered = flat.filter((t) => isRelevantTask(t, todayIso, aliases));
+  const filtered = flat.filter((t) => isRelevantTask(t, todayIso, aliases, windowDays));
   if (filtered.length === 0) return null;
   return {
     id: project.id,
@@ -146,9 +184,11 @@ export function buildSlimSnapshot(
 ): SlimSnapshot {
   const aliases = (options.aliases ?? []).map((a) => a.trim()).filter(Boolean);
   const maxTotalTasks = options.maxTotalTasks ?? 400;
+  const windowDays = normalizeWindowDays(options.windowDays ?? 30);
+  const sinceIso = getWindowSinceIso(todayIso, windowDays);
   const slim = (list: Project[]): SlimProject[] =>
     list
-      .map((p) => toSlimProject(p, todayIso, aliases))
+      .map((p) => toSlimProject(p, todayIso, aliases, windowDays))
       .filter((p): p is SlimProject => p !== null);
 
   const snapshot: SlimSnapshot = {
@@ -162,6 +202,8 @@ export function buildSlimSnapshot(
       truncated: 0,
       aliasFiltered: aliases.length > 0,
       aliases,
+      windowDays,
+      sinceIso,
     },
   };
 
@@ -212,6 +254,8 @@ export function buildSlimSnapshot(
     truncated,
     aliasFiltered: aliases.length > 0,
     aliases,
+    windowDays,
+    sinceIso,
   };
 
   return snapshot;

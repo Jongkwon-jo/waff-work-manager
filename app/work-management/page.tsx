@@ -742,6 +742,7 @@ export default function StrategyWorkManagementPage() {
         includeAll: canViewFullSchedule,
         personKeys: scheduleScopeAliases,
         pmEmail: currentUserEmail,
+        creatorEmail: currentUserEmail,
         includeHidden: includeHiddenInQuery,
       },
       (data) => {

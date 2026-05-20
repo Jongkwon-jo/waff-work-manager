@@ -46,6 +46,10 @@ export interface KakaoOptions {
   windowDays: number;
 }
 
+export interface WbsOptions {
+  windowDays: number;
+}
+
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -60,6 +64,8 @@ interface SettingsDialogProps {
   imapStoredState: ImapStoredState;
   onSaveImapConfig: () => Promise<void>;
   onDeleteImapConfig: () => Promise<void>;
+  wbsOptions: WbsOptions;
+  onWbsOptionsChange: (next: WbsOptions) => void;
   kakaoOptions: KakaoOptions;
   onKakaoOptionsChange: (next: KakaoOptions) => void;
 }
@@ -104,6 +110,8 @@ export function SettingsDialog({
   imapStoredState,
   onSaveImapConfig,
   onDeleteImapConfig,
+  wbsOptions,
+  onWbsOptionsChange,
   kakaoOptions,
   onKakaoOptionsChange,
 }: SettingsDialogProps) {
@@ -313,6 +321,29 @@ export function SettingsDialog({
 
         {agent === "wbs" && (
           <div className="space-y-6">
+            <section className="space-y-2">
+              <div className="text-sm font-medium">분석 기간</div>
+              <div className="flex flex-wrap gap-1.5">
+                {WINDOW_OPTIONS.map((opt) => {
+                  const active = wbsOptions.windowDays === opt.value;
+                  return (
+                    <Button
+                      key={opt.value}
+                      type="button"
+                      size="sm"
+                      variant={active ? "default" : "outline"}
+                      onClick={() => onWbsOptionsChange({ windowDays: opt.value })}
+                    >
+                      {opt.label}
+                    </Button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                기본값은 최근 30일입니다. WBS Agent에는 선택한 기간과 겹치는 담당 업무만 전달됩니다.
+              </p>
+            </section>
+
             <section className="space-y-3">
               <div className="text-sm font-medium">OpenAI API Key</div>
               <p className="text-xs text-muted-foreground">

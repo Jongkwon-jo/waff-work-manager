@@ -19,6 +19,7 @@ import {
   type ImapStoredState,
   type KakaoOptions,
   type SettingsAgentKey,
+  type WbsOptions,
 } from "@/components/daily-report/settings-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -83,6 +84,9 @@ export default function DailyReportPage() {
   const [kakaoFile, setKakaoFile] = useState<File | null>(null);
   const [kakaoOptions, setKakaoOptions] = useState<KakaoOptions>({
     windowDays: 14,
+  });
+  const [wbsOptions, setWbsOptions] = useState<WbsOptions>({
+    windowDays: 30,
   });
   const [apiKeyState, setApiKeyState] = useState<ApiKeyState>({
     hasKey: false,
@@ -340,7 +344,11 @@ export default function DailyReportPage() {
       const res = await fetch("/api/daily-report/agents/wbs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actorEmail, runId }),
+        body: JSON.stringify({
+          actorEmail,
+          runId,
+          options: { windowDays: wbsOptions.windowDays },
+        }),
       });
       const data = (await res.json()) as {
         runId?: string;
@@ -361,7 +369,7 @@ export default function DailyReportPage() {
     } finally {
       setBusy("wbs", false);
     }
-  }, [actorEmail, runId]);
+  }, [actorEmail, runId, wbsOptions.windowDays]);
 
   const handleRunEmail = useCallback(async () => {
     if (!actorEmail) {
@@ -504,6 +512,7 @@ export default function DailyReportPage() {
       JSON.stringify({
         actorEmail,
         runId,
+        wbsOptions: { windowDays: wbsOptions.windowDays },
         imap: buildImapForApi(imap),
         kakaoOptions: { windowDays: kakaoOptions.windowDays },
       }),
@@ -560,7 +569,7 @@ export default function DailyReportPage() {
     } finally {
       setRunning(false);
     }
-  }, [actorEmail, imap, kakaoFile, kakaoOptions.windowDays, runId]);
+  }, [actorEmail, imap, kakaoFile, kakaoOptions.windowDays, runId, wbsOptions.windowDays]);
 
   const handleMoveItem = useCallback(
     (itemId: string, section: DailyReportSection) => {
@@ -740,6 +749,8 @@ export default function DailyReportPage() {
         imapStoredState={imapStoredState}
         onSaveImapConfig={handleSaveImapConfig}
         onDeleteImapConfig={handleDeleteImapConfig}
+        wbsOptions={wbsOptions}
+        onWbsOptionsChange={setWbsOptions}
         kakaoOptions={kakaoOptions}
         onKakaoOptionsChange={setKakaoOptions}
       />

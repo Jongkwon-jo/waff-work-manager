@@ -17,6 +17,10 @@ import { fetchUserTaskAliases } from "@/lib/daily-report/server-aliases";
 interface WbsRequest {
   actorEmail: string;
   runId?: string;
+  options?: {
+    windowDays?: number;
+    maxTotalTasks?: number;
+  };
 }
 
 export const runtime = "nodejs";
@@ -57,6 +61,8 @@ export async function POST(request: Request) {
     const aliases = await fetchUserTaskAliases(actorEmail);
     const snapshot = buildSlimSnapshot(todayIso, strategy, fa, ict, {
       aliases,
+      windowDays: body.options?.windowDays,
+      maxTotalTasks: body.options?.maxTotalTasks,
     });
     const apiKey = await fetchUserOpenAiApiKey(actorEmail);
     const result = await runWbsAgent({
@@ -85,6 +91,8 @@ export async function POST(request: Request) {
         truncated: snapshot.totals.truncated,
         aliasFiltered: snapshot.totals.aliasFiltered,
         aliasCount: snapshot.totals.aliases.length,
+        windowDays: snapshot.totals.windowDays,
+        sinceIso: snapshot.totals.sinceIso,
         items: result.items.length,
       },
     });

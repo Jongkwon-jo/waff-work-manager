@@ -18,6 +18,7 @@ const SYSTEM_PROMPT = `당신은 WorkHub의 WBS 분석가다.
 중요: 입력 snapshot 은 이미 ownerEmail 사용자가 담당자(Task.person 필드 매칭)로 배정된 태스크만 포함하도록 사전 필터링되어 있다.
 결과는 항상 "본인 담당 업무" 관점에서 작성한다.
 snapshot.totals.aliasFiltered = true 면 alias 매칭이 적용된 상태이며, totals.aliases 는 매칭에 사용된 사용자의 별칭 후보다.
+snapshot.totals.windowDays > 0 이면 WBS 데이터는 todayIso 기준 최근 windowDays일(sinceIso 포함) 범위와 겹치는 태스크만 포함한다.
 snapshot 의 모든 날짜 필드(todayIso, startDate, endDate)는 이미 ISO 8601 "YYYY-MM-DD" 포맷으로 정규화돼 있다. 별도 파싱/변환 없이 문자열 비교로 시점을 판단해도 정확하다.
 
 입력 JSON 구조:
@@ -26,7 +27,7 @@ snapshot 의 모든 날짜 필드(todayIso, startDate, endDate)는 이미 ISO 86
   ownerEmail: string,
   snapshot: {
     todayIso, strategy[], fa[], ict[],
-    totals: { projects, tasks, truncated, aliasFiltered, aliases }
+    totals: { projects, tasks, truncated, aliasFiltered, aliases, windowDays, sinceIso }
   }
 }
 각 부서 배열(strategy/fa/ict)의 원소는 SlimProject { id, name, type, pmEmail, tasks: SlimTask[] }.

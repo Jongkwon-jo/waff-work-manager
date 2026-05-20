@@ -763,6 +763,7 @@ export default function IctWorkManagementPage() {
         includeAll: canViewFullSchedule,
         personKeys: scheduleScopeAliases,
         pmEmail: currentUserEmail,
+        creatorEmail: currentUserEmail,
         includeHidden: includeHiddenInQuery,
       },
       (data) => {

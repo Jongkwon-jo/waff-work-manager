@@ -731,6 +731,7 @@ export default function FaWorkManagementPage() {
         includeAll: canViewFullSchedule,
         personKeys: scheduleScopeAliases,
         pmEmail: currentUserEmail,
+        creatorEmail: currentUserEmail,
         includeHidden: includeHiddenInQuery,
       },
       (data) => {

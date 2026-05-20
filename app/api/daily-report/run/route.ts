@@ -55,6 +55,10 @@ interface RunPayload {
     windowDays?: number;
     maxGroups?: number;
   };
+  wbsOptions?: {
+    windowDays?: number;
+    maxTotalTasks?: number;
+  };
 }
 
 export async function POST(request: Request) {
@@ -125,6 +129,8 @@ export async function POST(request: Request) {
       ]);
       wbsSnapshot = buildSlimSnapshot(todayIso, strategy, fa, ict, {
         aliases,
+        windowDays: payload.wbsOptions?.windowDays,
+        maxTotalTasks: payload.wbsOptions?.maxTotalTasks,
       });
       sse.send({
         phase: "wbs_loaded",

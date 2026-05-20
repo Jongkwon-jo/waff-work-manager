@@ -365,6 +365,7 @@ export function subscribeProjectsWithTasksByPersonKeys(
 export type ScheduleScopeOptions = {
   personKeys?: string[]
   pmEmail?: string
+  creatorEmail?: string
   includeAll?: boolean
   includeHidden?: boolean
 }
@@ -378,7 +379,8 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
   const queryKeys = buildTaskPersonKeysFromValues(scope.personKeys || []).slice(0, 300)
   const normalizedPmEmail = normalizeEmail(scope.pmEmail || "")
-  if (queryKeys.length === 0 && !normalizedPmEmail) {
+  const normalizedCreatorEmail = normalizeEmail(scope.creatorEmail || "")
+  if (queryKeys.length === 0 && !normalizedPmEmail && !normalizedCreatorEmail) {
     callback([])
     return () => {}
   }
@@ -464,6 +466,29 @@ export function subscribeProjectsWithTasksByScheduleScope(
       ),
     )
   })
+
+  if (normalizedCreatorEmail) {
+    unsubscribes.push(
+      onSnapshot(
+        query(collection(db, TASKS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail)),
+        (snapshot) => {
+          taskGroups.set(
+            "creator",
+            snapshot.docs
+              .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
+              .filter((task: any) => includeHidden || !toBooleanOr(task.isHidden, false)),
+          )
+          void notify().catch((error) => {
+            console.error("Schedule creator FA data snapshot error:", error)
+            if (!disposed) callback([])
+          })
+        },
+        (error) => {
+          console.error("Schedule creator FA tasks snapshot error:", error)
+        },
+      ),
+    )
+  }
 
   if (normalizedPmEmail) {
     const projectConstraints: any[] = [where("pmEmail", "==", normalizedPmEmail)]

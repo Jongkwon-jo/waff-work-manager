@@ -178,8 +178,15 @@ function shouldShowWeeklyProject(
   project: Project,
   source: WeeklyWorkDataSource,
   selectedDepartment: DepartmentPersonGroup | "all",
+  visibleStrategyProjectIds: ReadonlySet<string> = new Set(),
 ) {
-  return !(selectedDepartment === "all" && source.id === "ict" && project.sourceSchedule === "strategy")
+  if (!(selectedDepartment === "all" && source.id === "ict" && project.sourceSchedule === "strategy")) {
+    return true
+  }
+
+  const strategyProjectId =
+    project.originalProjectId || (project.id.startsWith("strategy:") ? project.id.slice("strategy:".length) : project.id)
+  return !visibleStrategyProjectIds.has(strategyProjectId)
 }
 
 function getOrgPersonOrder(
@@ -496,12 +503,18 @@ export function WeeklyWorkBoard({
           }))
       : []
 
+    const visibleStrategyProjectIds = new Set(
+      (projectsBySource.strategy || [])
+        .filter((project) => !project.isHidden)
+        .map((project) => project.originalProjectId || project.id),
+    )
+
     return [
       ...selectedDataSources
       .flatMap((source) =>
         (projectsBySource[source.id] || [])
           .filter((project) => !project.isHidden)
-          .filter((project) => shouldShowWeeklyProject(project, source, selectedDepartment))
+          .filter((project) => shouldShowWeeklyProject(project, source, selectedDepartment, visibleStrategyProjectIds))
           .flatMap((project) =>
             flattenLeafTasksWithAncestors(project.tasks)
               .filter(({ task }) => !task.isHidden)
@@ -664,7 +677,10 @@ export function WeeklyWorkBoard({
       }))
   }, [departmentOrgSettings, departmentPersonSettings, profileDefaultPerson, profileDepartment, selectedDataSources, selectedDepartment, visiblePersons, visibleTasks])
 
-  const selectedManagementHref = selectedDataSources[0]?.managementHref || homeHref
+  const accountManagementHref = profileDepartment
+    ? dataSources.find((source) => source.departmentGroup === profileDepartment)?.managementHref
+    : undefined
+  const selectedManagementHref = accountManagementHref || selectedDataSources[0]?.managementHref || homeHref
 
   const weeklyGlobalSchedules = useMemo<WeeklyGlobalScheduleItem[]>(() => {
     return globalSchedules
