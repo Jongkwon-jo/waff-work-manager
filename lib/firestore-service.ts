@@ -1156,6 +1156,21 @@ export function subscribeDashboardSortBy(callback: (sortBy: DashboardSortBy) => 
   )
 }
 
+export async function fetchDashboardSortBy(): Promise<DashboardSortBy> {
+  try {
+    const snap = await getDoc(doc(db, SETTINGS_COLLECTION, DASHBOARD_PREFERENCES_DOC))
+    const raw = snap.data() as { sortBy?: unknown } | undefined
+    const candidate = toStringOrEmpty(raw?.sortBy) as DashboardSortBy
+    if (candidate === "latest" || candidate === "name" || candidate === "type" || candidate === "progress") {
+      return candidate
+    }
+    return "latest"
+  } catch (error) {
+    console.error("Dashboard sort fetch error:", error)
+    return "latest"
+  }
+}
+
 export async function saveDashboardSortBy(sortBy: DashboardSortBy): Promise<void> {
   const preferencesRef = doc(db, SETTINGS_COLLECTION, DASHBOARD_PREFERENCES_DOC)
   await setDoc(
@@ -1264,6 +1279,17 @@ export function subscribeDepartmentOrgSettings(callback: (settings: DepartmentOr
   )
 }
 
+export async function fetchDepartmentOrgSettings(): Promise<DepartmentOrgSettings> {
+  try {
+    const snap = await getDoc(doc(db, SETTINGS_COLLECTION, DEPARTMENT_ORG_SETTINGS_DOC))
+    const raw = snap.data() as Partial<Record<DepartmentPersonGroup, unknown>> | undefined
+    return normalizeDepartmentOrgSettings(raw)
+  } catch (error) {
+    console.error("Department org settings fetch error:", error)
+    return normalizeDepartmentOrgSettings()
+  }
+}
+
 export async function saveDepartmentOrgSettings(settings: DepartmentOrgSettings): Promise<DepartmentPersonSettings> {
   const normalized = normalizeDepartmentOrgSettings(settings)
   const orgRef = doc(db, SETTINGS_COLLECTION, DEPARTMENT_ORG_SETTINGS_DOC)
@@ -1303,6 +1329,18 @@ export function subscribeMyPageEditableFields(callback: (fields: MyPageEditableF
   )
 }
 
+export async function fetchMyPageEditableFields(): Promise<MyPageEditableFieldsSettings> {
+  try {
+    const snap = await getDoc(doc(db, SETTINGS_COLLECTION, MY_PAGE_EDITABLE_FIELDS_DOC))
+    const raw = snap.data() as { fields?: unknown } | undefined
+    if (!raw || !Array.isArray(raw.fields)) return [...DEFAULT_MY_PAGE_EDITABLE_FIELDS]
+    return normalizeMyPageEditableFields(raw.fields)
+  } catch (error) {
+    console.error("My-page editable fields fetch error:", error)
+    return [...DEFAULT_MY_PAGE_EDITABLE_FIELDS]
+  }
+}
+
 export async function saveMyPageEditableFields(fields: MyPageEditableFieldsSettings): Promise<void> {
   const settingsRef = doc(db, SETTINGS_COLLECTION, MY_PAGE_EDITABLE_FIELDS_DOC)
   await setDoc(
@@ -1328,6 +1366,17 @@ export function subscribeGlobalSchedules(callback: (schedules: GlobalSchedule[])
       callback([])
     },
   )
+}
+
+export async function fetchGlobalSchedules(): Promise<GlobalSchedule[]> {
+  try {
+    const snap = await getDoc(doc(db, SETTINGS_COLLECTION, GLOBAL_SCHEDULES_DOC))
+    const raw = snap.data() as { items?: unknown } | undefined
+    return normalizeGlobalSchedules(raw?.items)
+  } catch (error) {
+    console.error("Global schedules fetch error:", error)
+    return []
+  }
 }
 
 export async function saveGlobalSchedules(schedules: GlobalSchedule[]): Promise<void> {

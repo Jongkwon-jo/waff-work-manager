@@ -817,6 +817,21 @@ export function subscribeDashboardSortBy(callback: (sortBy: DashboardSortBy) => 
   )
 }
 
+export async function fetchDashboardSortBy(): Promise<DashboardSortBy> {
+  try {
+    const snap = await getDoc(doc(db, SETTINGS_COLLECTION, DASHBOARD_PREFERENCES_DOC))
+    const raw = snap.data() as { sortBy?: unknown } | undefined
+    const candidate = toStringOrEmpty(raw?.sortBy) as DashboardSortBy
+    if (candidate === "latest" || candidate === "name" || candidate === "type" || candidate === "progress") {
+      return candidate
+    }
+    return "latest"
+  } catch (error) {
+    console.error("Dashboard sort fetch error:", error)
+    return "latest"
+  }
+}
+
 export async function saveDashboardSortBy(sortBy: DashboardSortBy): Promise<void> {
   const preferencesRef = doc(db, SETTINGS_COLLECTION, DASHBOARD_PREFERENCES_DOC)
   await setDoc(

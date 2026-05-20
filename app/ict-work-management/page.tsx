@@ -17,7 +17,7 @@ import {
   updateProjectOrdersInDB,
   updateTaskOrdersInDB,
   saveDashboardSortBy,
-  subscribeDashboardSortBy,
+  fetchDashboardSortBy,
   saveGanttCollapseState,
   saveGanttDetailPanelWidth,
   saveGanttLeftPanelWidth,
@@ -33,8 +33,8 @@ import {
   saveSeenRecentChangeIds,
   saveUserHiddenOwnerOptions,
   subscribeCurrentUserProfileBundle,
-  subscribeDepartmentOrgSettings,
-  subscribeGlobalSchedules,
+  fetchDepartmentOrgSettings,
+  fetchGlobalSchedules,
   fetchUserProfiles,
   type DepartmentOrgSettings,
   type GlobalSchedule,
@@ -104,8 +104,18 @@ export default function IctWorkManagementPage() {
       setGlobalSchedules([])
       return
     }
-    const unsubscribe = subscribeGlobalSchedules(setGlobalSchedules)
-    return () => unsubscribe()
+    let disposed = false
+    void fetchGlobalSchedules()
+      .then((schedules) => {
+        if (!disposed) setGlobalSchedules(schedules)
+      })
+      .catch((error) => {
+        console.error("Global schedules fetch failed:", error)
+        if (!disposed) setGlobalSchedules([])
+      })
+    return () => {
+      disposed = true
+    }
   }, [user])
 
   useEffect(() => {
@@ -134,11 +144,22 @@ export default function IctWorkManagementPage() {
       return
     }
     setIsDepartmentOrgReady(false)
-    const unsubscribe = subscribeDepartmentOrgSettings((settings) => {
-      setDepartmentOrgSettings(settings)
-      setIsDepartmentOrgReady(true)
-    })
-    return () => unsubscribe()
+    let disposed = false
+    void fetchDepartmentOrgSettings()
+      .then((settings) => {
+        if (disposed) return
+        setDepartmentOrgSettings(settings)
+        setIsDepartmentOrgReady(true)
+      })
+      .catch((error) => {
+        console.error("Department org settings fetch failed:", error)
+        if (disposed) return
+        setDepartmentOrgSettings(DEFAULT_DEPARTMENT_ORG_SETTINGS)
+        setIsDepartmentOrgReady(true)
+      })
+    return () => {
+      disposed = true
+    }
   }, [user])
 
   const loadHistory = async () => {
@@ -166,11 +187,17 @@ export default function IctWorkManagementPage() {
 
   useEffect(() => {
     if (!user) return
-
-    const unsubscribe = subscribeDashboardSortBy((savedSortBy) => {
-      setSortBy(savedSortBy)
-    })
-    return () => unsubscribe()
+    let disposed = false
+    void fetchDashboardSortBy()
+      .then((savedSortBy) => {
+        if (!disposed) setSortBy(savedSortBy)
+      })
+      .catch((error) => {
+        console.error("Dashboard sort fetch failed:", error)
+      })
+    return () => {
+      disposed = true
+    }
   }, [user])
 
   useEffect(() => {

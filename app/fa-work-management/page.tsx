@@ -17,7 +17,7 @@ import {
   updateProjectOrdersInDB,
   updateTaskOrdersInDB,
   saveDashboardSortBy,
-  subscribeDashboardSortBy,
+  fetchDashboardSortBy,
   saveGanttCollapseState,
   saveGanttDetailPanelWidth,
   saveGanttLeftPanelWidth,
@@ -32,10 +32,10 @@ import {
   DEFAULT_DEPARTMENT_ORG_SETTINGS,
   saveUserHiddenOwnerOptions,
   subscribeCurrentUserProfileBundle,
-  subscribeDepartmentOrgSettings,
+  fetchDepartmentOrgSettings,
   fetchUserProfiles,
   saveSeenRecentChangeIds,
-  subscribeGlobalSchedules,
+  fetchGlobalSchedules,
   type DepartmentOrgSettings,
   type GlobalSchedule,
   type UserProfile,
@@ -103,8 +103,18 @@ export default function FaWorkManagementPage() {
       setGlobalSchedules([])
       return
     }
-    const unsubscribe = subscribeGlobalSchedules(setGlobalSchedules)
-    return () => unsubscribe()
+    let disposed = false
+    void fetchGlobalSchedules()
+      .then((schedules) => {
+        if (!disposed) setGlobalSchedules(schedules)
+      })
+      .catch((error) => {
+        console.error("Global schedules fetch failed:", error)
+        if (!disposed) setGlobalSchedules([])
+      })
+    return () => {
+      disposed = true
+    }
   }, [user])
 
   useEffect(() => {
@@ -133,11 +143,22 @@ export default function FaWorkManagementPage() {
       return
     }
     setIsDepartmentOrgReady(false)
-    const unsubscribe = subscribeDepartmentOrgSettings((settings) => {
-      setDepartmentOrgSettings(settings)
-      setIsDepartmentOrgReady(true)
-    })
-    return () => unsubscribe()
+    let disposed = false
+    void fetchDepartmentOrgSettings()
+      .then((settings) => {
+        if (disposed) return
+        setDepartmentOrgSettings(settings)
+        setIsDepartmentOrgReady(true)
+      })
+      .catch((error) => {
+        console.error("Department org settings fetch failed:", error)
+        if (disposed) return
+        setDepartmentOrgSettings(DEFAULT_DEPARTMENT_ORG_SETTINGS)
+        setIsDepartmentOrgReady(true)
+      })
+    return () => {
+      disposed = true
+    }
   }, [user])
 
   const loadHistory = async () => {
@@ -160,11 +181,17 @@ export default function FaWorkManagementPage() {
 
   useEffect(() => {
     if (!user) return
-
-    const unsubscribe = subscribeDashboardSortBy((savedSortBy) => {
-      setSortBy(savedSortBy)
-    })
-    return () => unsubscribe()
+    let disposed = false
+    void fetchDashboardSortBy()
+      .then((savedSortBy) => {
+        if (!disposed) setSortBy(savedSortBy)
+      })
+      .catch((error) => {
+        console.error("Dashboard sort fetch failed:", error)
+      })
+    return () => {
+      disposed = true
+    }
   }, [user])
 
   useEffect(() => {
