@@ -1168,28 +1168,6 @@ export async function saveDashboardSortBy(sortBy: DashboardSortBy): Promise<void
   )
 }
 
-export function subscribeGanttCollapseState(email: string, callback: (state: GanttCollapseState) => void) {
-  const normalizedEmail = normalizeEmail(email)
-  if (!normalizedEmail) {
-    callback({ ...DEFAULT_GANTT_COLLAPSE_STATE })
-    return () => {}
-  }
-
-  const profileRef = doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail))
-  return onSnapshot(
-    profileRef,
-    (snapshot) => {
-      const profile = snapshot.data() as { ganttCollapseState?: Partial<Record<keyof GanttCollapseState, unknown>> } | undefined
-      const raw = profile?.[GANTT_COLLAPSE_STATE_FIELD]
-      callback(normalizeGanttCollapseState(raw))
-    },
-    (error) => {
-      console.error("Gantt collapse state snapshot error:", error)
-      callback({ ...DEFAULT_GANTT_COLLAPSE_STATE })
-    },
-  )
-}
-
 export async function saveGanttCollapseState(email: string, state: GanttCollapseState): Promise<void> {
   const normalizedEmail = normalizeEmail(email)
   if (!normalizedEmail) return
@@ -1203,29 +1181,6 @@ export async function saveGanttCollapseState(email: string, state: GanttCollapse
       updatedAt: serverTimestamp(),
     },
     { merge: true },
-  )
-}
-
-export function subscribeGanttLeftPanelWidth(email: string, callback: (width: number | null) => void) {
-  const normalizedEmail = normalizeEmail(email)
-  if (!normalizedEmail) {
-    callback(null)
-    return () => {}
-  }
-
-  const profileRef = doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail))
-  return onSnapshot(
-    profileRef,
-    (snapshot) => {
-      const profile = snapshot.data() as { ganttLeftPanelWidth?: unknown } | undefined
-      const raw = profile?.[GANTT_LEFT_PANEL_WIDTH_FIELD]
-      const width = toNumberOr(raw, DEFAULT_GANTT_LEFT_PANEL_WIDTH)
-      callback(width > 0 ? width : null)
-    },
-    (error) => {
-      console.error("Gantt left panel width snapshot error:", error)
-      callback(null)
-    },
   )
 }
 
@@ -1245,29 +1200,6 @@ export async function saveGanttLeftPanelWidth(email: string, width: number): Pro
       updatedAt: serverTimestamp(),
     },
     { merge: true },
-  )
-}
-
-export function subscribeGanttDetailPanelWidth(email: string, callback: (width: number | null) => void) {
-  const normalizedEmail = normalizeEmail(email)
-  if (!normalizedEmail) {
-    callback(null)
-    return () => {}
-  }
-
-  const profileRef = doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail))
-  return onSnapshot(
-    profileRef,
-    (snapshot) => {
-      const profile = snapshot.data() as { ganttDetailPanelWidth?: unknown } | undefined
-      const raw = profile?.[GANTT_DETAIL_PANEL_WIDTH_FIELD]
-      const width = toNumberOr(raw, DEFAULT_GANTT_DETAIL_PANEL_WIDTH)
-      callback(width > 0 ? width : null)
-    },
-    (error) => {
-      console.error("Gantt detail panel width snapshot error:", error)
-      callback(null)
-    },
   )
 }
 
@@ -1505,6 +1437,41 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
   )
 }
 
+function parseUserProfileSnapshot(raw: Record<string, unknown> | undefined): UserProfile {
+  return {
+    email: normalizeEmail(toStringOrEmpty(raw?.email)),
+    lastLoginAt: (raw?.lastLoginAt as { toDate?: () => Date } | undefined)?.toDate?.() || undefined,
+    department: normalizeDepartmentGroup(raw?.department),
+    taskAliases: Array.isArray(raw?.taskAliases)
+      ? (raw.taskAliases as unknown[])
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : [],
+    hiddenOwnerOptions: Array.isArray(raw?.hiddenOwnerOptions)
+      ? (raw.hiddenOwnerOptions as unknown[])
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : [],
+    myPageTaskPreferences: normalizeMyPageTaskPreferences(raw?.myPageTaskPreferences),
+    myPagePersonalTasks: normalizeMyPagePersonalTasks(raw?.myPagePersonalTasks),
+    myPageMemo: toOptionalString(raw?.myPageMemo),
+    myPageCollapsedProjectGroups:
+      raw?.myPageCollapsedProjectGroups && typeof raw.myPageCollapsedProjectGroups === "object"
+        ? Object.fromEntries(
+            Object.entries(raw.myPageCollapsedProjectGroups as Record<string, unknown>).map(([key, value]) => [
+              key,
+              toBooleanOr(value, false),
+            ]),
+          )
+        : {},
+    seenRecentChangeIds: Array.isArray(raw?.seenRecentChangeIds)
+      ? uniqueTrimmedStrings((raw.seenRecentChangeIds as unknown[]).filter((value): value is string => typeof value === "string"))
+      : [],
+  }
+}
+
 export function subscribeCurrentUserProfile(email: string, callback: (profile: UserProfile | null) => void) {
   const normalizedEmail = normalizeEmail(email)
   if (!normalizedEmail) {
@@ -1519,51 +1486,95 @@ export function subscribeCurrentUserProfile(email: string, callback: (profile: U
         callback(null)
         return
       }
-
-      const raw = snapshot.data() as {
-        email?: unknown
-        lastLoginAt?: { toDate?: () => Date }
-        department?: unknown
-        taskAliases?: unknown
-        hiddenOwnerOptions?: unknown
-        myPageTaskPreferences?: unknown
-        myPagePersonalTasks?: unknown
-        myPageMemo?: unknown
-        myPageCollapsedProjectGroups?: unknown
-        seenRecentChangeIds?: unknown
-      }
-      callback({
-        email: normalizeEmail(toStringOrEmpty(raw?.email)),
-        lastLoginAt: raw?.lastLoginAt?.toDate?.() || undefined,
-        department: normalizeDepartmentGroup(raw?.department),
-        taskAliases: Array.isArray(raw?.taskAliases)
-          ? raw.taskAliases.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
-          : [],
-        hiddenOwnerOptions: Array.isArray(raw?.hiddenOwnerOptions)
-          ? raw.hiddenOwnerOptions
-              .filter((value): value is string => typeof value === "string")
-              .map((value) => value.trim())
-              .filter(Boolean)
-          : [],
-        myPageTaskPreferences: normalizeMyPageTaskPreferences(raw?.myPageTaskPreferences),
-        myPagePersonalTasks: normalizeMyPagePersonalTasks(raw?.myPagePersonalTasks),
-        myPageMemo: toOptionalString(raw?.myPageMemo),
-        myPageCollapsedProjectGroups:
-          raw?.myPageCollapsedProjectGroups && typeof raw.myPageCollapsedProjectGroups === "object"
-            ? Object.fromEntries(
-                Object.entries(raw.myPageCollapsedProjectGroups as Record<string, unknown>).map(([key, value]) => [
-                  key,
-                  toBooleanOr(value, false),
-                ]),
-              )
-            : {},
-        seenRecentChangeIds: Array.isArray(raw?.seenRecentChangeIds)
-          ? uniqueTrimmedStrings(raw.seenRecentChangeIds.filter((value): value is string => typeof value === "string"))
-          : [],
-      })
+      callback(parseUserProfileSnapshot(snapshot.data() as Record<string, unknown>))
     },
     (error) => {
       console.error("Current user profile snapshot error:", error)
+    },
+  )
+}
+
+export type GanttScope = "strategy" | "ict" | "fa"
+
+type GanttFieldMap = {
+  collapse: string
+  leftWidth: string
+  detailWidth: string
+}
+
+const GANTT_FIELD_MAP: Record<GanttScope, GanttFieldMap> = {
+  strategy: {
+    collapse: GANTT_COLLAPSE_STATE_FIELD,
+    leftWidth: GANTT_LEFT_PANEL_WIDTH_FIELD,
+    detailWidth: GANTT_DETAIL_PANEL_WIDTH_FIELD,
+  },
+  ict: {
+    collapse: "ictGanttCollapseState",
+    leftWidth: "ictGanttLeftPanelWidth",
+    detailWidth: "ictGanttDetailPanelWidth",
+  },
+  fa: {
+    collapse: "faGanttCollapseState",
+    leftWidth: "faGanttLeftPanelWidth",
+    detailWidth: "faGanttDetailPanelWidth",
+  },
+}
+
+export type CurrentUserProfileBundle = {
+  profile: UserProfile | null
+  ganttCollapseState: GanttCollapseState
+  ganttLeftPanelWidth: number | null
+  ganttDetailPanelWidth: number | null
+}
+
+const EMPTY_BUNDLE: CurrentUserProfileBundle = {
+  profile: null,
+  ganttCollapseState: { ...DEFAULT_GANTT_COLLAPSE_STATE },
+  ganttLeftPanelWidth: null,
+  ganttDetailPanelWidth: null,
+}
+
+/**
+ * Single onSnapshot on user_profiles/{email} that yields the profile and the
+ * scope-specific gantt UI state. Replaces 4 separate subscriptions that were
+ * all reading the same document.
+ */
+export function subscribeCurrentUserProfileBundle(
+  email: string,
+  scope: GanttScope,
+  callback: (bundle: CurrentUserProfileBundle) => void,
+): () => void {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) {
+    callback({ ...EMPTY_BUNDLE, ganttCollapseState: { ...DEFAULT_GANTT_COLLAPSE_STATE } })
+    return () => {}
+  }
+
+  const fields = GANTT_FIELD_MAP[scope]
+
+  return onSnapshot(
+    doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        callback({ ...EMPTY_BUNDLE, ganttCollapseState: { ...DEFAULT_GANTT_COLLAPSE_STATE } })
+        return
+      }
+
+      const raw = snapshot.data() as Record<string, unknown>
+      const collapseRaw = raw[fields.collapse] as Partial<Record<keyof GanttCollapseState, unknown>> | undefined
+      const leftWidth = toNumberOr(raw[fields.leftWidth], DEFAULT_GANTT_LEFT_PANEL_WIDTH)
+      const detailWidth = toNumberOr(raw[fields.detailWidth], DEFAULT_GANTT_DETAIL_PANEL_WIDTH)
+
+      callback({
+        profile: parseUserProfileSnapshot(raw),
+        ganttCollapseState: normalizeGanttCollapseState(collapseRaw),
+        ganttLeftPanelWidth: leftWidth > 0 ? leftWidth : null,
+        ganttDetailPanelWidth: detailWidth > 0 ? detailWidth : null,
+      })
+    },
+    (error) => {
+      console.error("Current user profile bundle snapshot error:", error)
+      callback({ ...EMPTY_BUNDLE, ganttCollapseState: { ...DEFAULT_GANTT_COLLAPSE_STATE } })
     },
   )
 }
