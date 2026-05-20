@@ -4,6 +4,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  documentId,
   getDoc,
   getDocs,
   limit,
@@ -267,38 +268,98 @@ function chunkValues<T>(values: T[], size: number): T[][] {
   return chunks
 }
 
+// See lib/firestore-service.ts for the rationale behind these caches.
+const DOC_CACHE_TTL_MS = 60_000
+type CachedDoc = { value: any; fetchedAt: number }
+const projectDocCache = new Map<string, CachedDoc>()
+const parentTaskDocCache = new Map<string, CachedDoc>()
+
+function getCachedDoc(cache: Map<string, CachedDoc>, id: string, now: number): any | undefined {
+  const entry = cache.get(id)
+  if (!entry) return undefined
+  if (now - entry.fetchedAt >= DOC_CACHE_TTL_MS) {
+    cache.delete(id)
+    return undefined
+  }
+  return entry.value
+}
+
+async function fetchDocsByIds(collectionName: string, ids: string[]): Promise<any[]> {
+  if (ids.length === 0) return []
+  const chunks = chunkValues(ids, 30)
+  const snapshots = await Promise.all(
+    chunks.map((chunk) => getDocs(query(collection(db, collectionName), where(documentId(), "in", chunk)))),
+  )
+  return snapshots.flatMap((snap) => snap.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+}
+
 async function fetchParentTaskChain(tasksById: Map<string, any>) {
-  const pendingParentIds = new Set<string>()
+  const now = Date.now()
+  let pending = new Set<string>()
   tasksById.forEach((task) => {
     const parentId = toOptionalString(task.parentId)
-    if (parentId && !tasksById.has(parentId)) pendingParentIds.add(parentId)
+    if (parentId && !tasksById.has(parentId)) pending.add(parentId)
   })
 
-  while (pendingParentIds.size > 0) {
-    const parentId = pendingParentIds.values().next().value as string
-    pendingParentIds.delete(parentId)
-    if (tasksById.has(parentId)) continue
+  while (pending.size > 0) {
+    const toFetch: string[] = []
+    pending.forEach((id) => {
+      if (tasksById.has(id)) return
+      const cached = getCachedDoc(parentTaskDocCache, id, now)
+      if (cached) {
+        tasksById.set(id, cached)
+      } else {
+        toFetch.push(id)
+      }
+    })
 
-    const parentSnap = await getDoc(doc(db, TASKS_COLLECTION, parentId))
-    if (!parentSnap.exists()) continue
+    const nextPending = new Set<string>()
 
-    const parentTask: any = { ...parentSnap.data(), id: parentSnap.id }
-    tasksById.set(parentSnap.id, parentTask)
+    pending.forEach((id) => {
+      const task = tasksById.get(id)
+      if (!task) return
+      const nextParentId = toOptionalString(task.parentId)
+      if (nextParentId && !tasksById.has(nextParentId)) nextPending.add(nextParentId)
+    })
 
-    const nextParentId = toOptionalString(parentTask.parentId)
-    if (nextParentId && !tasksById.has(nextParentId)) pendingParentIds.add(nextParentId)
+    if (toFetch.length > 0) {
+      const fetched = await fetchDocsByIds(TASKS_COLLECTION, toFetch)
+      fetched.forEach((task) => {
+        parentTaskDocCache.set(task.id, { value: task, fetchedAt: now })
+        tasksById.set(task.id, task)
+        const nextParentId = toOptionalString(task.parentId)
+        if (nextParentId && !tasksById.has(nextParentId)) nextPending.add(nextParentId)
+      })
+    }
+
+    pending = nextPending
   }
 }
 
 async function fetchProjectsForTasks(tasks: any[]) {
+  const now = Date.now()
   const projectIds = Array.from(new Set(tasks.map((task) => toStringOrEmpty(task.projectId)).filter(Boolean)))
-  const projectsData = await Promise.all(
-    projectIds.map(async (projectId) => {
-      const projectSnap = await getDoc(doc(db, PROJECTS_COLLECTION, projectId))
-      return projectSnap.exists() ? { ...projectSnap.data(), id: projectSnap.id } : null
-    }),
-  )
-  return projectsData.filter((project): project is any => Boolean(project))
+
+  const result: any[] = []
+  const missing: string[] = []
+  projectIds.forEach((id) => {
+    const cached = getCachedDoc(projectDocCache, id, now)
+    if (cached) {
+      result.push(cached)
+    } else {
+      missing.push(id)
+    }
+  })
+
+  if (missing.length > 0) {
+    const fetched = await fetchDocsByIds(PROJECTS_COLLECTION, missing)
+    fetched.forEach((project) => {
+      projectDocCache.set(project.id, { value: project, fetchedAt: now })
+      result.push(project)
+    })
+  }
+
+  return result
 }
 
 export type SubscribeOptions = {
