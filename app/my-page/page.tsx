@@ -45,8 +45,8 @@ import {
   saveMyPagePersonalTasks,
   saveMyPageTaskPreferences,
   subscribeCurrentUserProfile,
-  subscribeDepartmentOrgSettings,
-  subscribeMyPageEditableFields,
+  fetchDepartmentOrgSettings,
+  fetchMyPageEditableFields,
   subscribeProjectsWithTasksByPersonKeys as subscribeStrategyProjectsByPersonKeys,
   updateTaskInDB as updateStrategyTaskInDB,
   type DepartmentOrgSettings,
@@ -287,11 +287,18 @@ export default function MyPage() {
   ])
 
   useEffect(() => {
-    const unsubscribeEditableFields = subscribeMyPageEditableFields(setEditableFieldsConfig)
-    const unsubscribeDepartmentOrgSettings = subscribeDepartmentOrgSettings(setDepartmentOrgSettings)
+    let disposed = false
+    void Promise.all([fetchMyPageEditableFields(), fetchDepartmentOrgSettings()])
+      .then(([fields, orgSettings]) => {
+        if (disposed) return
+        setEditableFieldsConfig(fields)
+        setDepartmentOrgSettings(orgSettings)
+      })
+      .catch((error) => {
+        console.error("My-page settings fetch failed:", error)
+      })
     return () => {
-      unsubscribeEditableFields()
-      unsubscribeDepartmentOrgSettings()
+      disposed = true
     }
   }, [])
 
