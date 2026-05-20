@@ -6,7 +6,36 @@
 pip install firebase-admin openpyxl
 ```
 
-## Run
+## One-time backfill: isHidden field
+
+Before the app's `where("isHidden", "==", false)` filters start excluding hidden docs, every document needs the `isHidden` field present (Firestore's `==` filter does not match docs that are missing the field). Run this once:
+
+```bash
+# Dry-run first (no writes)
+python scripts/backfill_is_hidden.py \
+  --service-account ./serviceAccountKey.json \
+  --dry-run
+
+# Apply
+python scripts/backfill_is_hidden.py \
+  --service-account ./serviceAccountKey.json
+```
+
+It scans `projects`, `tasks`, `fa_projects`, `fa_tasks`, `ict_projects`, `ict_tasks` and sets `isHidden = false` on any doc missing or having a non-boolean value. Safe to re-run; existing booleans are not touched.
+
+### Required Firestore composite indexes
+
+The default subscribes combine `isHidden == false` with another field. Firestore needs these composite indexes (the SDK will print an auto-create URL the first time each query runs — click those and create):
+
+| Collection                                | Fields                                                          | Used by                                                  |
+| ----------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------- |
+| `tasks` / `fa_tasks` / `ict_tasks`        | `personKeys` (array-contains) + `isHidden` (==)                 | scoped per-person subscribes (my-page, weekly, work-mgmt) |
+| `tasks` / `fa_tasks` / `ict_tasks`        | `projectId` (==/in) + `isHidden` (==)                           | PM-scope task subscribes                                  |
+| `projects` / `fa_projects` / `ict_projects` | `pmEmail` (==) + `isHidden` (==)                                | PM-scope project subscribes                               |
+
+The single-field queries (collection-scan with only `isHidden == false`) used by `subscribeToData` / `fetchProjectsWithTasks` do **not** need a composite index — Firestore auto-indexes single fields.
+
+## Bulk import
 
 ```bash
 python scripts/firebase_bulk_import.py \
