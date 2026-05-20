@@ -6,6 +6,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  documentId,
   getDoc,
   getDocs,
   limit,
@@ -387,82 +388,176 @@ function chunkValues<T>(values: T[], size: number): T[][] {
   return chunks
 }
 
+// See lib/firestore-service.ts for the rationale behind these caches. The
+// ICT module reads from both the strategy and ICT collections, so cache keys
+// include the collection name to avoid cross-collection collisions.
+const DOC_CACHE_TTL_MS = 60_000
+type CachedDoc = { value: any; fetchedAt: number }
+const projectDocCache = new Map<string, CachedDoc>()
+const rawTaskDocCache = new Map<string, CachedDoc>()
+
+function cacheKey(collectionName: string, id: string) {
+  return `${collectionName}::${id}`
+}
+
+function getCachedDoc(cache: Map<string, CachedDoc>, key: string, now: number): any | undefined {
+  const entry = cache.get(key)
+  if (!entry) return undefined
+  if (now - entry.fetchedAt >= DOC_CACHE_TTL_MS) {
+    cache.delete(key)
+    return undefined
+  }
+  return entry.value
+}
+
+async function fetchRawDocsByIds(collectionName: string, ids: string[]): Promise<any[]> {
+  if (ids.length === 0) return []
+  const chunks = chunkValues(ids, 30)
+  const snapshots = await Promise.all(
+    chunks.map((chunk) => getDocs(query(collection(db, collectionName), where(documentId(), "in", chunk)))),
+  )
+  return snapshots.flatMap((snap) => snap.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+}
+
 async function fetchParentTaskChain(
   tasksById: Map<string, any>,
   collectionName: string,
   prefix = "",
 ) {
-  const pendingParentIds = new Set<string>()
-  tasksById.forEach((task) => {
-    const parentId = stripSourceId(toOptionalString(task.parentId)) || toOptionalString(task.parentId)
-    if (parentId && !tasksById.has(`${prefix}${parentId}`) && !tasksById.has(parentId)) pendingParentIds.add(parentId)
+  const now = Date.now()
+  const source: "strategy" | "ict" = prefix === STRATEGY_SOURCE_PREFIX ? "strategy" : "ict"
+
+  const wrapParent = (raw: any, mapId: string) => ({
+    ...raw,
+    id: mapId,
+    parentId: toOptionalString(raw.parentId)
+      ? `${prefix}${toStringOrEmpty(raw.parentId)}`
+      : undefined,
+    projectId: `${prefix}${toStringOrEmpty(raw.projectId)}`,
+    sourceSchedule: source,
+    originalTaskId: raw.id,
+    originalProjectId: toStringOrEmpty(raw.projectId),
   })
 
-  while (pendingParentIds.size > 0) {
-    const parentId = pendingParentIds.values().next().value as string
-    pendingParentIds.delete(parentId)
-    const mapId = `${prefix}${parentId}`
-    if (tasksById.has(mapId) || tasksById.has(parentId)) continue
+  let pending = new Set<string>()
+  tasksById.forEach((task) => {
+    const parentId = stripSourceId(toOptionalString(task.parentId)) || toOptionalString(task.parentId)
+    if (parentId && !tasksById.has(`${prefix}${parentId}`) && !tasksById.has(parentId)) pending.add(parentId)
+  })
 
-    const parentSnap = await getDoc(doc(db, collectionName, parentId))
-    if (!parentSnap.exists()) continue
+  while (pending.size > 0) {
+    const toFetch: string[] = []
+    pending.forEach((parentId) => {
+      const mapId = `${prefix}${parentId}`
+      if (tasksById.has(mapId) || tasksById.has(parentId)) return
+      const cached = getCachedDoc(rawTaskDocCache, cacheKey(collectionName, parentId), now)
+      if (cached) {
+        tasksById.set(mapId, wrapParent(cached, mapId))
+      } else {
+        toFetch.push(parentId)
+      }
+    })
 
-    const parentTask = {
-      ...parentSnap.data(),
-      id: mapId,
-      parentId: toOptionalString(parentSnap.data().parentId)
-        ? `${prefix}${toStringOrEmpty(parentSnap.data().parentId)}`
-        : undefined,
-      projectId: `${prefix}${toStringOrEmpty(parentSnap.data().projectId)}`,
-      sourceSchedule: prefix === STRATEGY_SOURCE_PREFIX ? "strategy" : "ict",
-      originalTaskId: parentSnap.id,
-      originalProjectId: toStringOrEmpty(parentSnap.data().projectId),
+    const nextPending = new Set<string>()
+
+    pending.forEach((parentId) => {
+      const mapId = `${prefix}${parentId}`
+      const wrapped = tasksById.get(mapId)
+      if (!wrapped) return
+      const nextParentId = stripSourceId(toOptionalString(wrapped.parentId)) || toOptionalString(wrapped.parentId)
+      if (nextParentId && !tasksById.has(`${prefix}${nextParentId}`)) nextPending.add(nextParentId)
+    })
+
+    if (toFetch.length > 0) {
+      const fetched = await fetchRawDocsByIds(collectionName, toFetch)
+      fetched.forEach((raw) => {
+        rawTaskDocCache.set(cacheKey(collectionName, raw.id), { value: raw, fetchedAt: now })
+        const mapId = `${prefix}${raw.id}`
+        tasksById.set(mapId, wrapParent(raw, mapId))
+        const nextParentId = toOptionalString(raw.parentId)
+        if (nextParentId && !tasksById.has(`${prefix}${nextParentId}`)) nextPending.add(nextParentId)
+      })
     }
-    tasksById.set(mapId, parentTask)
 
-    const nextParentId = toOptionalString(parentSnap.data().parentId)
-    if (nextParentId && !tasksById.has(`${prefix}${nextParentId}`)) pendingParentIds.add(nextParentId)
+    pending = nextPending
   }
 }
 
 async function fetchRawParentTaskChain(tasksById: Map<string, any>, collectionName: string) {
-  const pendingParentIds = new Set<string>()
+  const now = Date.now()
+  let pending = new Set<string>()
   tasksById.forEach((task) => {
     const parentId = toOptionalString(task.parentId)
-    if (parentId && !tasksById.has(parentId)) pendingParentIds.add(parentId)
+    if (parentId && !tasksById.has(parentId)) pending.add(parentId)
   })
 
-  while (pendingParentIds.size > 0) {
-    const parentId = pendingParentIds.values().next().value as string
-    pendingParentIds.delete(parentId)
-    if (tasksById.has(parentId)) continue
+  while (pending.size > 0) {
+    const toFetch: string[] = []
+    pending.forEach((id) => {
+      if (tasksById.has(id)) return
+      const cached = getCachedDoc(rawTaskDocCache, cacheKey(collectionName, id), now)
+      if (cached) {
+        tasksById.set(id, cached)
+      } else {
+        toFetch.push(id)
+      }
+    })
 
-    const parentSnap = await getDoc(doc(db, collectionName, parentId))
-    if (!parentSnap.exists()) continue
+    const nextPending = new Set<string>()
 
-    const parentTask: any = { ...parentSnap.data(), id: parentSnap.id }
-    tasksById.set(parentSnap.id, parentTask)
+    pending.forEach((id) => {
+      const task = tasksById.get(id)
+      if (!task) return
+      const nextParentId = toOptionalString(task.parentId)
+      if (nextParentId && !tasksById.has(nextParentId)) nextPending.add(nextParentId)
+    })
 
-    const nextParentId = toOptionalString(parentTask.parentId)
-    if (nextParentId && !tasksById.has(nextParentId)) pendingParentIds.add(nextParentId)
+    if (toFetch.length > 0) {
+      const fetched = await fetchRawDocsByIds(collectionName, toFetch)
+      fetched.forEach((task) => {
+        rawTaskDocCache.set(cacheKey(collectionName, task.id), { value: task, fetchedAt: now })
+        tasksById.set(task.id, task)
+        const nextParentId = toOptionalString(task.parentId)
+        if (nextParentId && !tasksById.has(nextParentId)) nextPending.add(nextParentId)
+      })
+    }
+
+    pending = nextPending
   }
 }
 
 async function fetchProjectsForTaskIds(projectIds: string[], collectionName: string, prefix = "") {
+  const now = Date.now()
+  const source: "strategy" | "ict" = prefix === STRATEGY_SOURCE_PREFIX ? "strategy" : "ict"
   const uniqueProjectIds = Array.from(new Set(projectIds.map((id) => stripSourceId(id) || id).filter(Boolean)))
-  const projectsData = await Promise.all(
-    uniqueProjectIds.map(async (projectId) => {
-      const projectSnap = await getDoc(doc(db, collectionName, projectId))
-      if (!projectSnap.exists()) return null
-      return {
-        ...projectSnap.data(),
-        id: `${prefix}${projectSnap.id}`,
-        sourceSchedule: prefix === STRATEGY_SOURCE_PREFIX ? "strategy" : "ict",
-        originalProjectId: projectSnap.id,
-      }
-    }),
-  )
-  return projectsData.filter((project): project is any => Boolean(project))
+
+  const wrapProject = (raw: any) => ({
+    ...raw,
+    id: `${prefix}${raw.id}`,
+    sourceSchedule: source,
+    originalProjectId: raw.id,
+  })
+
+  const result: any[] = []
+  const missing: string[] = []
+  uniqueProjectIds.forEach((id) => {
+    const cached = getCachedDoc(projectDocCache, cacheKey(collectionName, id), now)
+    if (cached) {
+      result.push(wrapProject(cached))
+    } else {
+      missing.push(id)
+    }
+  })
+
+  if (missing.length > 0) {
+    const fetched = await fetchRawDocsByIds(collectionName, missing)
+    fetched.forEach((raw) => {
+      projectDocCache.set(cacheKey(collectionName, raw.id), { value: raw, fetchedAt: now })
+      result.push(wrapProject(raw))
+    })
+  }
+
+  return result
 }
 
 export type SubscribeOptions = {
