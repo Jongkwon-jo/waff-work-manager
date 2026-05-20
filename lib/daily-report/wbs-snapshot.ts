@@ -77,15 +77,42 @@ const isRelevantTask = (
   return true;
 };
 
-const toSlimTask = (task: Task): SlimTask => ({
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// "04월 10일" / "2026년 4월 10일" / "4월 10일" 등 한글 단축 표기 → ISO 정규화
+const KOREAN_DATE_RE = /^\s*(?:(\d{4})\s*년\s*)?(\d{1,2})\s*월\s*(\d{1,2})\s*일\s*$/;
+
+/** Firestore 에 저장된 다양한 날짜 포맷을 "YYYY-MM-DD" 로 정규화. 실패 시 "" */
+const normalizeDateToIso = (
+  raw: string | undefined | null,
+  todayIso: string,
+): string => {
+  if (!raw) return "";
+  const trimmed = String(raw).trim();
+  if (!trimmed) return "";
+  if (ISO_DATE_RE.test(trimmed)) return trimmed;
+  const km = trimmed.match(KOREAN_DATE_RE);
+  if (km) {
+    const year = km[1] ?? todayIso.slice(0, 4);
+    const mm = km[2].padStart(2, "0");
+    const dd = km[3].padStart(2, "0");
+    return `${year}-${mm}-${dd}`;
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isFinite(parsed.getTime())) {
+    return parsed.toISOString().slice(0, 10);
+  }
+  return "";
+};
+
+const toSlimTask = (task: Task, todayIso: string): SlimTask => ({
   id: task.id,
   title: task.task ?? "",
   department: task.department ?? "",
   person: task.person ?? "",
   status: task.status ?? "미정",
   category: task.category ?? "일반",
-  startDate: task.startDate ?? "",
-  endDate: task.endDate ?? "",
+  startDate: normalizeDateToIso(task.startDate, todayIso),
+  endDate: normalizeDateToIso(task.endDate, todayIso),
   manDays: typeof task.manDays === "number" ? task.manDays : 0,
 });
 
@@ -103,7 +130,7 @@ const toSlimProject = (
     name: project.name,
     type: project.type,
     pmEmail: project.pmEmail ?? "",
-    tasks: filtered.map(toSlimTask),
+    tasks: filtered.map((t) => toSlimTask(t, todayIso)),
   };
 };
 

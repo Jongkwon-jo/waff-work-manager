@@ -13,7 +13,11 @@
       "Bash(git add *)",
       "Bash(gh auth *)",
       "Bash(python -c \"import firebase_admin; print\\('installed'\\)\")",
-      "Bash(python scripts/backfill_task_person_keys.py --service-account \"C:\\\\Users\\\\User\\\\Downloads\\\\waff-work-manager-firebase-adminsdk-fbsvc-2cd6669f86.json\")"
+      "Bash(python scripts/backfill_task_person_keys.py --service-account \"C:\\\\Users\\\\User\\\\Downloads\\\\waff-work-manager-firebase-adminsdk-fbsvc-2cd6669f86.json\")",
+      "Bash(npx tsc *)",
+      "Bash(findstr /C:\"wbs-agent\" /C:\"wbs-snapshot\")",
+      "Bash(ls -la .env* 2>&1; echo \"---worktree root---\"; ls ../../../../../.env* 2>&1)",
+      "Bash(cp \"C:/Users/User/Desktop/Project/work-manager/waff-work-manager/.env.local\" \".env.local\" && ls -la .env.local)"
     ]
   }
 }

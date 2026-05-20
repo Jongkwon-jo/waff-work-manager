@@ -43,9 +43,38 @@ const blankRun = (id: string, ownerEmail: string): DailyReportRunType => ({
   sectionStats: computeSectionStats([]),
 });
 
+// 구 스키마(optional) 시절 저장된 문서는 일부 필드가 누락돼 있을 수 있다.
+// 새 스키마(nullable required)와 호환되도록 누락 필드를 null 로 채워준다.
+const normalizeItemRaw = (raw: unknown): unknown => {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const obj = raw as Record<string, unknown>;
+  return {
+    ...obj,
+    summary: typeof obj.summary === "string" ? obj.summary : "",
+    suggestedAction:
+      typeof obj.suggestedAction === "string" ? obj.suggestedAction : "",
+    priority: obj.priority ?? "medium",
+    dueDate: obj.dueDate ?? null,
+    projectId: obj.projectId ?? null,
+    projectName: obj.projectName ?? null,
+    taskId: obj.taskId ?? null,
+    emailMessageId: obj.emailMessageId ?? null,
+    kakaoMessageRef: obj.kakaoMessageRef ?? null,
+  };
+};
+
+const normalizeRunRaw = (raw: unknown): unknown => {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const obj = raw as Record<string, unknown>;
+  const items = Array.isArray(obj.items)
+    ? obj.items.map(normalizeItemRaw)
+    : obj.items;
+  return { ...obj, items };
+};
+
 /** Firestore 문서를 Zod로 검증해 안전한 DailyReportRun 으로 반환. 실패 시 null. */
 function parseRunDoc(raw: unknown): DailyReportRunType | null {
-  const parsed = DailyReportRun.safeParse(raw);
+  const parsed = DailyReportRun.safeParse(normalizeRunRaw(raw));
   return parsed.success ? parsed.data : null;
 }
 
@@ -185,7 +214,7 @@ export function sanitizeCandidates(raw: unknown): DailyReportItemType[] {
   if (!Array.isArray(raw)) return [];
   const out: DailyReportItemType[] = [];
   for (const entry of raw) {
-    const parsed = DailyReportItem.safeParse(entry);
+    const parsed = DailyReportItem.safeParse(normalizeItemRaw(entry));
     if (parsed.success) out.push(parsed.data);
   }
   return out;

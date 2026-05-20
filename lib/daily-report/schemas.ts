@@ -29,20 +29,22 @@ export type AgentRunStatus = z.infer<typeof AgentRunStatus>;
 export const DailyReportPriority = z.enum(["high", "medium", "low"]);
 export type DailyReportPriority = z.infer<typeof DailyReportPriority>;
 
+// OpenAI Structured Outputs 는 모든 필드 required + nullable 만 허용한다.
+// 따라서 .optional() / .default() 는 사용하지 않고, 빈 값은 "" 또는 null 로 표현.
 export const DailyReportItem = z.object({
   id: z.string().min(1),
   section: DailyReportSection,
   source: DailyReportSource,
   title: z.string().min(1),
-  summary: z.string().default(""),
-  priority: DailyReportPriority.default("medium"),
-  suggestedAction: z.string().default(""),
-  dueDate: z.string().nullable().optional(),
-  projectId: z.string().nullable().optional(),
-  projectName: z.string().nullable().optional(),
-  taskId: z.string().nullable().optional(),
-  emailMessageId: z.string().nullable().optional(),
-  kakaoMessageRef: z.string().nullable().optional(),
+  summary: z.string(),
+  priority: DailyReportPriority,
+  suggestedAction: z.string(),
+  dueDate: z.string().nullable(),
+  projectId: z.string().nullable(),
+  projectName: z.string().nullable(),
+  taskId: z.string().nullable(),
+  emailMessageId: z.string().nullable(),
+  kakaoMessageRef: z.string().nullable(),
 });
 export type DailyReportItem = z.infer<typeof DailyReportItem>;
 
