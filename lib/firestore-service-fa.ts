@@ -829,28 +829,6 @@ export async function saveDashboardSortBy(sortBy: DashboardSortBy): Promise<void
   )
 }
 
-export function subscribeGanttCollapseState(email: string, callback: (state: GanttCollapseState) => void) {
-  const normalizedEmail = normalizeEmail(email)
-  if (!normalizedEmail) {
-    callback({ ...DEFAULT_GANTT_COLLAPSE_STATE })
-    return () => {}
-  }
-
-  const profileRef = doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail))
-  return onSnapshot(
-    profileRef,
-    (snapshot) => {
-      const profile = snapshot.data() as { faGanttCollapseState?: Partial<Record<keyof GanttCollapseState, unknown>> } | undefined
-      const raw = profile?.[FA_GANTT_COLLAPSE_STATE_FIELD]
-      callback(normalizeGanttCollapseState(raw))
-    },
-    (error) => {
-      console.error("Gantt collapse state snapshot error:", error)
-      callback({ ...DEFAULT_GANTT_COLLAPSE_STATE })
-    },
-  )
-}
-
 export async function saveGanttCollapseState(email: string, state: GanttCollapseState): Promise<void> {
   const normalizedEmail = normalizeEmail(email)
   if (!normalizedEmail) return
@@ -864,29 +842,6 @@ export async function saveGanttCollapseState(email: string, state: GanttCollapse
       updatedAt: serverTimestamp(),
     },
     { merge: true },
-  )
-}
-
-export function subscribeGanttLeftPanelWidth(email: string, callback: (width: number | null) => void) {
-  const normalizedEmail = normalizeEmail(email)
-  if (!normalizedEmail) {
-    callback(null)
-    return () => {}
-  }
-
-  const profileRef = doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail))
-  return onSnapshot(
-    profileRef,
-    (snapshot) => {
-      const profile = snapshot.data() as { faGanttLeftPanelWidth?: unknown } | undefined
-      const raw = profile?.[FA_GANTT_LEFT_PANEL_WIDTH_FIELD]
-      const width = toNumberOr(raw, DEFAULT_GANTT_LEFT_PANEL_WIDTH)
-      callback(width > 0 ? width : null)
-    },
-    (error) => {
-      console.error("FA gantt left panel width snapshot error:", error)
-      callback(null)
-    },
   )
 }
 
@@ -906,29 +861,6 @@ export async function saveGanttLeftPanelWidth(email: string, width: number): Pro
       updatedAt: serverTimestamp(),
     },
     { merge: true },
-  )
-}
-
-export function subscribeGanttDetailPanelWidth(email: string, callback: (width: number | null) => void) {
-  const normalizedEmail = normalizeEmail(email)
-  if (!normalizedEmail) {
-    callback(null)
-    return () => {}
-  }
-
-  const profileRef = doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail))
-  return onSnapshot(
-    profileRef,
-    (snapshot) => {
-      const profile = snapshot.data() as { faGanttDetailPanelWidth?: unknown } | undefined
-      const raw = profile?.[FA_GANTT_DETAIL_PANEL_WIDTH_FIELD]
-      const width = toNumberOr(raw, DEFAULT_GANTT_DETAIL_PANEL_WIDTH)
-      callback(width > 0 ? width : null)
-    },
-    (error) => {
-      console.error("FA gantt detail panel width snapshot error:", error)
-      callback(null)
-    },
   )
 }
 

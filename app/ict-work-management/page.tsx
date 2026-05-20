@@ -19,11 +19,8 @@ import {
   saveDashboardSortBy,
   subscribeDashboardSortBy,
   saveGanttCollapseState,
-  subscribeGanttCollapseState,
   saveGanttDetailPanelWidth,
   saveGanttLeftPanelWidth,
-  subscribeGanttDetailPanelWidth,
-  subscribeGanttLeftPanelWidth,
   addHistoryEntry,
   fetchHistoryEntries,
   fetchNotificationHistoryEntries,
@@ -35,7 +32,7 @@ import {
   DEFAULT_DEPARTMENT_ORG_SETTINGS,
   saveSeenRecentChangeIds,
   saveUserHiddenOwnerOptions,
-  subscribeCurrentUserProfile,
+  subscribeCurrentUserProfileBundle,
   subscribeDepartmentOrgSettings,
   subscribeGlobalSchedules,
   fetchUserProfiles,
@@ -181,35 +178,10 @@ export default function IctWorkManagementPage() {
     setGanttCollapsedProjectIds([])
     setGanttCollapsedTaskIds([])
     setIsGanttCollapseStateReady(false)
-
-    if (!email) return
-
-    const unsubscribe = subscribeGanttCollapseState(email, (state) => {
-      setGanttCollapsedProjectIds(state.collapsedProjectIds)
-      setGanttCollapsedTaskIds(state.collapsedTaskIds)
-      setIsGanttCollapseStateReady(true)
-    })
-
-    return () => unsubscribe()
-  }, [user?.email])
-
-  useEffect(() => {
-    const email = user?.email || ""
     setGanttLeftPanelWidth(null)
     setGanttDetailPanelWidth(null)
 
-    if (!email) return
-
-    const unsubscribeLeftPanel = subscribeGanttLeftPanelWidth(email, setGanttLeftPanelWidth)
-    const unsubscribeDetailPanel = subscribeGanttDetailPanelWidth(email, setGanttDetailPanelWidth)
-    return () => {
-      unsubscribeLeftPanel()
-      unsubscribeDetailPanel()
-    }
-  }, [user?.email])
-
-  useEffect(() => {
-    if (!user?.email) {
+    if (!email) {
       setDefaultTaskPerson("")
       setCurrentTaskAliases([])
       setCurrentProfileEmail("")
@@ -219,10 +191,18 @@ export default function IctWorkManagementPage() {
       return
     }
 
-    const normalizedProfileEmail = user.email.trim().toLowerCase()
+    const normalizedProfileEmail = email.trim().toLowerCase()
     setCurrentProfileEmail("")
     setIsCurrentProfileReady(false)
-    const unsubscribe = subscribeCurrentUserProfile(user.email, (profile) => {
+
+    const unsubscribe = subscribeCurrentUserProfileBundle(email, "ict", (bundle) => {
+      setGanttCollapsedProjectIds(bundle.ganttCollapseState.collapsedProjectIds)
+      setGanttCollapsedTaskIds(bundle.ganttCollapseState.collapsedTaskIds)
+      setIsGanttCollapseStateReady(true)
+      setGanttLeftPanelWidth(bundle.ganttLeftPanelWidth)
+      setGanttDetailPanelWidth(bundle.ganttDetailPanelWidth)
+
+      const profile = bundle.profile
       const accountDefaultPerson = (profile?.taskAliases || [])[0]?.trim() || ""
       setDefaultTaskPerson(accountDefaultPerson)
       setCurrentTaskAliases((prev) => keepIfShallowEqual(prev, profile?.taskAliases || []))
@@ -233,7 +213,7 @@ export default function IctWorkManagementPage() {
     })
 
     return () => unsubscribe()
-  }, [user])
+  }, [user?.email])
 
   const compact = <T extends Record<string, unknown>>(obj: T): T =>
     Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T
