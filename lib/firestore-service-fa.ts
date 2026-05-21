@@ -648,6 +648,7 @@ export async function fetchProjectsWithTasks(
 export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Promise<string> {
   const docRef = await addDoc(collection(db, PROJECTS_COLLECTION), {
     ...project,
+    isHidden: typeof project.isHidden === "boolean" ? project.isHidden : false,
     displayOrder: Date.now(),
     createdAt: serverTimestamp(),
   })
@@ -676,6 +677,7 @@ export async function addTaskToDB(task: Omit<Task, "id">): Promise<string> {
   const docRef = await addDoc(collection(db, TASKS_COLLECTION), {
     ...task,
     personKeys: buildTaskPersonKeys(task.person || ""),
+    isHidden: typeof task.isHidden === "boolean" ? task.isHidden : false,
     displayOrder: typeof task.displayOrder === "number" ? task.displayOrder : Date.now(),
   })
   return docRef.id

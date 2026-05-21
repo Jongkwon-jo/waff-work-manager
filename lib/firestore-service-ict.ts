@@ -22,6 +22,7 @@ import {
 import type { Project, Task } from "./data"
 import {
   addHistoryEntry as addStrategyHistoryEntry,
+  computeIsIctFromDepartment,
   deleteHistoryEntry as deleteStrategyHistoryEntry,
   rollbackHistoryEntry as rollbackStrategyHistoryEntry,
 } from "./firestore-service"
@@ -1189,6 +1190,7 @@ export async function fetchProjectsWithTasks(
 export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Promise<string> {
   const docRef = await addDoc(collection(db, PROJECTS_COLLECTION), {
     ...stripSourcePrefixFromRecord(project as Record<string, unknown>),
+    isHidden: typeof project.isHidden === "boolean" ? project.isHidden : false,
     displayOrder: Date.now(),
     createdAt: serverTimestamp(),
   })
@@ -1256,9 +1258,15 @@ export async function addTaskToDB(task: Omit<Task, "id">): Promise<string> {
   const isStrategyTask = isStrategyId(task.projectId)
   const targetCollection = isStrategyTask ? STRATEGY_TASKS_COLLECTION : TASKS_COLLECTION
   const cleanTask = stripSourcePrefixFromRecord(task as unknown as Record<string, unknown>)
+  // ICT 페이지에서 strategy task 를 만드는 경우 server-side isIct 필터에도 잡혀야 함
+  const isIctValue = isStrategyTask
+    ? computeIsIctFromDepartment((cleanTask as { department?: unknown }).department ?? task.department)
+    : undefined
   const docRef = await addDoc(collection(db, targetCollection), {
     ...cleanTask,
     personKeys: buildTaskPersonKeys(task.person || ""),
+    isHidden: typeof task.isHidden === "boolean" ? task.isHidden : false,
+    ...(isIctValue !== undefined ? { isIct: isIctValue } : {}),
     displayOrder: typeof task.displayOrder === "number" ? task.displayOrder : Date.now(),
   })
   return `${isStrategyTask ? STRATEGY_SOURCE_PREFIX : ICT_SOURCE_PREFIX}${docRef.id}`

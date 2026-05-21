@@ -990,6 +990,8 @@ export async function fetchProjectsWithTasks(
 export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Promise<string> {
   const docRef = await addDoc(collection(db, PROJECTS_COLLECTION), {
     ...project,
+    // where("isHidden", "==", false) 쿼리에서 누락되지 않도록 항상 boolean 으로 저장
+    isHidden: typeof project.isHidden === "boolean" ? project.isHidden : false,
     displayOrder: Date.now(),
     createdAt: serverTimestamp(),
   })
@@ -1025,6 +1027,8 @@ export async function addTaskToDB(task: Omit<Task, "id">): Promise<string> {
     ...task,
     personKeys: buildTaskPersonKeys(task.person || ""),
     isIct: computeIsIctFromDepartment(task.department),
+    // where("isHidden", "==", false) 쿼리에서 누락되지 않도록 항상 boolean 으로 저장
+    isHidden: typeof task.isHidden === "boolean" ? task.isHidden : false,
     displayOrder: typeof task.displayOrder === "number" ? task.displayOrder : Date.now(),
   })
   return docRef.id
