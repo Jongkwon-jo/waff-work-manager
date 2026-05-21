@@ -369,6 +369,30 @@ export type SubscribeOptions = {
    * Set true to also stream hidden docs (composite indexes required).
    */
   includeHidden?: boolean
+  dateRange?: {
+    startDate: string
+    endDate: string
+  }
+}
+
+type QueryDateRange = {
+  startDate: string
+  endDate: string
+}
+
+function normalizeQueryDateRange(range?: SubscribeOptions["dateRange"]): QueryDateRange | undefined {
+  const startDate = toStringOrEmpty(range?.startDate)
+  const endDate = toStringOrEmpty(range?.endDate)
+  if (!startDate || !endDate) return undefined
+  return startDate <= endDate ? { startDate, endDate } : { startDate: endDate, endDate: startDate }
+}
+
+function taskOverlapsQueryDateRange(task: any, range?: QueryDateRange) {
+  if (!range) return true
+  const startDate = toStringOrEmpty(task?.startDate) || toStringOrEmpty(task?.endDate)
+  const endDate = toStringOrEmpty(task?.endDate) || startDate
+  if (!startDate || !endDate) return false
+  return startDate <= range.endDate && endDate >= range.startDate
 }
 
 export function subscribeProjectsWithTasksByPersonKeys(
@@ -377,6 +401,7 @@ export function subscribeProjectsWithTasksByPersonKeys(
   options: SubscribeOptions = {},
 ) {
   const includeHidden = options.includeHidden === true
+  const dateRange = normalizeQueryDateRange(options.dateRange)
   const queryKeys = buildTaskPersonKeysFromValues(personKeys).slice(0, 300)
   if (queryKeys.length === 0) {
     callback([])
@@ -402,10 +427,16 @@ export function subscribeProjectsWithTasksByPersonKeys(
   const unsubscribes = chunks.map((chunk, index) => {
     const constraints: any[] = [where("personKeys", "array-contains-any", chunk)]
     if (!includeHidden) constraints.push(where("isHidden", "==", false))
+    if (dateRange) constraints.push(where("endDate", ">=", dateRange.startDate))
     return onSnapshot(
       query(collection(db, TASKS_COLLECTION), ...constraints),
       (snapshot) => {
-        taskGroups.set(index, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+        taskGroups.set(
+          index,
+          snapshot.docs
+            .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
+            .filter((task) => taskOverlapsQueryDateRange(task, dateRange)),
+        )
         void notify().catch((error) => {
           console.error("Scoped FA data snapshot error:", error)
           if (!disposed) callback([])

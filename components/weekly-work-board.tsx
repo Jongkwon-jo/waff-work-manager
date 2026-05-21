@@ -28,6 +28,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { CategoryBadge, ProjectTypeBadge, StatusBadge } from "@/components/status-badge"
 import type { Project, Task } from "@/lib/data"
+import type { UserPagePermissions } from "@/lib/page-access"
 import { UNCLASSIFIED_TEAM_NAME, getOrgTeamForPerson, getTeamScopePersonsForAliases } from "@/lib/department-org"
 import { cn, keepIfShallowEqual } from "@/lib/utils"
 import { toast } from "sonner"
@@ -85,8 +86,29 @@ export type WeeklyWorkDataSource = {
   label: string
   departmentGroup: DepartmentPersonGroup
   managementHref: string
-  subscribeToData: (callback: (projects: Project[]) => void) => () => void
-  subscribeScopedToData?: (personKeys: string[], callback: (projects: Project[]) => void) => () => void
+  permissionKey?: keyof Pick<UserPagePermissions, "strategyWeeklyWork" | "faWeeklyWork" | "ictWeeklyWork">
+  subscribeToData: (
+    callback: (projects: Project[]) => void,
+    options?: { dateRange?: { startDate: string; endDate: string } },
+  ) => () => void
+  subscribeScopedToData?: (
+    personKeys: string[],
+    callback: (projects: Project[]) => void,
+    options?: { dateRange?: { startDate: string; endDate: string } },
+  ) => () => void
+}
+
+function getDepartmentFromUrlSearch() {
+  if (typeof window === "undefined") return undefined
+
+  const params = new URLSearchParams(window.location.search)
+  const raw = (params.get("source") || params.get("department") || "").trim().toLowerCase()
+  if (!raw) return undefined
+  if (raw === "all" || raw === "전체" || raw === "전체부서") return "all"
+  if (raw === "ict") return "ICT"
+  if (raw === "fa") return "FA"
+  if (raw === "strategy" || raw === "전략기획") return "전략기획"
+  return undefined
 }
 
 function getWeeklyStatusBarClass(status: Task["status"]) {
@@ -230,9 +252,10 @@ export function WeeklyWorkBoard({
   dataSources,
   tone,
 }: WeeklyWorkBoardProps) {
-  const { user } = useAuth()
+  const { user, isAdmin, pagePermissions } = useAuth()
   const [projectsBySource, setProjectsBySource] = useState<Record<string, Project[]>>({})
   const [selectedDepartment, setSelectedDepartment] = useState<DepartmentPersonGroup | "all">("all")
+  const [hasResolvedInitialDepartment, setHasResolvedInitialDepartment] = useState(false)
   const [selectedTeam, setSelectedTeam] = useState("all")
   const [selectedPerson, setSelectedPerson] = useState("all")
   const [hasUserSelectedPersonScope, setHasUserSelectedPersonScope] = useState(false)
@@ -299,6 +322,13 @@ export function WeeklyWorkBoard({
   const today = useMemo(() => new Date(), [])
   const weekStart = useMemo(() => startOfWeek(currentWeekAnchor, { weekStartsOn: 1 }), [currentWeekAnchor])
   const weekEnd = useMemo(() => endOfWeek(currentWeekAnchor, { weekStartsOn: 1 }), [currentWeekAnchor])
+  const weeklyDateRange = useMemo(
+    () => ({
+      startDate: toDayKey(weekStart),
+      endDate: toDayKey(weekEnd),
+    }),
+    [weekEnd, weekStart],
+  )
 
   const weekDays = useMemo<WeekDay[]>(
     () =>
@@ -316,15 +346,45 @@ export function WeeklyWorkBoard({
     [today, weekStart],
   )
 
-  const departmentOptions = useMemo(() => dataSources.map((source) => source.departmentGroup), [dataSources])
+  const availableDataSources = useMemo(
+    () =>
+      dataSources.filter(
+        (source) => isAdmin || !source.permissionKey || pagePermissions[source.permissionKey],
+      ),
+    [dataSources, isAdmin, pagePermissions],
+  )
+
+  const departmentOptions = useMemo(() => availableDataSources.map((source) => source.departmentGroup), [availableDataSources])
 
   useEffect(() => {
-    if (hasAppliedProfileDepartmentRef.current) return
+    if (hasResolvedInitialDepartment) return
+
+    const urlDepartment = getDepartmentFromUrlSearch()
+    if (urlDepartment === "all") {
+      setSelectedDepartment("all")
+      hasAppliedProfileDepartmentRef.current = true
+    } else if (urlDepartment && departmentOptions.includes(urlDepartment)) {
+      setSelectedDepartment(urlDepartment)
+      hasAppliedProfileDepartmentRef.current = true
+    }
+
+    setHasResolvedInitialDepartment(true)
+  }, [departmentOptions, hasResolvedInitialDepartment])
+
+  const shouldApplyProfileDepartment = Boolean(
+    hasResolvedInitialDepartment &&
+      profileDepartment &&
+      departmentOptions.includes(profileDepartment) &&
+      selectedDepartment !== profileDepartment &&
+      !hasAppliedProfileDepartmentRef.current,
+  )
+
+  useEffect(() => {
+    if (!shouldApplyProfileDepartment) return
     if (!profileDepartment) return
-    if (!departmentOptions.includes(profileDepartment)) return
     setSelectedDepartment(profileDepartment)
     hasAppliedProfileDepartmentRef.current = true
-  }, [departmentOptions, profileDepartment])
+  }, [profileDepartment, shouldApplyProfileDepartment])
 
   useEffect(() => {
     if (selectedDepartment === "all") return
@@ -334,12 +394,14 @@ export function WeeklyWorkBoard({
 
   const selectedDataSources = useMemo(
     () => {
+      if (!hasResolvedInitialDepartment) return []
       if (user?.email && !isProfileLoaded) return []
+      if (shouldApplyProfileDepartment) return []
       return selectedDepartment === "all"
-        ? dataSources
-        : dataSources.filter((source) => source.departmentGroup === selectedDepartment)
+        ? availableDataSources
+        : availableDataSources.filter((source) => source.departmentGroup === selectedDepartment)
     },
-    [dataSources, isProfileLoaded, selectedDepartment, user?.email],
+    [availableDataSources, hasResolvedInitialDepartment, isProfileLoaded, selectedDepartment, shouldApplyProfileDepartment, user?.email],
   )
 
   const allAllowedPersons = useMemo(
@@ -440,13 +502,13 @@ export function WeeklyWorkBoard({
       source.subscribeScopedToData
         ? source.subscribeScopedToData(queryPersons, (projects) => {
             setProjectsBySource((prev) => ({ ...prev, [source.id]: projects }))
-          })
+          }, { dateRange: weeklyDateRange })
         : source.subscribeToData((projects) => {
         setProjectsBySource((prev) => ({ ...prev, [source.id]: projects }))
-          }),
+          }, { dateRange: weeklyDateRange }),
     )
     return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
-  }, [allowedPersons, hasUserSelectedPersonScope, profileDefaultPerson, selectedDataSources, selectedPerson, teamScopePersons])
+  }, [allowedPersons, hasUserSelectedPersonScope, profileDefaultPerson, selectedDataSources, selectedPerson, teamScopePersons, weeklyDateRange])
 
   const weeklyTasks = useMemo<WeeklyTaskItem[]>(() => {
     const profilePerson = profileDefaultPerson || user?.email?.split("@")[0] || "개인"
@@ -678,9 +740,9 @@ export function WeeklyWorkBoard({
   }, [departmentOrgSettings, departmentPersonSettings, profileDefaultPerson, profileDepartment, selectedDataSources, selectedDepartment, visiblePersons, visibleTasks])
 
   const accountManagementHref = profileDepartment
-    ? dataSources.find((source) => source.departmentGroup === profileDepartment)?.managementHref
+    ? availableDataSources.find((source) => source.departmentGroup === profileDepartment)?.managementHref
     : undefined
-  const selectedManagementHref = accountManagementHref || selectedDataSources[0]?.managementHref || homeHref
+  const selectedManagementHref = selectedDataSources[0]?.managementHref || accountManagementHref || homeHref
 
   const weeklyGlobalSchedules = useMemo<WeeklyGlobalScheduleItem[]>(() => {
     return globalSchedules
@@ -796,13 +858,16 @@ export function WeeklyWorkBoard({
 
                 <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
                 <div className="flex flex-wrap gap-1.5 rounded-xl border border-slate-200 bg-white/80 p-1.5 sm:col-span-2">
-                  {[{ id: "all", label: "전체 부서" }, ...dataSources.map((source) => ({ id: source.departmentGroup, label: source.label }))].map((item) => {
+                  {[{ id: "all", label: "전체 부서" }, ...availableDataSources.map((source) => ({ id: source.departmentGroup, label: source.label }))].map((item) => {
                     const selected = selectedDepartment === item.id
                     return (
                       <button
                         key={item.id}
                         type="button"
-                        onClick={() => setSelectedDepartment(item.id as DepartmentPersonGroup | "all")}
+                        onClick={() => {
+                          hasAppliedProfileDepartmentRef.current = true
+                          setSelectedDepartment(item.id as DepartmentPersonGroup | "all")
+                        }}
                         className={cn(
                           "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold shadow-sm transition-all",
                           selected

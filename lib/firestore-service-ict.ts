@@ -568,6 +568,30 @@ export type SubscribeOptions = {
    * Set true to also stream hidden docs (composite indexes required).
    */
   includeHidden?: boolean
+  dateRange?: {
+    startDate: string
+    endDate: string
+  }
+}
+
+type QueryDateRange = {
+  startDate: string
+  endDate: string
+}
+
+function normalizeQueryDateRange(range?: SubscribeOptions["dateRange"]): QueryDateRange | undefined {
+  const startDate = toStringOrEmpty(range?.startDate)
+  const endDate = toStringOrEmpty(range?.endDate)
+  if (!startDate || !endDate) return undefined
+  return startDate <= endDate ? { startDate, endDate } : { startDate: endDate, endDate: startDate }
+}
+
+function taskOverlapsQueryDateRange(task: any, range?: QueryDateRange) {
+  if (!range) return true
+  const startDate = toStringOrEmpty(task?.startDate) || toStringOrEmpty(task?.endDate)
+  const endDate = toStringOrEmpty(task?.endDate) || startDate
+  if (!startDate || !endDate) return false
+  return startDate <= range.endDate && endDate >= range.startDate
 }
 
 export function subscribeProjectsWithTasksByPersonKeys(
@@ -576,6 +600,7 @@ export function subscribeProjectsWithTasksByPersonKeys(
   options: SubscribeOptions = {},
 ) {
   const includeHidden = options.includeHidden === true
+  const dateRange = normalizeQueryDateRange(options.dateRange)
   const queryKeys = buildTaskPersonKeysFromValues(personKeys).slice(0, 300)
   if (queryKeys.length === 0) {
     callback([])
@@ -630,24 +655,28 @@ export function subscribeProjectsWithTasksByPersonKeys(
   chunks.forEach((chunk, index) => {
     const ictConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
     if (!includeHidden) ictConstraints.push(where("isHidden", "==", false))
+    if (dateRange) ictConstraints.push(where("endDate", ">=", dateRange.startDate))
     // ICT 스케줄에 보일 strategy task = department 에 "ICT" 포함된 것만 (isIctTask 와 동일).
     const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk), where("isIct", "==", true)]
     if (!includeHidden) strategyConstraints.push(where("isHidden", "==", false))
+    if (dateRange) strategyConstraints.push(where("endDate", ">=", dateRange.startDate))
     unsubscribes.push(
       onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...ictConstraints),
         (snapshot) => {
           ictTaskGroups.set(
             index,
-            snapshot.docs.map((docSnap) => ({
-              ...docSnap.data(),
-              id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
-              parentId: toOptionalString(docSnap.data().parentId) ? `${ICT_SOURCE_PREFIX}${toStringOrEmpty(docSnap.data().parentId)}` : undefined,
-              projectId: `${ICT_SOURCE_PREFIX}${toStringOrEmpty(docSnap.data().projectId)}`,
-              sourceSchedule: "ict",
-              originalTaskId: docSnap.id,
-              originalProjectId: toStringOrEmpty(docSnap.data().projectId),
-            })),
+            snapshot.docs
+              .map((docSnap) => ({
+                ...docSnap.data(),
+                id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
+                parentId: toOptionalString(docSnap.data().parentId) ? `${ICT_SOURCE_PREFIX}${toStringOrEmpty(docSnap.data().parentId)}` : undefined,
+                projectId: `${ICT_SOURCE_PREFIX}${toStringOrEmpty(docSnap.data().projectId)}`,
+                sourceSchedule: "ict",
+                originalTaskId: docSnap.id,
+                originalProjectId: toStringOrEmpty(docSnap.data().projectId),
+              }))
+              .filter((task) => taskOverlapsQueryDateRange(task, dateRange)),
           )
           void notify().catch((error) => console.error("Scoped ICT data snapshot error:", error))
         },
@@ -660,7 +689,8 @@ export function subscribeProjectsWithTasksByPersonKeys(
             index,
             snapshot.docs
               .filter((docSnap) => isIctTask(docSnap.data()))
-              .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })),
+              .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
+              .filter((task) => taskOverlapsQueryDateRange(task, dateRange)),
           )
           void notify().catch((error) => console.error("Scoped linked strategy data snapshot error:", error))
         },
