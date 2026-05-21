@@ -8,6 +8,8 @@ import type { Project, ProjectPmOption, Task, TaskStatus } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import {
   subscribeProjectsWithTasksByScheduleScope,
+  subscribeHiddenProjectSummaries,
+  subscribeProjectsWithTasksByProjectIds,
   addProjectToDB,
   updateProjectInDB,
   deleteProjectFromDB,
@@ -66,6 +68,10 @@ export default function FaWorkManagementPage() {
   const isMobile = useIsMobile()
   const canEdit = isAdmin || pagePermissions.faWorkManagementEdit
   const [projectList, setProjectList] = useState<Project[]>([])
+  const [visibleProjectList, setVisibleProjectList] = useState<Project[]>([])
+  const [selectedHiddenProjectList, setSelectedHiddenProjectList] = useState<Project[]>([])
+  const [hiddenProjectOptions, setHiddenProjectOptions] = useState<Project[]>([])
+  const [selectedHiddenProjectIds, setSelectedHiddenProjectIds] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all")
@@ -237,6 +243,11 @@ export default function FaWorkManagementPage() {
 
   const compact = <T extends Record<string, unknown>>(obj: T): T =>
     Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T
+
+  const mergeProjectLists = (visibleProjects: Project[], selectedHiddenProjects: Project[]) => {
+    const visibleIds = new Set(visibleProjects.map((project) => project.id))
+    return [...visibleProjects, ...selectedHiddenProjects.filter((project) => !visibleIds.has(project.id))]
+  }
 
   const serializeTaskData = (task: Task) =>
     compact({
@@ -722,19 +733,19 @@ export default function FaWorkManagementPage() {
 
   useEffect(() => {
     if (!user) {
-      setProjectList([])
+      setVisibleProjectList([])
       setLoading(false)
       return
     }
     if (!currentUserEmail) {
-      setProjectList([])
+      setVisibleProjectList([])
       setLoading(false)
       return
     }
 
     const isProfileForCurrentUser = Boolean(currentUserEmail) && currentProfileEmail === currentUserEmail
     if (!canViewFullSchedule && (!isCurrentProfileReady || !isProfileForCurrentUser || !isDepartmentOrgReady)) {
-      setProjectList([])
+      setVisibleProjectList([])
       setLoading(true)
       return
     }
@@ -746,10 +757,10 @@ export default function FaWorkManagementPage() {
         personKeys: scheduleScopeAliases,
         pmEmail: currentUserEmail,
         creatorEmail: currentUserEmail,
-        includeHidden: true,
+        includeHidden: false,
       },
       (data) => {
-        setProjectList(data)
+        setVisibleProjectList(data.filter((project) => !project.isHidden))
         setLoading(false)
       },
     )
@@ -764,6 +775,37 @@ export default function FaWorkManagementPage() {
     isDepartmentOrgReady,
     scheduleScopeAliases,
   ])
+
+  useEffect(() => {
+    setProjectList(mergeProjectLists(visibleProjectList, selectedHiddenProjectList))
+  }, [visibleProjectList, selectedHiddenProjectList])
+
+  useEffect(() => {
+    if (!user || !canViewFullSchedule) {
+      setHiddenProjectOptions([])
+      setSelectedHiddenProjectIds([])
+      return
+    }
+
+    return subscribeHiddenProjectSummaries(setHiddenProjectOptions)
+  }, [user, canViewFullSchedule])
+
+  useEffect(() => {
+    const availableHiddenIds = new Set(hiddenProjectOptions.map((project) => project.id))
+    setSelectedHiddenProjectIds((prev) => {
+      const next = prev.filter((projectId) => availableHiddenIds.has(projectId))
+      return next.length === prev.length ? prev : next
+    })
+  }, [hiddenProjectOptions])
+
+  useEffect(() => {
+    if (!user || selectedHiddenProjectIds.length === 0) {
+      setSelectedHiddenProjectList([])
+      return
+    }
+
+    return subscribeProjectsWithTasksByProjectIds(selectedHiddenProjectIds, setSelectedHiddenProjectList)
+  }, [user, selectedHiddenProjectIds])
 
   const canViewAllRecentChanges = isAdmin || pagePermissions.recentChangesWidget
   const canRollbackRecentChanges = isAdmin
@@ -1810,6 +1852,8 @@ export default function FaWorkManagementPage() {
                 defaultTaskPerson={defaultTaskPerson}
                 pmOptions={pmOptions}
                 searchQuery={deferredSearchQuery}
+                hiddenProjectOptions={hiddenProjectOptions}
+                selectedHiddenProjectIds={selectedHiddenProjectIds}
                 canEdit={canEdit}
                 canDeleteTask={isTaskCreatedByCurrentUser}
                 onAddProject={handleAddProject}
@@ -1823,6 +1867,7 @@ export default function FaWorkManagementPage() {
                 onMoveProject={handleMoveProject}
                 onMoveTask={handleMoveTask}
                 onMoveTaskToProjectTop={handleMoveTaskToProjectTop}
+                onSelectedHiddenProjectIdsChange={setSelectedHiddenProjectIds}
                 onReorderTask={handleReorderTask}
                 persistedCollapsedProjectIds={ganttCollapsedProjectIds}
                 persistedCollapsedTaskIds={ganttCollapsedTaskIds}

@@ -10,6 +10,7 @@ import { EditProjectDialog } from "./edit-project-dialog"
 import { AddTaskDialog } from "./add-task-dialog"
 import { AddProjectDialog } from "./add-project-dialog"
 import { Button } from "./ui/button"
+import { Checkbox } from "./ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover"
@@ -54,6 +55,8 @@ interface GanttViewProps {
   defaultTaskPerson?: string
   pmOptions?: ProjectPmOption[]
   searchQuery: string
+  hiddenProjectOptions?: Project[]
+  selectedHiddenProjectIds?: string[]
   canEdit?: boolean
   canDeleteTask?: (task: Task) => boolean
   onAddProject: (project: Project) => void
@@ -67,6 +70,7 @@ interface GanttViewProps {
   onMoveProject: (projectId: string, direction: "up" | "down") => void
   onMoveTask: (projectId: string, taskId: string, direction: "up" | "down") => void
   onMoveTaskToProjectTop?: (targetProjectId: string, draggedTaskId: string) => Promise<void> | void
+  onSelectedHiddenProjectIdsChange?: (projectIds: string[]) => void
   onReorderTask: (
     projectId: string,
     draggedTaskId: string,
@@ -394,6 +398,8 @@ export function GanttView({
   defaultTaskPerson = "",
   pmOptions = [],
   searchQuery,
+  hiddenProjectOptions = [],
+  selectedHiddenProjectIds = [],
   canEdit = true,
   canDeleteTask,
   onAddProject,
@@ -407,6 +413,7 @@ export function GanttView({
   onMoveProject,
   onMoveTask,
   onMoveTaskToProjectTop,
+  onSelectedHiddenProjectIdsChange,
   onReorderTask,
   persistedCollapsedProjectIds = [],
   persistedCollapsedTaskIds = [],
@@ -521,10 +528,17 @@ export function GanttView({
 
   const allProjectIds = useMemo(() => projects.map((project) => project.id), [projects])
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
+  const selectedHiddenProjectIdSet = useMemo(
+    () => new Set(selectedHiddenProjectIds),
+    [selectedHiddenProjectIds],
+  )
+  const hasHiddenProjectSelector = Boolean(onSelectedHiddenProjectIdsChange)
   const hiddenProjectCount = useMemo(
     () => Array.from(hiddenProjectIds).filter((id) => projectById.has(id)).length,
     [hiddenProjectIds, projectById],
   )
+  const hiddenProjectOptionCount = hiddenProjectOptions.length
+  const selectedHiddenProjectCount = selectedHiddenProjectIds.length
   const allCollapsibleTaskIds = useMemo(() => {
     const ids: string[] = []
     const walk = (tasks: Task[]) => {
@@ -792,6 +806,18 @@ export function GanttView({
     })
   }
 
+  const toggleSelectedHiddenProject = (projectId: string) => {
+    if (!onSelectedHiddenProjectIdsChange) return
+    const next = selectedHiddenProjectIdSet.has(projectId)
+      ? selectedHiddenProjectIds.filter((id) => id !== projectId)
+      : [...selectedHiddenProjectIds, projectId]
+    onSelectedHiddenProjectIdsChange(next)
+  }
+
+  const clearSelectedHiddenProjects = () => {
+    onSelectedHiddenProjectIdsChange?.([])
+  }
+
   const toggleProjectVisibility = (projectId: string) => {
     const project = projectById.get(projectId)
     if (!project) return
@@ -914,13 +940,12 @@ export function GanttView({
   const filteredProjects = useMemo<FilteredProject[]>(() => {
     const lowerQuery = searchQuery.trim().toLowerCase()
 
-    const sourceProjects = showHiddenProjects
-      ? projects
-      : projects.filter(
-          (project) =>
-            !hiddenProjectIds.has(project.id) ||
-            Boolean(highlightedTaskId && projectContainsTaskId(project, highlightedTaskId)),
-        )
+    const sourceProjects = projects.filter((project) => {
+      const isHiddenProject = hiddenProjectIds.has(project.id)
+      if (!isHiddenProject) return true
+      if (hasHiddenProjectSelector) return selectedHiddenProjectIdSet.has(project.id)
+      return showHiddenProjects || Boolean(highlightedTaskId && projectContainsTaskId(project, highlightedTaskId))
+    })
 
     return sourceProjects
       .map((project) => {
@@ -968,12 +993,16 @@ export function GanttView({
           }, [] as FlattenedTask[])
         }
 
+        const forceShowHiddenProjectTasks =
+          hasHiddenProjectSelector && selectedHiddenProjectIdSet.has(project.id)
+        const showHiddenProjectTasks = expandedHiddenProjectIds.has(project.id) || forceShowHiddenProjectTasks
+
         return {
           ...project,
           tasks:
-            hiddenProjectIds.has(project.id) && !expandedHiddenProjectIds.has(project.id)
+            hiddenProjectIds.has(project.id) && !showHiddenProjectTasks
               ? []
-              : collectVisibleRows(project.tasks, 0, expandedHiddenProjectIds.has(project.id)),
+              : collectVisibleRows(project.tasks, 0, showHiddenProjectTasks),
         }
       })
       .filter((project) => {
@@ -985,7 +1014,7 @@ export function GanttView({
         }
         return true
       })
-  }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds, hiddenTaskIds, hiddenProjectIds, showHiddenProjects, expandedHiddenParentIds, expandedHiddenProjectIds, collapsedHiddenParentIds, highlightedTaskId])
+  }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds, hiddenTaskIds, hiddenProjectIds, showHiddenProjects, expandedHiddenParentIds, expandedHiddenProjectIds, collapsedHiddenParentIds, highlightedTaskId, hasHiddenProjectSelector, selectedHiddenProjectIdSet])
 
   const visibleTaskMap = useMemo(() => {
     const map = new Map<string, FlattenedTask>()
@@ -2055,7 +2084,73 @@ export function GanttView({
                     )}
                   </div>
                   <div className="flex items-center gap-1.5">
-                    {hiddenProjectCount > 0 && (
+                    {hasHiddenProjectSelector && hiddenProjectOptionCount > 0 ? (
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 gap-1 px-2 text-[11px]"
+                          >
+                            <EyeOff className="h-3 w-3" />
+                            숨긴 프로젝트
+                            <span className="text-muted-foreground">
+                              {selectedHiddenProjectCount > 0
+                                ? `${selectedHiddenProjectCount}/${hiddenProjectOptionCount}`
+                                : hiddenProjectOptionCount}
+                            </span>
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[320px] p-2" align="end">
+                          <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                            <div>
+                              <div className="text-xs font-semibold text-foreground">숨긴 프로젝트</div>
+                              <div className="text-[11px] text-muted-foreground">{hiddenProjectOptionCount}개 숨김</div>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-[11px]"
+                              disabled={selectedHiddenProjectCount === 0}
+                              onClick={clearSelectedHiddenProjects}
+                            >
+                              선택 해제
+                            </Button>
+                          </div>
+                          <div className="max-h-[280px] overflow-y-auto pr-1">
+                            {hiddenProjectOptions.map((project) => {
+                              const selected = selectedHiddenProjectIdSet.has(project.id)
+                              return (
+                                <div
+                                  key={project.id}
+                                  className={cn(
+                                    "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs hover:bg-accent",
+                                    selected && "bg-accent/70",
+                                  )}
+                                >
+                                  <Checkbox
+                                    checked={selected}
+                                    aria-label={`${project.name} 선택`}
+                                    onCheckedChange={() => toggleSelectedHiddenProject(project.id)}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="min-w-0 flex-1 text-left"
+                                    onClick={() => toggleSelectedHiddenProject(project.id)}
+                                  >
+                                    <div className="truncate font-medium text-foreground">{project.name}</div>
+                                    <div className="truncate text-[10px] text-muted-foreground">
+                                      {[project.type, project.period].filter(Boolean).join(" · ") || "숨김 프로젝트"}
+                                    </div>
+                                  </button>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    ) : hiddenProjectCount > 0 && (
                       <Button
                         variant="ghost"
                         size="sm"

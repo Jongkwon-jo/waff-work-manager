@@ -1032,6 +1032,197 @@ export function subscribeProjectsWithTasksByScheduleScope(
   }
 }
 
+export function subscribeHiddenProjectSummaries(callback: (projects: Project[]) => void) {
+  let ictProjects: any[] = []
+  let strategyProjects: any[] = []
+  let strategyProjectUnsubscribes: Array<() => void> = []
+
+  const notify = () => {
+    callback(buildProjectTree(ictProjects, []).concat(buildProjectTree(strategyProjects, [])))
+  }
+
+  const resetStrategyProjectSubscriptions = (projectIds: string[]) => {
+    strategyProjectUnsubscribes.forEach((unsubscribe) => unsubscribe())
+    strategyProjectUnsubscribes = []
+    strategyProjects = []
+
+    const chunks = chunkValues(projectIds, 30)
+    if (chunks.length === 0) {
+      notify()
+      return
+    }
+
+    const projectGroups = new Map<number, any[]>()
+    strategyProjectUnsubscribes = chunks.map((chunk, index) =>
+      onSnapshot(
+        query(collection(db, STRATEGY_PROJECTS_COLLECTION), where(documentId(), "in", chunk)),
+        (snapshot) => {
+          projectGroups.set(
+            index,
+            snapshot.docs.map((docSnap) => ({
+              ...docSnap.data(),
+              id: `${STRATEGY_SOURCE_PREFIX}${docSnap.id}`,
+              originalProjectId: docSnap.id,
+              sourceSchedule: "strategy",
+              isHidden: true,
+            })),
+          )
+          strategyProjects = Array.from(projectGroups.values()).flat()
+          notify()
+        },
+        (error) => {
+          console.error("Hidden linked strategy project summaries snapshot error:", error)
+        },
+      ),
+    )
+  }
+
+  const unsubscribeIctProjects = onSnapshot(
+    query(collection(db, PROJECTS_COLLECTION), where("isHidden", "==", true)),
+    (snapshot) => {
+      ictProjects = snapshot.docs.map((docSnap) => ({
+        ...docSnap.data(),
+        id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
+        originalProjectId: docSnap.id,
+        sourceSchedule: "ict",
+      }))
+      notify()
+    },
+    (error) => {
+      console.error("Hidden ICT projects snapshot error:", error)
+      ictProjects = []
+      notify()
+    },
+  )
+
+  const unsubscribeLinkedStrategyVisibility = onSnapshot(
+    doc(db, SETTINGS_COLLECTION, LINKED_STRATEGY_PROJECT_VISIBILITY_DOC),
+    (snapshot) => {
+      resetStrategyProjectSubscriptions(
+        normalizeHiddenLinkedStrategyProjectIds(snapshot.data()?.[HIDDEN_LINKED_STRATEGY_PROJECT_IDS_FIELD]),
+      )
+    },
+    (error) => {
+      console.error("Hidden linked strategy project ids snapshot error:", error)
+      resetStrategyProjectSubscriptions([])
+    },
+  )
+
+  return () => {
+    unsubscribeIctProjects()
+    unsubscribeLinkedStrategyVisibility()
+    strategyProjectUnsubscribes.forEach((unsubscribe) => unsubscribe())
+  }
+}
+
+export function subscribeProjectsWithTasksByProjectIds(
+  projectIds: string[],
+  callback: (projects: Project[]) => void,
+) {
+  const ids = uniqueTrimmedStrings(projectIds)
+  if (ids.length === 0) {
+    callback([])
+    return () => {}
+  }
+
+  const ictIds = ids.filter((id) => !isStrategyId(id)).map((id) => stripIctId(id) || id)
+  const strategyIds = ids.filter((id) => isStrategyId(id)).map((id) => stripStrategyId(id) || id)
+  const ictProjectGroups = new Map<string, any[]>()
+  const ictTaskGroups = new Map<string, any[]>()
+  const strategyProjectGroups = new Map<string, any[]>()
+  const strategyTaskGroups = new Map<string, any[]>()
+
+  const notify = () => {
+    callback(
+      buildIctScheduleProjectTree(
+        Array.from(ictProjectGroups.values()).flat(),
+        Array.from(ictTaskGroups.values()).flat(),
+        Array.from(strategyProjectGroups.values()).flat(),
+        Array.from(strategyTaskGroups.values()).flat(),
+        strategyIds,
+      ),
+    )
+  }
+
+  const unsubscribes: Array<() => void> = []
+
+  chunkValues(ictIds, 30).forEach((chunk, index) => {
+    unsubscribes.push(
+      onSnapshot(
+        query(collection(db, PROJECTS_COLLECTION), where(documentId(), "in", chunk)),
+        (snapshot) => {
+          ictProjectGroups.set(
+            `p:${index}`,
+            snapshot.docs.map((docSnap) => ({
+              ...docSnap.data(),
+              id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
+              originalProjectId: docSnap.id,
+              sourceSchedule: "ict",
+            })),
+          )
+          notify()
+        },
+        (error) => {
+          console.error("Selected hidden ICT projects snapshot error:", error)
+        },
+      ),
+      onSnapshot(
+        query(collection(db, TASKS_COLLECTION), where("projectId", "in", chunk)),
+        (snapshot) => {
+          ictTaskGroups.set(
+            `t:${index}`,
+            snapshot.docs.map((docSnap) => {
+              const raw = docSnap.data()
+              return {
+                ...raw,
+                id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
+                projectId: `${ICT_SOURCE_PREFIX}${toStringOrEmpty(raw.projectId)}`,
+                parentId: toOptionalString(raw.parentId)
+                  ? `${ICT_SOURCE_PREFIX}${toStringOrEmpty(raw.parentId)}`
+                  : undefined,
+                originalTaskId: docSnap.id,
+                originalProjectId: toStringOrEmpty(raw.projectId),
+                sourceSchedule: "ict",
+              }
+            }),
+          )
+          notify()
+        },
+        (error) => {
+          console.error("Selected hidden ICT tasks snapshot error:", error)
+        },
+      ),
+    )
+  })
+
+  chunkValues(strategyIds, 30).forEach((chunk, index) => {
+    unsubscribes.push(
+      onSnapshot(
+        query(collection(db, STRATEGY_PROJECTS_COLLECTION), where(documentId(), "in", chunk)),
+        (snapshot) => {
+          strategyProjectGroups.set(`p:${index}`, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+          notify()
+        },
+        (error) => {
+          console.error("Selected hidden linked strategy projects snapshot error:", error)
+        },
+      ),
+      onSnapshot(
+        query(collection(db, STRATEGY_TASKS_COLLECTION), where("projectId", "in", chunk)),
+        (snapshot) => {
+          strategyTaskGroups.set(`t:${index}`, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+          notify()
+        },
+        (error) => {
+          console.error("Selected hidden linked strategy tasks snapshot error:", error)
+        },
+      ),
+    )
+  })
+
+  return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
+}
+
 export function subscribeToData(
   callback: (projects: Project[]) => void,
   options: SubscribeOptions = {},
