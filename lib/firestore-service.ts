@@ -1014,10 +1014,17 @@ export async function deleteProjectFromDB(projectId: string): Promise<void> {
   await batch.commit()
 }
 
+// ICT 스케줄 페이지에서 strategy tasks 를 server-side 필터하기 위한 boolean.
+// lib/firestore-service-ict.ts 의 isIctTask 와 동일 규칙.
+export function computeIsIctFromDepartment(department: unknown): boolean {
+  return typeof department === "string" && department.toUpperCase().includes("ICT")
+}
+
 export async function addTaskToDB(task: Omit<Task, "id">): Promise<string> {
   const docRef = await addDoc(collection(db, TASKS_COLLECTION), {
     ...task,
     personKeys: buildTaskPersonKeys(task.person || ""),
+    isIct: computeIsIctFromDepartment(task.department),
     displayOrder: typeof task.displayOrder === "number" ? task.displayOrder : Date.now(),
   })
   return docRef.id
@@ -1028,6 +1035,7 @@ export async function updateTaskInDB(taskId: string, updates: Omit<Partial<Task>
   const payload = {
     ...updates,
     ...(typeof updates.person === "string" ? { personKeys: buildTaskPersonKeys(updates.person) } : {}),
+    ...(typeof updates.department === "string" ? { isIct: computeIsIctFromDepartment(updates.department) } : {}),
   }
   await updateDoc(taskRef, payload)
 }
@@ -1065,7 +1073,32 @@ export async function addHistoryEntry(entry: HistoryEntryInput): Promise<string>
     createdAt: serverTimestamp(),
   })
   const docRef = await addDoc(collection(db, HISTORY_COLLECTION), payload)
+  clearHistoryQueryCache()
   return docRef.id
+}
+
+// 60초 모듈 캐시 — 페이지 재진입/위젯 재열기에 의한 동일 fetch 반복을 흡수.
+// addHistoryEntry 가 호출되면 무효화.
+const HISTORY_QUERY_CACHE_TTL_MS = 60_000
+type CachedHistoryQuery = { value: ChangeHistoryEntry[]; fetchedAt: number }
+const historyQueryCache = new Map<string, CachedHistoryQuery>()
+
+function getCachedHistoryQuery(key: string): ChangeHistoryEntry[] | undefined {
+  const entry = historyQueryCache.get(key)
+  if (!entry) return undefined
+  if (Date.now() - entry.fetchedAt >= HISTORY_QUERY_CACHE_TTL_MS) {
+    historyQueryCache.delete(key)
+    return undefined
+  }
+  return entry.value
+}
+
+function setCachedHistoryQuery(key: string, value: ChangeHistoryEntry[]): void {
+  historyQueryCache.set(key, { value, fetchedAt: Date.now() })
+}
+
+function clearHistoryQueryCache(): void {
+  historyQueryCache.clear()
 }
 
 function mapHistoryDoc(docSnap: { id: string; data: () => any }): ChangeHistoryEntry {
@@ -1094,6 +1127,9 @@ function mapHistoryDoc(docSnap: { id: string; data: () => any }): ChangeHistoryE
 
 export async function fetchHistoryEntries(limitCount = 30, actorEmail?: string): Promise<ChangeHistoryEntry[]> {
   const normalizedActorEmail = actorEmail ? normalizeEmail(actorEmail) : ""
+  const cacheKey = `f|${limitCount}|${normalizedActorEmail}`
+  const cached = getCachedHistoryQuery(cacheKey)
+  if (cached) return cached
   const historyQ = normalizedActorEmail
     ? query(
         collection(db, HISTORY_COLLECTION),
@@ -1103,7 +1139,9 @@ export async function fetchHistoryEntries(limitCount = 30, actorEmail?: string):
       )
     : query(collection(db, HISTORY_COLLECTION), orderBy("createdAt", "desc"), limit(limitCount))
   const snapshot = await getDocs(historyQ)
-  return snapshot.docs.map(mapHistoryDoc)
+  const result = snapshot.docs.map(mapHistoryDoc)
+  setCachedHistoryQuery(cacheKey, result)
+  return result
 }
 
 export async function fetchNotificationHistoryEntries(
@@ -1112,6 +1150,9 @@ export async function fetchNotificationHistoryEntries(
 ): Promise<ChangeHistoryEntry[]> {
   const personKeys = buildPersonKeys(filter.personKeys || []).slice(0, 30)
   const departmentGroups = (filter.departmentGroups || []).slice(0, 30)
+  const cacheKey = `n|${limitCount}|${personKeys.join(",")}|${departmentGroups.join(",")}`
+  const cached = getCachedHistoryQuery(cacheKey)
+  if (cached) return cached
   const historyQueries: any[] = []
 
   if (personKeys.length > 0) {
@@ -1134,16 +1175,21 @@ export async function fetchNotificationHistoryEntries(
       ),
     )
   }
-  if (historyQueries.length === 0) return []
+  if (historyQueries.length === 0) {
+    setCachedHistoryQuery(cacheKey, [])
+    return []
+  }
 
   const snapshots = await Promise.all(historyQueries.map((historyQ) => getDocs(historyQ)))
   const byId = new Map<string, ChangeHistoryEntry>()
   snapshots.forEach((snapshot) => {
     snapshot.docs.forEach((docSnap) => byId.set(docSnap.id, mapHistoryDoc(docSnap)))
   })
-  return Array.from(byId.values())
+  const result = Array.from(byId.values())
     .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0))
     .slice(0, limitCount)
+  setCachedHistoryQuery(cacheKey, result)
+  return result
 }
 
 function getCollectionForEntity(entityType: "project" | "task") {

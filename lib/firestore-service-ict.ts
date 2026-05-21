@@ -629,7 +629,8 @@ export function subscribeProjectsWithTasksByPersonKeys(
   chunks.forEach((chunk, index) => {
     const ictConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
     if (!includeHidden) ictConstraints.push(where("isHidden", "==", false))
-    const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
+    // ICT 스케줄에 보일 strategy task = department 에 "ICT" 포함된 것만 (isIctTask 와 동일).
+    const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk), where("isIct", "==", true)]
     if (!includeHidden) strategyConstraints.push(where("isHidden", "==", false))
     unsubscribes.push(
       onSnapshot(
@@ -815,7 +816,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
     }
 
     strategyPmTaskUnsubscribes = chunks.map((chunk, index) => {
-      const constraints: any[] = [where("projectId", "in", chunk)]
+      const constraints: any[] = [where("projectId", "in", chunk), where("isIct", "==", true)]
       if (!includeHidden) constraints.push(where("isHidden", "==", false))
       return onSnapshot(
         query(collection(db, STRATEGY_TASKS_COLLECTION), ...constraints),
@@ -853,7 +854,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
   chunkValues(queryKeys, 30).forEach((chunk, index) => {
     const ictConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
     if (!includeHidden) ictConstraints.push(where("isHidden", "==", false))
-    const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
+    const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk), where("isIct", "==", true)]
     if (!includeHidden) strategyConstraints.push(where("isHidden", "==", false))
     unsubscribes.push(
       onSnapshot(
@@ -909,7 +910,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
         },
       ),
       onSnapshot(
-        query(collection(db, STRATEGY_TASKS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail)),
+        query(collection(db, STRATEGY_TASKS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail), where("isIct", "==", true)),
         (snapshot) => {
           strategyTaskGroups.set(
             "creator",
@@ -999,9 +1000,10 @@ export function subscribeToData(
   const strategyProjectsQuery = includeHidden
     ? query(collection(db, STRATEGY_PROJECTS_COLLECTION))
     : query(collection(db, STRATEGY_PROJECTS_COLLECTION), where("isHidden", "==", false))
+  // ICT 스케줄에 보일 strategy task = department 에 "ICT" 포함된 것 (isIct=true) 만 server-side 필터.
   const strategyTasksQuery = includeHidden
-    ? query(collection(db, STRATEGY_TASKS_COLLECTION))
-    : query(collection(db, STRATEGY_TASKS_COLLECTION), where("isHidden", "==", false))
+    ? query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true))
+    : query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true), where("isHidden", "==", false))
   const linkedStrategyVisibilityRef = doc(db, SETTINGS_COLLECTION, LINKED_STRATEGY_PROJECT_VISIBILITY_DOC)
 
   let ictProjects: any[] = []
@@ -1128,9 +1130,10 @@ export async function fetchProjectsWithTasks(
   const strategyProjectsQuery = includeHidden
     ? query(collection(db, STRATEGY_PROJECTS_COLLECTION))
     : query(collection(db, STRATEGY_PROJECTS_COLLECTION), where("isHidden", "==", false))
+  // 위 subscribeToData 와 동일 — server-side isIct 필터.
   const strategyTasksQuery = includeHidden
-    ? query(collection(db, STRATEGY_TASKS_COLLECTION))
-    : query(collection(db, STRATEGY_TASKS_COLLECTION), where("isHidden", "==", false))
+    ? query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true))
+    : query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true), where("isHidden", "==", false))
 
   const projectsSnapshot = await getDocs(projectsQuery)
   const tasksSnapshot = await getDocs(tasksQuery)
@@ -1312,6 +1315,7 @@ export async function addHistoryEntry(entry: HistoryEntryInput): Promise<string>
       createdAt: serverTimestamp(),
     })
     const docRef = await addDoc(collection(db, HISTORY_COLLECTION), payload)
+    clearHistoryQueryCache()
     return `${ICT_SOURCE_PREFIX}${docRef.id}`
   }
   if (isStrategyId(entry.entityId) || isStrategyId(entry.projectId)) {
@@ -1330,6 +1334,8 @@ export async function addHistoryEntry(entry: HistoryEntryInput): Promise<string>
       source: "ict-work-management" as HistorySource,
     }
     const id = await addStrategyHistoryEntry(strategyEntry as any)
+    // ICT fetch 결과는 strategy history 일부도 포함 → ICT 캐시도 함께 비움
+    clearHistoryQueryCache()
     return `${STRATEGY_SOURCE_PREFIX}${id}`
   }
   const payload = compactObject({
@@ -1351,7 +1357,33 @@ export async function addHistoryEntry(entry: HistoryEntryInput): Promise<string>
     createdAt: serverTimestamp(),
   })
   const docRef = await addDoc(collection(db, HISTORY_COLLECTION), payload)
+  clearHistoryQueryCache()
   return `${ICT_SOURCE_PREFIX}${docRef.id}`
+}
+
+// 60초 모듈 캐시 — addHistoryEntry 호출 시 무효화.
+// ICT fetch 는 ict_history + strategy history 양쪽을 합쳐 반환하므로,
+// 어느 분기든 ICT 캐시는 모두 비워야 함.
+const HISTORY_QUERY_CACHE_TTL_MS = 60_000
+type CachedHistoryQuery = { value: ChangeHistoryEntry[]; fetchedAt: number }
+const historyQueryCache = new Map<string, CachedHistoryQuery>()
+
+function getCachedHistoryQuery(key: string): ChangeHistoryEntry[] | undefined {
+  const entry = historyQueryCache.get(key)
+  if (!entry) return undefined
+  if (Date.now() - entry.fetchedAt >= HISTORY_QUERY_CACHE_TTL_MS) {
+    historyQueryCache.delete(key)
+    return undefined
+  }
+  return entry.value
+}
+
+function setCachedHistoryQuery(key: string, value: ChangeHistoryEntry[]): void {
+  historyQueryCache.set(key, { value, fetchedAt: Date.now() })
+}
+
+function clearHistoryQueryCache(): void {
+  historyQueryCache.clear()
 }
 
 function mapIctHistoryDoc(docSnap: { id: string; data: () => any }): ChangeHistoryEntry {
@@ -1427,6 +1459,9 @@ function isIctSourceHistoryDoc(docSnap: { data: () => any }) {
 
 export async function fetchHistoryEntries(limitCount = 30, actorEmail?: string): Promise<ChangeHistoryEntry[]> {
   const normalizedActorEmail = actorEmail ? normalizeEmail(actorEmail) : ""
+  const cacheKey = `f|${limitCount}|${normalizedActorEmail}`
+  const cached = getCachedHistoryQuery(cacheKey)
+  if (cached) return cached
   const ictHistoryLimit = Math.max(limitCount * 3, limitCount)
   const strategyHistoryLimit = Math.max(limitCount * 3, limitCount)
   const ictHistoryQ = normalizedActorEmail
@@ -1445,13 +1480,15 @@ export async function fetchHistoryEntries(limitCount = 30, actorEmail?: string):
       )
     : query(collection(db, "history"), orderBy("createdAt", "desc"), limit(strategyHistoryLimit))
   const [snapshot, strategySnapshot] = await Promise.all([getDocs(ictHistoryQ), getDocs(strategyHistoryQ)])
-  return mergeHistoryEntries(
+  const result = mergeHistoryEntries(
     [
       ...snapshot.docs.map(mapIctHistoryDoc),
       ...strategySnapshot.docs.filter(isIctSourceHistoryDoc).map(mapStrategyHistoryDoc),
     ],
     limitCount,
   )
+  setCachedHistoryQuery(cacheKey, result)
+  return result
 }
 
 export async function fetchNotificationHistoryEntries(
@@ -1460,6 +1497,9 @@ export async function fetchNotificationHistoryEntries(
 ): Promise<ChangeHistoryEntry[]> {
   const personKeys = buildPersonKeys(filter.personKeys || []).slice(0, 30)
   const departmentGroups = (filter.departmentGroups || []).slice(0, 30)
+  const cacheKey = `n|${limitCount}|${personKeys.join(",")}|${departmentGroups.join(",")}`
+  const cached = getCachedHistoryQuery(cacheKey)
+  if (cached) return cached
   const historyQueries: Array<{ source: "ict" | "strategy"; query: any }> = []
 
   if (personKeys.length > 0) {
@@ -1500,14 +1540,19 @@ export async function fetchNotificationHistoryEntries(
     })
   }
 
-  if (historyQueries.length === 0) return []
+  if (historyQueries.length === 0) {
+    setCachedHistoryQuery(cacheKey, [])
+    return []
+  }
   const snapshots = await Promise.all(historyQueries.map((item) => getDocs(item.query)))
   const entries = snapshots.flatMap((snapshot, index) => {
     const historyQuery = historyQueries[index]
     const docs = historyQuery.source === "strategy" ? snapshot.docs.filter(isIctSourceHistoryDoc) : snapshot.docs
     return docs.map(historyQuery.source === "strategy" ? mapStrategyHistoryDoc : mapIctHistoryDoc)
   })
-  return mergeHistoryEntries(entries, limitCount)
+  const result = mergeHistoryEntries(entries, limitCount)
+  setCachedHistoryQuery(cacheKey, result)
+  return result
 }
 
 function getCollectionForEntity(entityType: "project" | "task") {
