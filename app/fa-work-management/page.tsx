@@ -1503,7 +1503,7 @@ export default function FaWorkManagementPage() {
               </Link>
             )}
             <Link
-              href="/weekly-work"
+              href="/weekly-work?source=fa"
               className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-background px-3 text-[11px] font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
             >
               <CalendarDays className="h-3.5 w-3.5" />
