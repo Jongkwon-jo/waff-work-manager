@@ -583,15 +583,30 @@ function normalizeQueryDateRange(range?: SubscribeOptions["dateRange"]): QueryDa
   const startDate = toStringOrEmpty(range?.startDate)
   const endDate = toStringOrEmpty(range?.endDate)
   if (!startDate || !endDate) return undefined
-  return startDate <= endDate ? { startDate, endDate } : { startDate: endDate, endDate: startDate }
+  return { startDate, endDate }
+}
+
+function parseDateOrdinal(value?: string) {
+  const text = toStringOrEmpty(value)
+  if (!text) return undefined
+  const isoMatched = text.match(/^\d{4}-(\d{2})-(\d{2})$/)
+  if (isoMatched) return Number(isoMatched[1]) * 100 + Number(isoMatched[2])
+  const koreanMatched = text.match(/^(?:\d{4}\s*년\s*)?(\d{1,2})\s*월\s*(\d{1,2})\s*일$/)
+  if (koreanMatched) return Number(koreanMatched[1]) * 100 + Number(koreanMatched[2])
+  const shortMatched = text.match(/^(\d{1,2})[\/.-](\d{1,2})$/)
+  if (shortMatched) return Number(shortMatched[1]) * 100 + Number(shortMatched[2])
+  return undefined
 }
 
 function taskOverlapsQueryDateRange(task: any, range?: QueryDateRange) {
   if (!range) return true
-  const startDate = toStringOrEmpty(task?.startDate) || toStringOrEmpty(task?.endDate)
-  const endDate = toStringOrEmpty(task?.endDate) || startDate
-  if (!startDate || !endDate) return false
-  return startDate <= range.endDate && endDate >= range.startDate
+  const rangeStart = parseDateOrdinal(range.startDate)
+  const rangeEnd = parseDateOrdinal(range.endDate)
+  const startDate = parseDateOrdinal(toStringOrEmpty(task?.startDate) || toStringOrEmpty(task?.endDate))
+  const endDate = parseDateOrdinal(toStringOrEmpty(task?.endDate) || toStringOrEmpty(task?.startDate))
+  if (rangeStart === undefined || rangeEnd === undefined || startDate === undefined || endDate === undefined) return false
+  if (rangeStart <= rangeEnd) return startDate <= rangeEnd && endDate >= rangeStart
+  return startDate <= rangeEnd || endDate >= rangeStart
 }
 
 export function subscribeProjectsWithTasksByPersonKeys(

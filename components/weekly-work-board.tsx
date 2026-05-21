@@ -155,6 +155,10 @@ function toDayKey(date: Date) {
   return format(date, "yyyy-MM-dd")
 }
 
+function toTaskDateKey(date: Date) {
+  return format(date, "MM월 dd일", { locale: ko })
+}
+
 function splitPersons(value?: string) {
   const normalized = (value || "").trim()
   if (!normalized) return ["미지정"]
@@ -324,8 +328,8 @@ export function WeeklyWorkBoard({
   const weekEnd = useMemo(() => endOfWeek(currentWeekAnchor, { weekStartsOn: 1 }), [currentWeekAnchor])
   const weeklyDateRange = useMemo(
     () => ({
-      startDate: toDayKey(weekStart),
-      endDate: toDayKey(weekEnd),
+      startDate: toTaskDateKey(weekStart),
+      endDate: toTaskDateKey(weekEnd),
     }),
     [weekEnd, weekStart],
   )
