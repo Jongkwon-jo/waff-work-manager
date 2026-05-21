@@ -48,7 +48,7 @@ import { FilterBar, ProjectSortType } from "@/components/filter-bar"
 import { ProjectList } from "@/components/project-list"
 import { GanttView } from "@/components/gantt-view"
 import { ProjectCardView } from "@/components/project-card-view"
-import { Bell, CalendarDays, Building2, Home, List, BarChart3, LayoutGrid, RotateCcw, History, ChevronDown, ChevronRight, LogOut, UserRoundSearch, Eye, EyeOff } from "lucide-react"
+import { Bell, CalendarDays, Building2, Home, List, BarChart3, LayoutGrid, RotateCcw, History, ChevronDown, ChevronRight, LogOut, UserRoundSearch } from "lucide-react"
 import { cn, keepIfShallowEqual } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -96,7 +96,6 @@ export default function IctWorkManagementPage() {
   const [isDepartmentOrgReady, setIsDepartmentOrgReady] = useState(false)
   const [globalSchedules, setGlobalSchedules] = useState<GlobalSchedule[]>([])
   const [operationInProgress, setOperationInProgress] = useState<"copy" | "delete" | null>(null)
-  const [includeHiddenInQuery, setIncludeHiddenInQuery] = useState(false)
   const deferredSearchQuery = useDeferredValue(searchQuery)
 
   useEffect(() => {
@@ -771,7 +770,7 @@ export default function IctWorkManagementPage() {
         personKeys: scheduleScopeAliases,
         pmEmail: currentUserEmail,
         creatorEmail: currentUserEmail,
-        includeHidden: includeHiddenInQuery,
+        includeHidden: true,
       },
       (data) => {
         setProjectList(data)
@@ -788,7 +787,6 @@ export default function IctWorkManagementPage() {
     isCurrentProfileReady,
     isDepartmentOrgReady,
     scheduleScopeAliases,
-    includeHiddenInQuery,
   ])
 
   const canViewAllRecentChanges = isAdmin || pagePermissions.recentChangesWidget
@@ -1787,21 +1785,6 @@ export default function IctWorkManagementPage() {
                 )}
               </Button>
             )}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 shrink-0 gap-1.5 whitespace-nowrap px-2 text-[11px]"
-              onClick={() => setIncludeHiddenInQuery((prev) => !prev)}
-              title={
-                includeHiddenInQuery
-                  ? "숨김 항목 fetch ON - 다시 누르면 숨김 항목을 Firestore에서 불러오지 않습니다."
-                  : "숨김 항목 fetch OFF - 누르면 숨김 항목까지 함께 불러옵니다."
-              }
-            >
-              {includeHiddenInQuery ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-              {includeHiddenInQuery ? "숨김 포함" : "숨김 제외"}
-            </Button>
             {canEdit && (
               <Button
                 variant="outline"
@@ -2007,7 +1990,6 @@ export default function IctWorkManagementPage() {
                 persistedLeftPanelWidth={ganttLeftPanelWidth}
                 persistedDetailPanelWidth={ganttDetailPanelWidth}
                 persistedHiddenOwnerOptions={hiddenOwnerOptions}
-                showHiddenItems={includeHiddenInQuery}
                 isCollapseStateReady={isGanttCollapseStateReady}
                 onPersistCollapseState={handlePersistGanttCollapseState}
                 onPersistLeftPanelWidth={handlePersistGanttLeftPanelWidth}
