@@ -2007,6 +2007,7 @@ export default function IctWorkManagementPage() {
                 persistedLeftPanelWidth={ganttLeftPanelWidth}
                 persistedDetailPanelWidth={ganttDetailPanelWidth}
                 persistedHiddenOwnerOptions={hiddenOwnerOptions}
+                showHiddenItems={includeHiddenInQuery}
                 isCollapseStateReady={isGanttCollapseStateReady}
                 onPersistCollapseState={handlePersistGanttCollapseState}
                 onPersistLeftPanelWidth={handlePersistGanttLeftPanelWidth}

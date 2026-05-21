@@ -77,6 +77,7 @@ interface GanttViewProps {
   persistedLeftPanelWidth?: number | null
   persistedDetailPanelWidth?: number | null
   persistedHiddenOwnerOptions?: string[]
+  showHiddenItems?: boolean
   isCollapseStateReady?: boolean
   onPersistCollapseState?: (state: { collapsedProjectIds: string[]; collapsedTaskIds: string[] }) => void
   onPersistLeftPanelWidth?: (width: number) => void
@@ -407,6 +408,7 @@ export function GanttView({
   persistedLeftPanelWidth = null,
   persistedDetailPanelWidth = null,
   persistedHiddenOwnerOptions = [],
+  showHiddenItems = false,
   isCollapseStateReady = false,
   onPersistCollapseState,
   onPersistLeftPanelWidth,
@@ -880,7 +882,7 @@ export function GanttView({
   const filteredProjects = useMemo<FilteredProject[]>(() => {
     const lowerQuery = searchQuery.trim().toLowerCase()
 
-    const sourceProjects = showHiddenProjects
+    const sourceProjects = showHiddenItems || showHiddenProjects
       ? projects
       : projects.filter(
           (project) =>
@@ -892,7 +894,7 @@ export function GanttView({
       .map((project) => {
         const projectMatchesSearch = lowerQuery.length > 0 && project.name.toLowerCase().includes(lowerQuery)
 
-        const collectVisibleRows = (tasks: Task[], depth = 0, showHiddenInLevel = false): FlattenedTask[] => {
+        const collectVisibleRows = (tasks: Task[], depth = 0, showHiddenInLevel = showHiddenItems): FlattenedTask[] => {
           return tasks.reduce((acc, task) => {
             const hasChildren = (task.subTasks?.length || 0) > 0
             const isHidden = hiddenTaskIds.has(task.id)
@@ -902,7 +904,7 @@ export function GanttView({
             }
 
             const parentCollapsed = collapsedHiddenParentIds.has(task.id)
-            const nextShowHidden = parentCollapsed ? false : expandedHiddenParentIds.has(task.id)
+            const nextShowHidden = showHiddenItems ? true : parentCollapsed ? false : expandedHiddenParentIds.has(task.id)
             const childRows = collectVisibleRows(
               task.subTasks || [],
               depth + 1,
@@ -936,7 +938,7 @@ export function GanttView({
 
         return {
           ...project,
-          tasks: collectVisibleRows(project.tasks, 0, expandedHiddenProjectIds.has(project.id)),
+          tasks: collectVisibleRows(project.tasks, 0, showHiddenItems || expandedHiddenProjectIds.has(project.id)),
         }
       })
       .filter((project) => {
@@ -948,7 +950,7 @@ export function GanttView({
         }
         return true
       })
-  }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds, hiddenTaskIds, hiddenProjectIds, showHiddenProjects, expandedHiddenParentIds, expandedHiddenProjectIds, collapsedHiddenParentIds, highlightedTaskId])
+  }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds, hiddenTaskIds, hiddenProjectIds, showHiddenItems, showHiddenProjects, expandedHiddenParentIds, expandedHiddenProjectIds, collapsedHiddenParentIds, highlightedTaskId])
 
   const visibleTaskMap = useMemo(() => {
     const map = new Map<string, FlattenedTask>()
@@ -2023,9 +2025,12 @@ export function GanttView({
                         variant="ghost"
                         size="sm"
                         className="h-7 gap-1 px-2 text-[11px]"
+                        disabled={showHiddenItems}
                         onClick={() => setShowHiddenProjects((prev) => !prev)}
                       >
-                        {showHiddenProjects
+                        {showHiddenItems
+                          ? `숨김 포함 표시 중(${String(hiddenProjectCount).padStart(2, "0")}개)`
+                          : showHiddenProjects
                           ? "- 숨긴 프로젝트 숨기기"
                         : `+ 숨긴 프로젝트(${String(hiddenProjectCount).padStart(2, "0")}개)`}
                       </Button>
