@@ -60,6 +60,7 @@ interface GanttViewProps {
   onEditProject: (project: Project) => void
   onAddTask: (task: Task) => void
   onEditTask: (task: Task) => void
+  onSetTaskTreeHidden?: (task: Task, isHidden: boolean) => Promise<void> | void
   onDeleteTask: (taskId: string, projectId: string) => void
   onDeleteTasks?: (tasks: Array<{ taskId: string; projectId: string }>) => Promise<void> | void
   onCopyTasks?: (taskIds: string[]) => Promise<void> | void
@@ -358,6 +359,10 @@ function taskTreeContainsId(task: Task, targetTaskId: string): boolean {
   return (task.subTasks || []).some((child) => taskTreeContainsId(child, targetTaskId))
 }
 
+function collectTaskSubtree(task: Task): Task[] {
+  return [task, ...(task.subTasks || []).flatMap((child) => collectTaskSubtree(child))]
+}
+
 function projectContainsTaskId(project: Project, targetTaskId: string): boolean {
   return project.tasks.some((task) => taskTreeContainsId(task, targetTaskId))
 }
@@ -395,6 +400,7 @@ export function GanttView({
   onEditProject,
   onAddTask,
   onEditTask,
+  onSetTaskTreeHidden,
   onDeleteTask,
   onDeleteTasks,
   onCopyTasks,
@@ -693,19 +699,38 @@ export function GanttView({
   }
 
   const toggleTaskHidden = (task: Task) => {
-    const taskId = task.id
-    const willHide = !hiddenTaskIds.has(taskId)
+    const affectedTasks = collectTaskSubtree(task)
+    const affectedTaskIds = affectedTasks.map((affectedTask) => affectedTask.id)
+    const willHide = !hiddenTaskIds.has(task.id)
 
     setHiddenTaskIds((prev) => {
       const next = new Set(prev)
-      if (next.has(taskId)) next.delete(taskId)
-      else next.add(taskId)
+      affectedTaskIds.forEach((taskId) => {
+        if (willHide) next.add(taskId)
+        else next.delete(taskId)
+      })
       return next
     })
 
-    updateTaskInline(task, { isHidden: willHide })
+    if (onSetTaskTreeHidden) {
+      void onSetTaskTreeHidden(task, willHide)
+    } else {
+      affectedTasks.forEach((affectedTask) => updateTaskInline(affectedTask, { isHidden: willHide }))
+    }
 
-    if (!willHide) return
+    if (!willHide) {
+      setExpandedHiddenParentIds((prev) => {
+        const next = new Set(prev)
+        affectedTaskIds.forEach((taskId) => next.delete(taskId))
+        return next
+      })
+      setCollapsedHiddenParentIds((prev) => {
+        const next = new Set(prev)
+        affectedTaskIds.forEach((taskId) => next.delete(taskId))
+        return next
+      })
+      return
+    }
 
     if (!task.parentId) {
       setExpandedHiddenProjectIds((prev) => {
@@ -806,7 +831,8 @@ export function GanttView({
     hiddenProjectIds.has(project.id)
       ? countAllTasks(project.tasks)
       : project.tasks.reduce(
-          (count, task) => count + (hiddenTaskIds.has(task.id) ? 1 : 0) + countHiddenChildren(task),
+          (count, task) =>
+            count + (hiddenTaskIds.has(task.id) ? countTaskAndDescendants(task) : countHiddenChildren(task)),
           0,
         )
 

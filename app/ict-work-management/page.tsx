@@ -331,7 +331,7 @@ export default function IctWorkManagementPage() {
 
   const getHistoryLabel = (entry: ChangeHistoryEntry) => {
     if (entry.entityType === "project_bundle") return "프로젝트 삭제"
-    if (entry.entityType === "batch") return "업무 이동/정렬"
+    if (entry.entityType === "batch") return "업무 일괄 변경"
     if (entry.entityType === "project" && entry.action === "create") return "프로젝트 추가"
     if (entry.entityType === "project" && entry.action === "update") return "프로젝트 수정"
     if (entry.entityType === "project" && entry.action === "delete") return "프로젝트 삭제"
@@ -412,6 +412,14 @@ export default function IctWorkManagementPage() {
         ...task,
         subTasks: task.subTasks ? removeTaskFromTree(task.subTasks, taskId) : task.subTasks,
       }))
+  }
+
+  const setTaskHiddenInTree = (tasks: Task[], taskIds: Set<string>, isHidden: boolean): Task[] => {
+    return tasks.map((task) => ({
+      ...task,
+      isHidden: taskIds.has(task.id) ? isHidden : task.isHidden,
+      subTasks: task.subTasks ? setTaskHiddenInTree(task.subTasks, taskIds, isHidden) : task.subTasks,
+    }))
   }
 
   const replaceTaskIdInTree = (tasks: Task[], fromId: string, toId: string): Task[] => {
@@ -1064,6 +1072,49 @@ export default function IctWorkManagementPage() {
       toast.success("업무가 수정되었습니다.")
     } catch (error) {
       toast.error("업무 수정 실패")
+    }
+  }
+
+  const handleSetTaskTreeHidden = async (rootTask: Task, isHidden: boolean) => {
+    const affectedTasks = flattenTasks([rootTask])
+    const affectedTaskIds = new Set(affectedTasks.map((task) => task.id))
+    if (affectedTaskIds.size === 0) return
+
+    const beforeProjectList = projectList
+    const beforeTaskMap = new Map(allTasksFlat.map((task) => [task.id, task]))
+
+    setProjectList((prev) =>
+      prev.map((project) =>
+        project.id === rootTask.projectId
+          ? {
+              ...project,
+              tasks: setTaskHiddenInTree(project.tasks, affectedTaskIds, isHidden),
+            }
+          : project,
+      ),
+    )
+
+    try {
+      await Promise.all(Array.from(affectedTaskIds).map((taskId) => updateTaskInDB(taskId, { isHidden })))
+      await recordHistory({
+        entityType: "batch",
+        action: "batch_update",
+        projectId: rootTask.projectId,
+        batch: affectedTasks.map((task) => {
+          const beforeTask = beforeTaskMap.get(task.id) || task
+          const afterTask = { ...beforeTask, isHidden }
+          return {
+            entityType: "task" as const,
+            entityId: task.id,
+            before: serializeTaskData(beforeTask),
+            after: serializeTaskData(afterTask),
+          }
+        }),
+      })
+      toast.success(isHidden ? "하위 업무까지 숨김 처리되었습니다." : "하위 업무까지 표시되었습니다.")
+    } catch (error) {
+      setProjectList(beforeProjectList)
+      toast.error("업무 숨김 상태 저장 실패")
     }
   }
 
@@ -1978,6 +2029,7 @@ export default function IctWorkManagementPage() {
                 onEditProject={handleEditProject}
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
+                onSetTaskTreeHidden={handleSetTaskTreeHidden}
                 onDeleteTask={handleDeleteTask}
                 onDeleteTasks={handleDeleteTasksBulk}
                 onCopyTasks={handleCopyTasksBulk}
