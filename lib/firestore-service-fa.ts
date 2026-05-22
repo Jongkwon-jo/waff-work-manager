@@ -364,9 +364,9 @@ async function fetchProjectsForTasks(tasks: any[]) {
 
 export type SubscribeOptions = {
   /**
-   * When false (default), excludes docs with `isHidden == true` from the
-   * underlying Firestore queries so they don't count toward read quota.
-   * Set true to also stream hidden docs (composite indexes required).
+   * When false (default), hidden projects are excluded from the initial
+   * schedule stream. Tasks in visible projects are still streamed so the
+   * Gantt view can show and restore hidden task rows.
    */
   includeHidden?: boolean
   dateRange?: {
@@ -441,7 +441,6 @@ export function subscribeProjectsWithTasksByPersonKeys(
 
   const unsubscribes = chunks.map((chunk, index) => {
     const constraints: any[] = [where("personKeys", "array-contains-any", chunk)]
-    if (!includeHidden) constraints.push(where("isHidden", "==", false))
     if (dateRange) constraints.push(where("endDate", ">=", dateRange.startDate))
     return onSnapshot(
       query(collection(db, TASKS_COLLECTION), ...constraints),
@@ -535,7 +534,6 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
     pmTaskUnsubscribes = chunks.map((chunk, index) => {
       const constraints: any[] = [where("projectId", "in", chunk)]
-      if (!includeHidden) constraints.push(where("isHidden", "==", false))
       return onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...constraints),
         (snapshot) => {
@@ -556,7 +554,6 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
   chunkValues(queryKeys, 30).forEach((chunk, index) => {
     const constraints: any[] = [where("personKeys", "array-contains-any", chunk)]
-    if (!includeHidden) constraints.push(where("isHidden", "==", false))
     unsubscribes.push(
       onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...constraints),
@@ -579,12 +576,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
       onSnapshot(
         query(collection(db, TASKS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail)),
         (snapshot) => {
-          taskGroups.set(
-            "creator",
-            snapshot.docs
-              .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
-              .filter((task: any) => includeHidden || !toBooleanOr(task.isHidden, false)),
-          )
+          taskGroups.set("creator", snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
           void notify().catch((error) => {
             console.error("Schedule creator FA data snapshot error:", error)
             if (!disposed) callback([])
@@ -713,12 +705,7 @@ export function subscribeToData(
         onSnapshot(
           query(collection(db, TASKS_COLLECTION), where("projectId", "in", chunk)),
           (snapshot) => {
-            taskGroups.set(
-              index,
-              snapshot.docs
-                .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
-                .filter((task: any) => !toBooleanOr(task.isHidden, false)),
-            )
+            taskGroups.set(index, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
             readyTaskGroupIndexes.add(index)
             notify()
           },

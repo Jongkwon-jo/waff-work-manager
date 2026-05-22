@@ -563,9 +563,9 @@ async function fetchProjectsForTaskIds(projectIds: string[], collectionName: str
 
 export type SubscribeOptions = {
   /**
-   * When false (default), excludes docs with `isHidden == true` from the
-   * underlying Firestore queries so they don't count toward read quota.
-   * Set true to also stream hidden docs (composite indexes required).
+   * When false (default), hidden projects are excluded from the initial
+   * schedule stream. Tasks in visible projects are still streamed so the
+   * Gantt view can show and restore hidden task rows.
    */
   includeHidden?: boolean
   dateRange?: {
@@ -669,11 +669,9 @@ export function subscribeProjectsWithTasksByPersonKeys(
 
   chunks.forEach((chunk, index) => {
     const ictConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
-    if (!includeHidden) ictConstraints.push(where("isHidden", "==", false))
     if (dateRange) ictConstraints.push(where("endDate", ">=", dateRange.startDate))
     // ICT 스케줄에 보일 strategy task = department 에 "ICT" 포함된 것만 (isIctTask 와 동일).
     const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk), where("isIct", "==", true)]
-    if (!includeHidden) strategyConstraints.push(where("isHidden", "==", false))
     if (dateRange) strategyConstraints.push(where("endDate", ">=", dateRange.startDate))
     unsubscribes.push(
       onSnapshot(
@@ -828,7 +826,6 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
     ictPmTaskUnsubscribes = chunks.map((chunk, index) => {
       const constraints: any[] = [where("projectId", "in", chunk)]
-      if (!includeHidden) constraints.push(where("isHidden", "==", false))
       return onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...constraints),
         (snapshot) => {
@@ -863,7 +860,6 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
     strategyPmTaskUnsubscribes = chunks.map((chunk, index) => {
       const constraints: any[] = [where("projectId", "in", chunk), where("isIct", "==", true)]
-      if (!includeHidden) constraints.push(where("isHidden", "==", false))
       return onSnapshot(
         query(collection(db, STRATEGY_TASKS_COLLECTION), ...constraints),
         (snapshot) => {
@@ -899,9 +895,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
   chunkValues(queryKeys, 30).forEach((chunk, index) => {
     const ictConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
-    if (!includeHidden) ictConstraints.push(where("isHidden", "==", false))
     const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk), where("isIct", "==", true)]
-    if (!includeHidden) strategyConstraints.push(where("isHidden", "==", false))
     unsubscribes.push(
       onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...ictConstraints),
@@ -944,7 +938,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
         (snapshot) => {
           ictTaskGroups.set(
             "creator",
-            snapshot.docs.map(mapIctTaskDoc).filter((task) => includeHidden || !toBooleanOr(task.isHidden, false)),
+            snapshot.docs.map(mapIctTaskDoc),
           )
           void notify().catch((error) => {
             console.error("Schedule creator ICT data snapshot error:", error)
@@ -963,7 +957,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
             snapshot.docs
               .filter((docSnap) => {
                 const data = docSnap.data()
-                return isIctTask(data) && (includeHidden || !toBooleanOr(data.isHidden, false))
+                return isIctTask(data)
               })
               .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })),
           )
@@ -1228,20 +1222,173 @@ export function subscribeToData(
   options: SubscribeOptions = {},
 ) {
   const includeHidden = options.includeHidden === true
-  const projectsQuery = includeHidden
-    ? query(collection(db, PROJECTS_COLLECTION))
-    : query(collection(db, PROJECTS_COLLECTION), where("isHidden", "==", false))
-  const tasksQuery = includeHidden
-    ? query(collection(db, TASKS_COLLECTION))
-    : query(collection(db, TASKS_COLLECTION), where("isHidden", "==", false))
-  const strategyProjectsQuery = includeHidden
-    ? query(collection(db, STRATEGY_PROJECTS_COLLECTION))
-    : query(collection(db, STRATEGY_PROJECTS_COLLECTION), where("isHidden", "==", false))
-  // ICT 스케줄에 보일 strategy task = department 에 "ICT" 포함된 것 (isIct=true) 만 server-side 필터.
-  const strategyTasksQuery = includeHidden
-    ? query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true))
-    : query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true), where("isHidden", "==", false))
   const linkedStrategyVisibilityRef = doc(db, SETTINGS_COLLECTION, LINKED_STRATEGY_PROJECT_VISIBILITY_DOC)
+
+  if (!includeHidden) {
+    let ictProjects: any[] = []
+    let strategyProjects: any[] = []
+    let strategyProjectSourceIds: string[] = []
+    let hiddenLinkedStrategyProjectIds: string[] = []
+    const ictTaskGroups = new Map<number, any[]>()
+    const strategyTaskGroups = new Map<number, any[]>()
+    let ictTaskUnsubscribes: Array<() => void> = []
+    let strategyTaskUnsubscribes: Array<() => void> = []
+    let areIctProjectsReady = false
+    let areStrategyProjectsReady = false
+    let isLinkedStrategyVisibilityReady = false
+    let expectedIctTaskGroupCount = 0
+    let expectedStrategyTaskGroupCount = 0
+    const readyIctTaskGroupIndexes = new Set<number>()
+    const readyStrategyTaskGroupIndexes = new Set<number>()
+
+    const updateAndNotify = () => {
+      if (!areIctProjectsReady || !areStrategyProjectsReady || !isLinkedStrategyVisibilityReady) return
+      if (readyIctTaskGroupIndexes.size < expectedIctTaskGroupCount) return
+      if (readyStrategyTaskGroupIndexes.size < expectedStrategyTaskGroupCount) return
+      callback(
+        buildIctScheduleProjectTree(
+          ictProjects,
+          Array.from(ictTaskGroups.values()).flat(),
+          strategyProjects,
+          Array.from(strategyTaskGroups.values()).flat(),
+          hiddenLinkedStrategyProjectIds,
+        ),
+      )
+    }
+
+    const mapIctTaskDoc = (docSnap: any) => {
+      const raw = docSnap.data()
+      return {
+        ...raw,
+        id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
+        projectId: `${ICT_SOURCE_PREFIX}${toStringOrEmpty(raw.projectId)}`,
+        parentId: toOptionalString(raw.parentId) ? `${ICT_SOURCE_PREFIX}${toStringOrEmpty(raw.parentId)}` : undefined,
+        originalTaskId: docSnap.id,
+        originalProjectId: toStringOrEmpty(raw.projectId),
+        sourceSchedule: "ict",
+      }
+    }
+
+    const resetIctTaskSubscriptions = (projectIds: string[]) => {
+      ictTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+      ictTaskUnsubscribes = []
+      ictTaskGroups.clear()
+      readyIctTaskGroupIndexes.clear()
+
+      const chunks = chunkValues(projectIds, 30)
+      expectedIctTaskGroupCount = chunks.length
+      if (chunks.length === 0) {
+        updateAndNotify()
+        return
+      }
+
+      ictTaskUnsubscribes = chunks.map((chunk, index) =>
+        onSnapshot(
+          query(collection(db, TASKS_COLLECTION), where("projectId", "in", chunk)),
+          (snapshot) => {
+            ictTaskGroups.set(index, snapshot.docs.map(mapIctTaskDoc))
+            readyIctTaskGroupIndexes.add(index)
+            updateAndNotify()
+          },
+          (error) => {
+            console.error("Visible ICT project tasks snapshot error:", error)
+          },
+        ),
+      )
+    }
+
+    const resetStrategyTaskSubscriptions = () => {
+      strategyTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+      strategyTaskUnsubscribes = []
+      strategyTaskGroups.clear()
+      readyStrategyTaskGroupIndexes.clear()
+
+      const hiddenIds = new Set(hiddenLinkedStrategyProjectIds.map((id) => stripStrategyId(id) || id))
+      const visibleProjectIds = strategyProjectSourceIds.filter((projectId) => !hiddenIds.has(projectId))
+      const chunks = chunkValues(visibleProjectIds, 30)
+      expectedStrategyTaskGroupCount = chunks.length
+      if (chunks.length === 0) {
+        updateAndNotify()
+        return
+      }
+
+      strategyTaskUnsubscribes = chunks.map((chunk, index) =>
+        onSnapshot(
+          query(collection(db, STRATEGY_TASKS_COLLECTION), where("projectId", "in", chunk), where("isIct", "==", true)),
+          (snapshot) => {
+            strategyTaskGroups.set(index, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+            readyStrategyTaskGroupIndexes.add(index)
+            updateAndNotify()
+          },
+          (error) => {
+            console.error("Visible linked strategy project tasks snapshot error:", error)
+          },
+        ),
+      )
+    }
+
+    const unsubscribeProjects = onSnapshot(
+      query(collection(db, PROJECTS_COLLECTION), where("isHidden", "==", false)),
+      (snapshot) => {
+        ictProjects = snapshot.docs.map((docSnap) => ({
+          ...docSnap.data(),
+          id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
+          originalProjectId: docSnap.id,
+          sourceSchedule: "ict",
+        }))
+        areIctProjectsReady = true
+        resetIctTaskSubscriptions(snapshot.docs.map((docSnap) => docSnap.id))
+      },
+      (error) => {
+        console.error("Projects snapshot error:", error)
+      },
+    )
+
+    const unsubscribeStrategyProjects = onSnapshot(
+      query(collection(db, STRATEGY_PROJECTS_COLLECTION), where("isHidden", "==", false)),
+      (snapshot) => {
+        strategyProjects = snapshot.docs.map((docSnap) => ({
+          ...docSnap.data(),
+          id: docSnap.id,
+          originalProjectId: docSnap.id,
+          sourceSchedule: "strategy",
+        }))
+        strategyProjectSourceIds = snapshot.docs.map((docSnap) => docSnap.id)
+        areStrategyProjectsReady = true
+        resetStrategyTaskSubscriptions()
+      },
+      (error) => {
+        console.error("Strategy projects snapshot error:", error)
+      },
+    )
+
+    const unsubscribeLinkedStrategyVisibility = onSnapshot(
+      linkedStrategyVisibilityRef,
+      (snapshot) => {
+        hiddenLinkedStrategyProjectIds = normalizeHiddenLinkedStrategyProjectIds(
+          snapshot.data()?.[HIDDEN_LINKED_STRATEGY_PROJECT_IDS_FIELD],
+        )
+        isLinkedStrategyVisibilityReady = true
+        resetStrategyTaskSubscriptions()
+      },
+      (error) => {
+        console.error("Linked strategy project visibility snapshot error:", error)
+      },
+    )
+
+    return () => {
+      unsubscribeProjects()
+      unsubscribeStrategyProjects()
+      unsubscribeLinkedStrategyVisibility()
+      ictTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+      strategyTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+    }
+  }
+
+  const projectsQuery = query(collection(db, PROJECTS_COLLECTION))
+  const tasksQuery = query(collection(db, TASKS_COLLECTION))
+  const strategyProjectsQuery = query(collection(db, STRATEGY_PROJECTS_COLLECTION))
+  const strategyTasksQuery = query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true))
 
   let ictProjects: any[] = []
   let ictTasks: any[] = []
