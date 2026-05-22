@@ -2,12 +2,14 @@
 
 import Image from "next/image"
 import Link from "next/link"
-import { useState, useMemo, useEffect, useDeferredValue } from "react"
+import { useState, useMemo, useEffect, useDeferredValue, useRef } from "react"
 import { signOut } from "firebase/auth"
 import type { Project, ProjectPmOption, Task, TaskStatus } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import {
   subscribeProjectsWithTasksByScheduleScope,
+  subscribeHiddenProjectSummaries,
+  subscribeProjectsWithTasksByProjectIds,
   addProjectToDB,
   updateProjectInDB,
   deleteProjectFromDB,
@@ -48,7 +50,7 @@ import { FilterBar, ProjectSortType } from "@/components/filter-bar"
 import { ProjectList } from "@/components/project-list"
 import { GanttView } from "@/components/gantt-view"
 import { ProjectCardView } from "@/components/project-card-view"
-import { Bell, CalendarDays, Building2, Home, List, BarChart3, LayoutGrid, RotateCcw, History, ChevronDown, ChevronRight, LogOut, UserRoundSearch, Eye, EyeOff } from "lucide-react"
+import { Bell, CalendarDays, Building2, Home, List, BarChart3, LayoutGrid, RotateCcw, History, ChevronDown, ChevronRight, LogOut, UserRoundSearch } from "lucide-react"
 import { cn, keepIfShallowEqual } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -66,6 +68,11 @@ export default function IctWorkManagementPage() {
   const isMobile = useIsMobile()
   const canEdit = isAdmin || pagePermissions.ictWorkManagementEdit
   const [projectList, setProjectList] = useState<Project[]>([])
+  const visibleProjectListRef = useRef<Project[]>([])
+  const selectedHiddenProjectListRef = useRef<Project[]>([])
+  const hasLoadedProjectListRef = useRef(false)
+  const [hiddenProjectOptions, setHiddenProjectOptions] = useState<Project[]>([])
+  const [selectedHiddenProjectIds, setSelectedHiddenProjectIds] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all")
@@ -96,7 +103,6 @@ export default function IctWorkManagementPage() {
   const [isDepartmentOrgReady, setIsDepartmentOrgReady] = useState(false)
   const [globalSchedules, setGlobalSchedules] = useState<GlobalSchedule[]>([])
   const [operationInProgress, setOperationInProgress] = useState<"copy" | "delete" | null>(null)
-  const [includeHiddenInQuery, setIncludeHiddenInQuery] = useState(false)
   const deferredSearchQuery = useDeferredValue(searchQuery)
 
   useEffect(() => {
@@ -245,6 +251,11 @@ export default function IctWorkManagementPage() {
   const compact = <T extends Record<string, unknown>>(obj: T): T =>
     Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T
 
+  const mergeProjectLists = (visibleProjects: Project[], selectedHiddenProjects: Project[]) => {
+    const visibleIds = new Set(visibleProjects.map((project) => project.id))
+    return [...visibleProjects, ...selectedHiddenProjects.filter((project) => !visibleIds.has(project.id))]
+  }
+
   const serializeTaskData = (task: Task) =>
     compact({
       projectId: task.projectId,
@@ -332,7 +343,7 @@ export default function IctWorkManagementPage() {
 
   const getHistoryLabel = (entry: ChangeHistoryEntry) => {
     if (entry.entityType === "project_bundle") return "프로젝트 삭제"
-    if (entry.entityType === "batch") return "업무 이동/정렬"
+    if (entry.entityType === "batch") return "업무 일괄 변경"
     if (entry.entityType === "project" && entry.action === "create") return "프로젝트 추가"
     if (entry.entityType === "project" && entry.action === "update") return "프로젝트 수정"
     if (entry.entityType === "project" && entry.action === "delete") return "프로젝트 삭제"
@@ -413,6 +424,14 @@ export default function IctWorkManagementPage() {
         ...task,
         subTasks: task.subTasks ? removeTaskFromTree(task.subTasks, taskId) : task.subTasks,
       }))
+  }
+
+  const setTaskHiddenInTree = (tasks: Task[], taskIds: Set<string>, isHidden: boolean): Task[] => {
+    return tasks.map((task) => ({
+      ...task,
+      isHidden: taskIds.has(task.id) ? isHidden : task.isHidden,
+      subTasks: task.subTasks ? setTaskHiddenInTree(task.subTasks, taskIds, isHidden) : task.subTasks,
+    }))
   }
 
   const replaceTaskIdInTree = (tasks: Task[], fromId: string, toId: string): Task[] => {
@@ -747,11 +766,15 @@ export default function IctWorkManagementPage() {
 
   useEffect(() => {
     if (!user) {
+      hasLoadedProjectListRef.current = false
+      visibleProjectListRef.current = []
       setProjectList([])
       setLoading(false)
       return
     }
     if (!currentUserEmail) {
+      hasLoadedProjectListRef.current = false
+      visibleProjectListRef.current = []
       setProjectList([])
       setLoading(false)
       return
@@ -759,22 +782,28 @@ export default function IctWorkManagementPage() {
 
     const isProfileForCurrentUser = Boolean(currentUserEmail) && currentProfileEmail === currentUserEmail
     if (!canViewFullSchedule && (!isCurrentProfileReady || !isProfileForCurrentUser || !isDepartmentOrgReady)) {
-      setProjectList([])
-      setLoading(true)
+      if (!hasLoadedProjectListRef.current) {
+        visibleProjectListRef.current = []
+        setProjectList([])
+        setLoading(true)
+      }
       return
     }
 
-    setLoading(true)
+    if (!hasLoadedProjectListRef.current) setLoading(true)
     const unsubscribe = subscribeProjectsWithTasksByScheduleScope(
       {
         includeAll: canViewFullSchedule,
         personKeys: scheduleScopeAliases,
         pmEmail: currentUserEmail,
         creatorEmail: currentUserEmail,
-        includeHidden: includeHiddenInQuery,
+        includeHidden: false,
       },
       (data) => {
-        setProjectList(data)
+        const visibleData = data.filter((project) => !project.isHidden)
+        visibleProjectListRef.current = visibleData
+        setProjectList(mergeProjectLists(visibleData, selectedHiddenProjectListRef.current))
+        hasLoadedProjectListRef.current = true
         setLoading(false)
       },
     )
@@ -788,8 +817,38 @@ export default function IctWorkManagementPage() {
     isCurrentProfileReady,
     isDepartmentOrgReady,
     scheduleScopeAliases,
-    includeHiddenInQuery,
   ])
+
+  useEffect(() => {
+    if (!user || !canViewFullSchedule) {
+      setHiddenProjectOptions([])
+      setSelectedHiddenProjectIds([])
+      return
+    }
+
+    return subscribeHiddenProjectSummaries(setHiddenProjectOptions)
+  }, [user, canViewFullSchedule])
+
+  useEffect(() => {
+    const availableHiddenIds = new Set(hiddenProjectOptions.map((project) => project.id))
+    setSelectedHiddenProjectIds((prev) => {
+      const next = prev.filter((projectId) => availableHiddenIds.has(projectId))
+      return next.length === prev.length ? prev : next
+    })
+  }, [hiddenProjectOptions])
+
+  useEffect(() => {
+    if (!user || selectedHiddenProjectIds.length === 0) {
+      selectedHiddenProjectListRef.current = []
+      setProjectList(mergeProjectLists(visibleProjectListRef.current, []))
+      return
+    }
+
+    return subscribeProjectsWithTasksByProjectIds(selectedHiddenProjectIds, (data) => {
+      selectedHiddenProjectListRef.current = data
+      setProjectList(mergeProjectLists(visibleProjectListRef.current, data))
+    })
+  }, [user, selectedHiddenProjectIds])
 
   const canViewAllRecentChanges = isAdmin || pagePermissions.recentChangesWidget
   const canRollbackRecentChanges = isAdmin
@@ -1066,6 +1125,49 @@ export default function IctWorkManagementPage() {
       toast.success("업무가 수정되었습니다.")
     } catch (error) {
       toast.error("업무 수정 실패")
+    }
+  }
+
+  const handleSetTaskTreeHidden = async (rootTask: Task, isHidden: boolean) => {
+    const affectedTasks = flattenTasks([rootTask])
+    const affectedTaskIds = new Set(affectedTasks.map((task) => task.id))
+    if (affectedTaskIds.size === 0) return
+
+    const beforeProjectList = projectList
+    const beforeTaskMap = new Map(allTasksFlat.map((task) => [task.id, task]))
+
+    setProjectList((prev) =>
+      prev.map((project) =>
+        project.id === rootTask.projectId
+          ? {
+              ...project,
+              tasks: setTaskHiddenInTree(project.tasks, affectedTaskIds, isHidden),
+            }
+          : project,
+      ),
+    )
+
+    try {
+      await Promise.all(Array.from(affectedTaskIds).map((taskId) => updateTaskInDB(taskId, { isHidden })))
+      await recordHistory({
+        entityType: "batch",
+        action: "batch_update",
+        projectId: rootTask.projectId,
+        batch: affectedTasks.map((task) => {
+          const beforeTask = beforeTaskMap.get(task.id) || task
+          const afterTask = { ...beforeTask, isHidden }
+          return {
+            entityType: "task" as const,
+            entityId: task.id,
+            before: serializeTaskData(beforeTask),
+            after: serializeTaskData(afterTask),
+          }
+        }),
+      })
+      toast.success(isHidden ? "하위 업무까지 숨김 처리되었습니다." : "하위 업무까지 표시되었습니다.")
+    } catch (error) {
+      setProjectList(beforeProjectList)
+      toast.error("업무 숨김 상태 저장 실패")
     }
   }
 
@@ -1787,21 +1889,6 @@ export default function IctWorkManagementPage() {
                 )}
               </Button>
             )}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 shrink-0 gap-1.5 whitespace-nowrap px-2 text-[11px]"
-              onClick={() => setIncludeHiddenInQuery((prev) => !prev)}
-              title={
-                includeHiddenInQuery
-                  ? "숨김 항목 fetch ON - 다시 누르면 숨김 항목을 Firestore에서 불러오지 않습니다."
-                  : "숨김 항목 fetch OFF - 누르면 숨김 항목까지 함께 불러옵니다."
-              }
-            >
-              {includeHiddenInQuery ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-              {includeHiddenInQuery ? "숨김 포함" : "숨김 제외"}
-            </Button>
             {canEdit && (
               <Button
                 variant="outline"
@@ -1989,18 +2076,22 @@ export default function IctWorkManagementPage() {
                 defaultTaskPerson={defaultTaskPerson}
                 pmOptions={pmOptions}
                 searchQuery={deferredSearchQuery}
+                hiddenProjectOptions={hiddenProjectOptions}
+                selectedHiddenProjectIds={selectedHiddenProjectIds}
                 canEdit={canEdit}
                 canDeleteTask={isTaskCreatedByCurrentUser}
                 onAddProject={handleAddProject}
                 onEditProject={handleEditProject}
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
+                onSetTaskTreeHidden={handleSetTaskTreeHidden}
                 onDeleteTask={handleDeleteTask}
                 onDeleteTasks={handleDeleteTasksBulk}
                 onCopyTasks={handleCopyTasksBulk}
                 onMoveProject={handleMoveProject}
                 onMoveTask={handleMoveTask}
                 onMoveTaskToProjectTop={handleMoveTaskToProjectTop}
+                onSelectedHiddenProjectIdsChange={setSelectedHiddenProjectIds}
                 onReorderTask={handleReorderTask}
                 persistedCollapsedProjectIds={ganttCollapsedProjectIds}
                 persistedCollapsedTaskIds={ganttCollapsedTaskIds}

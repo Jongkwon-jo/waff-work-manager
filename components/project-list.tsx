@@ -98,6 +98,7 @@ export function ProjectList({
 
           // 3. 필터 적용
           return processed.filter(task => {
+            if (task.isHidden) return false
             const matchesFilter = (
               ((statusFilter === "all"
                 ? task.status !== "완료" || (task.subTasks?.length || 0) > 0

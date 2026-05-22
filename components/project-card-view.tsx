@@ -41,6 +41,7 @@ export function ProjectCardView({
     return projects
       .map((project) => {
         const filteredTasks = project.tasks.filter((task) => {
+          if (task.isHidden) return false
           if (statusFilter === "all" && task.status === "완료" && (task.subTasks?.length || 0) === 0) return false
           if (statusFilter !== "all" && task.status !== statusFilter) return false
           if (departmentFilter !== "all" && !task.department.includes(departmentFilter))

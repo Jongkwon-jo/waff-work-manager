@@ -706,9 +706,9 @@ async function fetchProjectsForTasks(tasks: any[]) {
 
 export type SubscribeOptions = {
   /**
-   * When false (default), excludes docs with `isHidden == true` from the
-   * underlying Firestore queries so they don't count toward read quota.
-   * Set true to also stream hidden docs (composite indexes required).
+   * When false (default), hidden projects are excluded from the initial
+   * schedule stream. Tasks in visible projects are still streamed so the
+   * Gantt view can show and restore hidden task rows.
    */
   includeHidden?: boolean
   dateRange?: {
@@ -783,7 +783,6 @@ export function subscribeProjectsWithTasksByPersonKeys(
 
   const unsubscribes = chunks.map((chunk, index) => {
     const constraints: any[] = [where("personKeys", "array-contains-any", chunk)]
-    if (!includeHidden) constraints.push(where("isHidden", "==", false))
     if (dateRange) constraints.push(where("endDate", ">=", dateRange.startDate))
     return onSnapshot(
       query(collection(db, TASKS_COLLECTION), ...constraints),
@@ -877,7 +876,6 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
     pmTaskUnsubscribes = chunks.map((chunk, index) => {
       const constraints: any[] = [where("projectId", "in", chunk)]
-      if (!includeHidden) constraints.push(where("isHidden", "==", false))
       return onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...constraints),
         (snapshot) => {
@@ -898,7 +896,6 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
   chunkValues(queryKeys, 30).forEach((chunk, index) => {
     const constraints: any[] = [where("personKeys", "array-contains-any", chunk)]
-    if (!includeHidden) constraints.push(where("isHidden", "==", false))
     unsubscribes.push(
       onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...constraints),
@@ -923,9 +920,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
         (snapshot) => {
           taskGroups.set(
             "creator",
-            snapshot.docs
-              .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
-              .filter((task: any) => includeHidden || !toBooleanOr(task.isHidden, false)),
+            snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })),
           )
           void notify().catch((error) => {
             console.error("Schedule creator strategy data snapshot error:", error)
@@ -966,11 +961,123 @@ export function subscribeProjectsWithTasksByScheduleScope(
   }
 }
 
+export function subscribeHiddenProjectSummaries(callback: (projects: Project[]) => void) {
+  return onSnapshot(
+    query(collection(db, PROJECTS_COLLECTION), where("isHidden", "==", true)),
+    (snapshot) => {
+      callback(buildProjectTree(snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })), []))
+    },
+    (error) => {
+      console.error("Hidden strategy projects snapshot error:", error)
+      callback([])
+    },
+  )
+}
+
+export function subscribeProjectsWithTasksByProjectIds(
+  projectIds: string[],
+  callback: (projects: Project[]) => void,
+) {
+  const ids = uniqueTrimmedStrings(projectIds)
+  if (ids.length === 0) {
+    callback([])
+    return () => {}
+  }
+
+  const projectGroups = new Map<number, any[]>()
+  const taskGroups = new Map<number, any[]>()
+  const notify = () => {
+    callback(buildProjectTree(Array.from(projectGroups.values()).flat(), Array.from(taskGroups.values()).flat()))
+  }
+
+  const unsubscribes = chunkValues(ids, 30).flatMap((chunk, index) => [
+    onSnapshot(
+      query(collection(db, PROJECTS_COLLECTION), where(documentId(), "in", chunk)),
+      (snapshot) => {
+        projectGroups.set(index, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+        notify()
+      },
+      (error) => {
+        console.error("Selected hidden strategy projects snapshot error:", error)
+      },
+    ),
+    onSnapshot(
+      query(collection(db, TASKS_COLLECTION), where("projectId", "in", chunk)),
+      (snapshot) => {
+        taskGroups.set(index, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+        notify()
+      },
+      (error) => {
+        console.error("Selected hidden strategy tasks snapshot error:", error)
+      },
+    ),
+  ])
+
+  return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
+}
+
 export function subscribeToData(
   callback: (projects: Project[]) => void,
   options: SubscribeOptions = {},
 ) {
   const includeHidden = options.includeHidden === true
+  if (!includeHidden) {
+    let projects: any[] = []
+    const taskGroups = new Map<number, any[]>()
+    let taskUnsubscribes: Array<() => void> = []
+    let expectedTaskGroupCount = 0
+    const readyTaskGroupIndexes = new Set<number>()
+
+    const notify = () => {
+      if (readyTaskGroupIndexes.size < expectedTaskGroupCount) return
+      callback(buildProjectTree(projects, Array.from(taskGroups.values()).flat()))
+    }
+
+    const resetTaskSubscriptions = (projectIds: string[]) => {
+      taskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+      taskUnsubscribes = []
+      taskGroups.clear()
+      readyTaskGroupIndexes.clear()
+
+      const chunks = chunkValues(projectIds, 30)
+      expectedTaskGroupCount = chunks.length
+      if (chunks.length === 0) {
+        notify()
+        return
+      }
+
+      taskUnsubscribes = chunks.map((chunk, index) =>
+        onSnapshot(
+          query(collection(db, TASKS_COLLECTION), where("projectId", "in", chunk)),
+          (snapshot) => {
+            taskGroups.set(index, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+            readyTaskGroupIndexes.add(index)
+            notify()
+          },
+          (error) => {
+            console.error("Visible strategy project tasks snapshot error:", error)
+          },
+        ),
+      )
+    }
+
+    const unsubscribeProjects = onSnapshot(
+      query(collection(db, PROJECTS_COLLECTION), where("isHidden", "==", false)),
+      (snapshot) => {
+        projects = snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
+        resetTaskSubscriptions(snapshot.docs.map((docSnap) => docSnap.id))
+      },
+      (error) => {
+        console.error("Projects snapshot error:", error)
+      },
+    )
+
+    return () => {
+      unsubscribeProjects()
+      taskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+    }
+  }
+
   const projectsQuery = includeHidden
     ? query(collection(db, PROJECTS_COLLECTION))
     : query(collection(db, PROJECTS_COLLECTION), where("isHidden", "==", false))
@@ -980,8 +1087,11 @@ export function subscribeToData(
 
   let projects: any[] = []
   let tasks: any[] = []
+  let projectsReady = false
+  let tasksReady = false
 
   const updateAndNotify = () => {
+    if (!projectsReady || !tasksReady) return
     callback(buildProjectTree(projects, tasks))
   }
 
@@ -989,6 +1099,7 @@ export function subscribeToData(
     projectsQuery,
     (snapshot) => {
       projects = snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
+      projectsReady = true
       updateAndNotify()
     },
     (error) => {
@@ -1000,6 +1111,7 @@ export function subscribeToData(
     tasksQuery,
     (snapshot) => {
       tasks = snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
+      tasksReady = true
       updateAndNotify()
     },
     (error) => {
