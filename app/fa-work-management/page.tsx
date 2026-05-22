@@ -2,7 +2,7 @@
 
 import Image from "next/image"
 import Link from "next/link"
-import { useState, useMemo, useEffect, useDeferredValue } from "react"
+import { useState, useMemo, useEffect, useDeferredValue, useRef } from "react"
 import { signOut } from "firebase/auth"
 import type { Project, ProjectPmOption, Task, TaskStatus } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
@@ -70,6 +70,8 @@ export default function FaWorkManagementPage() {
   const [projectList, setProjectList] = useState<Project[]>([])
   const [visibleProjectList, setVisibleProjectList] = useState<Project[]>([])
   const [selectedHiddenProjectList, setSelectedHiddenProjectList] = useState<Project[]>([])
+  const visibleProjectListRef = useRef<Project[]>([])
+  const selectedHiddenProjectListRef = useRef<Project[]>([])
   const [hiddenProjectOptions, setHiddenProjectOptions] = useState<Project[]>([])
   const [selectedHiddenProjectIds, setSelectedHiddenProjectIds] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -733,19 +735,25 @@ export default function FaWorkManagementPage() {
 
   useEffect(() => {
     if (!user) {
+      visibleProjectListRef.current = []
       setVisibleProjectList([])
+      setProjectList([])
       setLoading(false)
       return
     }
     if (!currentUserEmail) {
+      visibleProjectListRef.current = []
       setVisibleProjectList([])
+      setProjectList([])
       setLoading(false)
       return
     }
 
     const isProfileForCurrentUser = Boolean(currentUserEmail) && currentProfileEmail === currentUserEmail
     if (!canViewFullSchedule && (!isCurrentProfileReady || !isProfileForCurrentUser || !isDepartmentOrgReady)) {
+      visibleProjectListRef.current = []
       setVisibleProjectList([])
+      setProjectList([])
       setLoading(true)
       return
     }
@@ -760,7 +768,10 @@ export default function FaWorkManagementPage() {
         includeHidden: false,
       },
       (data) => {
-        setVisibleProjectList(data.filter((project) => !project.isHidden))
+        const visibleData = data.filter((project) => !project.isHidden)
+        visibleProjectListRef.current = visibleData
+        setVisibleProjectList(visibleData)
+        setProjectList(mergeProjectLists(visibleData, selectedHiddenProjectListRef.current))
         setLoading(false)
       },
     )
@@ -800,11 +811,17 @@ export default function FaWorkManagementPage() {
 
   useEffect(() => {
     if (!user || selectedHiddenProjectIds.length === 0) {
+      selectedHiddenProjectListRef.current = []
       setSelectedHiddenProjectList([])
+      setProjectList(mergeProjectLists(visibleProjectListRef.current, []))
       return
     }
 
-    return subscribeProjectsWithTasksByProjectIds(selectedHiddenProjectIds, setSelectedHiddenProjectList)
+    return subscribeProjectsWithTasksByProjectIds(selectedHiddenProjectIds, (data) => {
+      selectedHiddenProjectListRef.current = data
+      setSelectedHiddenProjectList(data)
+      setProjectList(mergeProjectLists(visibleProjectListRef.current, data))
+    })
   }, [user, selectedHiddenProjectIds])
 
   const canViewAllRecentChanges = isAdmin || pagePermissions.recentChangesWidget
