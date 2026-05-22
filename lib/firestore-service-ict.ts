@@ -1248,8 +1248,11 @@ export function subscribeToData(
   let strategyProjects: any[] = []
   let strategyTasks: any[] = []
   let hiddenLinkedStrategyProjectIds: string[] = []
+  const readySources = new Set<string>()
+  const requiredSources = ["ictProjects", "ictTasks", "strategyProjects", "strategyTasks", "linkedStrategyVisibility"]
 
   const updateAndNotify = () => {
+    if (readySources.size < requiredSources.length) return
     callback(
       buildIctScheduleProjectTree(
         ictProjects,
@@ -1270,6 +1273,7 @@ export function subscribeToData(
         originalProjectId: docSnap.id,
         sourceSchedule: "ict",
       }))
+      readySources.add("ictProjects")
       updateAndNotify()
     },
     (error) => {
@@ -1292,6 +1296,7 @@ export function subscribeToData(
           sourceSchedule: "ict",
         }
       })
+      readySources.add("ictTasks")
       updateAndNotify()
     },
     (error) => {
@@ -1308,6 +1313,7 @@ export function subscribeToData(
         originalProjectId: docSnap.id,
         sourceSchedule: "strategy",
       }))
+      readySources.add("strategyProjects")
       updateAndNotify()
     },
     (error) => {
@@ -1325,6 +1331,7 @@ export function subscribeToData(
         originalProjectId: toStringOrEmpty(docSnap.data().projectId),
         sourceSchedule: "strategy",
       }))
+      readySources.add("strategyTasks")
       updateAndNotify()
     },
     (error) => {
@@ -1338,6 +1345,7 @@ export function subscribeToData(
       hiddenLinkedStrategyProjectIds = normalizeHiddenLinkedStrategyProjectIds(
         snapshot.data()?.[HIDDEN_LINKED_STRATEGY_PROJECT_IDS_FIELD],
       )
+      readySources.add("linkedStrategyVisibility")
       updateAndNotify()
     },
     (error) => {

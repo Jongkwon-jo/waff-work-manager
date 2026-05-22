@@ -688,8 +688,11 @@ export function subscribeToData(
     let projects: any[] = []
     const taskGroups = new Map<number, any[]>()
     let taskUnsubscribes: Array<() => void> = []
+    let expectedTaskGroupCount = 0
+    const readyTaskGroupIndexes = new Set<number>()
 
     const notify = () => {
+      if (readyTaskGroupIndexes.size < expectedTaskGroupCount) return
       callback(buildProjectTree(projects, Array.from(taskGroups.values()).flat()))
     }
 
@@ -697,8 +700,10 @@ export function subscribeToData(
       taskUnsubscribes.forEach((unsubscribe) => unsubscribe())
       taskUnsubscribes = []
       taskGroups.clear()
+      readyTaskGroupIndexes.clear()
 
       const chunks = chunkValues(projectIds, 30)
+      expectedTaskGroupCount = chunks.length
       if (chunks.length === 0) {
         notify()
         return
@@ -714,6 +719,7 @@ export function subscribeToData(
                 .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
                 .filter((task: any) => !toBooleanOr(task.isHidden, false)),
             )
+            readyTaskGroupIndexes.add(index)
             notify()
           },
           (error) => {
@@ -749,8 +755,11 @@ export function subscribeToData(
 
   let projects: any[] = []
   let tasks: any[] = []
+  let projectsReady = false
+  let tasksReady = false
 
   const updateAndNotify = () => {
+    if (!projectsReady || !tasksReady) return
     callback(buildProjectTree(projects, tasks))
   }
 
@@ -758,6 +767,7 @@ export function subscribeToData(
     projectsQuery,
     (snapshot) => {
       projects = snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
+      projectsReady = true
       updateAndNotify()
     },
     (error) => {
@@ -769,6 +779,7 @@ export function subscribeToData(
     tasksQuery,
     (snapshot) => {
       tasks = snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
+      tasksReady = true
       updateAndNotify()
     },
     (error) => {

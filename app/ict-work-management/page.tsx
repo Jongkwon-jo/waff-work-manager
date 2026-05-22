@@ -68,10 +68,9 @@ export default function IctWorkManagementPage() {
   const isMobile = useIsMobile()
   const canEdit = isAdmin || pagePermissions.ictWorkManagementEdit
   const [projectList, setProjectList] = useState<Project[]>([])
-  const [visibleProjectList, setVisibleProjectList] = useState<Project[]>([])
-  const [selectedHiddenProjectList, setSelectedHiddenProjectList] = useState<Project[]>([])
   const visibleProjectListRef = useRef<Project[]>([])
   const selectedHiddenProjectListRef = useRef<Project[]>([])
+  const hasLoadedProjectListRef = useRef(false)
   const [hiddenProjectOptions, setHiddenProjectOptions] = useState<Project[]>([])
   const [selectedHiddenProjectIds, setSelectedHiddenProjectIds] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -767,15 +766,15 @@ export default function IctWorkManagementPage() {
 
   useEffect(() => {
     if (!user) {
+      hasLoadedProjectListRef.current = false
       visibleProjectListRef.current = []
-      setVisibleProjectList([])
       setProjectList([])
       setLoading(false)
       return
     }
     if (!currentUserEmail) {
+      hasLoadedProjectListRef.current = false
       visibleProjectListRef.current = []
-      setVisibleProjectList([])
       setProjectList([])
       setLoading(false)
       return
@@ -783,14 +782,15 @@ export default function IctWorkManagementPage() {
 
     const isProfileForCurrentUser = Boolean(currentUserEmail) && currentProfileEmail === currentUserEmail
     if (!canViewFullSchedule && (!isCurrentProfileReady || !isProfileForCurrentUser || !isDepartmentOrgReady)) {
-      visibleProjectListRef.current = []
-      setVisibleProjectList([])
-      setProjectList([])
-      setLoading(true)
+      if (!hasLoadedProjectListRef.current) {
+        visibleProjectListRef.current = []
+        setProjectList([])
+        setLoading(true)
+      }
       return
     }
 
-    setLoading(true)
+    if (!hasLoadedProjectListRef.current) setLoading(true)
     const unsubscribe = subscribeProjectsWithTasksByScheduleScope(
       {
         includeAll: canViewFullSchedule,
@@ -802,8 +802,8 @@ export default function IctWorkManagementPage() {
       (data) => {
         const visibleData = data.filter((project) => !project.isHidden)
         visibleProjectListRef.current = visibleData
-        setVisibleProjectList(visibleData)
         setProjectList(mergeProjectLists(visibleData, selectedHiddenProjectListRef.current))
+        hasLoadedProjectListRef.current = true
         setLoading(false)
       },
     )
@@ -818,10 +818,6 @@ export default function IctWorkManagementPage() {
     isDepartmentOrgReady,
     scheduleScopeAliases,
   ])
-
-  useEffect(() => {
-    setProjectList(mergeProjectLists(visibleProjectList, selectedHiddenProjectList))
-  }, [visibleProjectList, selectedHiddenProjectList])
 
   useEffect(() => {
     if (!user || !canViewFullSchedule) {
@@ -844,14 +840,12 @@ export default function IctWorkManagementPage() {
   useEffect(() => {
     if (!user || selectedHiddenProjectIds.length === 0) {
       selectedHiddenProjectListRef.current = []
-      setSelectedHiddenProjectList([])
       setProjectList(mergeProjectLists(visibleProjectListRef.current, []))
       return
     }
 
     return subscribeProjectsWithTasksByProjectIds(selectedHiddenProjectIds, (data) => {
       selectedHiddenProjectListRef.current = data
-      setSelectedHiddenProjectList(data)
       setProjectList(mergeProjectLists(visibleProjectListRef.current, data))
     })
   }, [user, selectedHiddenProjectIds])
