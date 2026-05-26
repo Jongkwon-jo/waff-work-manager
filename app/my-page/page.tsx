@@ -29,48 +29,41 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import { CategoryBadge, ProjectTypeBadge, StatusBadge } from "@/components/status-badge"
 import { toast } from "sonner"
 import {
   addHistoryEntry as addStrategyHistoryEntry,
-  DEFAULT_DEPARTMENT_ORG_SETTINGS,
   DEFAULT_MY_PAGE_EDITABLE_FIELDS,
-  deleteHistoryEntry as deleteStrategyHistoryEntry,
-  fetchHistoryEntries as fetchStrategyHistoryEntries,
-  fetchNotificationHistoryEntries as fetchStrategyNotificationHistoryEntries,
   isUserOwnerOfTask,
-  rollbackHistoryEntry as rollbackStrategyHistoryEntry,
   saveMyPageMemo,
   saveMyPageCollapsedProjectGroups,
   saveMyPagePersonalTasks,
   saveMyPageTaskPreferences,
   subscribeCurrentUserProfile,
-  fetchDepartmentOrgSettings,
   fetchMyPageEditableFields,
   subscribeProjectsWithTasksByPersonKeys as subscribeStrategyProjectsByPersonKeys,
   updateTaskInDB as updateStrategyTaskInDB,
-  type DepartmentOrgSettings,
   type MyPageEditableFieldsSettings,
   type MyPagePersonalTask,
   type MyPageTaskPreference,
 } from "@/lib/firestore-service"
 import {
   addHistoryEntry as addFaHistoryEntry,
-  deleteHistoryEntry as deleteFaHistoryEntry,
-  fetchHistoryEntries as fetchFaHistoryEntries,
-  fetchNotificationHistoryEntries as fetchFaNotificationHistoryEntries,
-  rollbackHistoryEntry as rollbackFaHistoryEntry,
   subscribeProjectsWithTasksByPersonKeys as subscribeFaProjectsByPersonKeys,
   updateTaskInDB as updateFaTaskInDB,
 } from "@/lib/firestore-service-fa"
 import type { Project, Task, TaskStatus } from "@/lib/data"
 import { EditTaskDialog } from "@/components/edit-task-dialog"
-import { RecentChangesWidget, type RecentChangeEntry } from "@/components/recent-changes-widget"
 import { cn } from "@/lib/utils"
-import {
-  getLedDepartmentGroupsForAliases,
-  hasChangeNotificationScope,
-} from "@/lib/recent-change-visibility"
 
 type GroupedProject = {
   id: string
@@ -91,7 +84,7 @@ type ProjectTaskItem = {
   ancestorNames: string[]
 }
 
-type MyPagePanel = "today" | "project" | "personal" | "memo"
+type ProjectDateRangePreset = "currentMonth" | "prevToThreeMonths" | "threeToSixMonths" | "all"
 
 const DEFAULT_TASK_PREFERENCE: MyPageTaskPreference = {
   checked: false,
@@ -136,6 +129,13 @@ const priorityMeta: Record<MyPageTaskPreference["priority"], { label: string; cl
 type ProjectStatusFilter = TaskStatus
 
 const PROJECT_STATUS_FILTERS: ProjectStatusFilter[] = ["진행", "예정", "보류", "미정", "완료"]
+
+const PROJECT_DATE_RANGE_PRESETS: { value: ProjectDateRangePreset; label: string }[] = [
+  { value: "currentMonth", label: "이번달" },
+  { value: "prevToThreeMonths", label: "전월~3개월" },
+  { value: "threeToSixMonths", label: "3개월~6개월" },
+  { value: "all", label: "전체" },
+]
 
 const projectStatusFilterMeta: Record<ProjectStatusFilter, { className: string; activeClassName: string }> = {
   진행: {
@@ -203,6 +203,39 @@ const formatDateWithYear = (value?: string) => {
   return `${year}.${month}.${day}`
 }
 
+const formatDateInputValue = (date: Date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+const formatTaskDateKey = (date: Date) => {
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${month}월 ${day}일`
+}
+
+const buildProjectDateRange = (preset: ProjectDateRangePreset) => {
+  if (preset === "all") return null
+
+  const now = new Date()
+  const startMonthOffset =
+    preset === "currentMonth" ? 0 : preset === "prevToThreeMonths" ? -1 : 3
+  const endMonthOffset =
+    preset === "currentMonth" ? 0 : preset === "prevToThreeMonths" ? 3 : 6
+  const start = new Date(now.getFullYear(), now.getMonth() + startMonthOffset, 1)
+  const end = new Date(now.getFullYear(), now.getMonth() + endMonthOffset + 1, 0)
+
+  return {
+    display: `${formatDateInputValue(start)} ~ ${formatDateInputValue(end)}`,
+    query: {
+      startDate: formatTaskDateKey(start),
+      endDate: formatTaskDateKey(end),
+    },
+  }
+}
+
 const buildAliasCandidates = (email?: string | null, displayName?: string | null) => {
   const normalizedEmail = (email || "").trim().toLowerCase()
   const localPart = normalizedEmail.split("@")[0] || ""
@@ -249,7 +282,7 @@ const collectProjectTaskItems = (
 }
 
 export default function MyPage() {
-  const { user, isAdmin, pagePermissions } = useAuth()
+  const { user } = useAuth()
   const [strategyProjects, setStrategyProjects] = useState<Project[]>([])
   const [faProjects, setFaProjects] = useState<Project[]>([])
   const [aliases, setAliases] = useState<string[]>([])
@@ -257,42 +290,38 @@ export default function MyPage() {
   const [personalTasks, setPersonalTasks] = useState<MyPagePersonalTask[]>([])
   const [draftTitle, setDraftTitle] = useState("")
   const [draftMemo, setDraftMemo] = useState("")
-  const [draftStartDate, setDraftStartDate] = useState("")
-  const [draftEndDate, setDraftEndDate] = useState("")
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState("")
   const [editingMemo, setEditingMemo] = useState("")
-  const [editingStartDate, setEditingStartDate] = useState("")
-  const [editingEndDate, setEditingEndDate] = useState("")
   const [draggedProjectKey, setDraggedProjectKey] = useState<string | null>(null)
   const [draggedPersonalId, setDraggedPersonalId] = useState<string | null>(null)
   const [projectDropIndicator, setProjectDropIndicator] = useState<{ key: string; position: "before" | "after" } | null>(null)
   const [personalDropIndicator, setPersonalDropIndicator] = useState<{ id: string; position: "before" | "after" } | null>(null)
-  const [isProjectActiveCollapsed, setIsProjectActiveCollapsed] = useState(true)
-  const [isProjectHiddenCollapsed, setIsProjectHiddenCollapsed] = useState(true)
+  const [isProjectActiveCollapsed, setIsProjectActiveCollapsed] = useState(false)
+  const [isProjectHiddenCollapsed, setIsProjectHiddenCollapsed] = useState(false)
   const [selectedProjectStatus, setSelectedProjectStatus] = useState<ProjectStatusFilter | null>("진행")
+  const [projectDateRangePreset, setProjectDateRangePreset] = useState<ProjectDateRangePreset>("prevToThreeMonths")
   const [checkedTodayTaskKeys, setCheckedTodayTaskKeys] = useState<string[]>([])
-  const [isTodayActiveCollapsed, setIsTodayActiveCollapsed] = useState(true)
-  const [isTodayCompletedCollapsed, setIsTodayCompletedCollapsed] = useState(true)
+  const [isTodayActiveCollapsed, setIsTodayActiveCollapsed] = useState(false)
+  const [isTodayCompletedCollapsed, setIsTodayCompletedCollapsed] = useState(false)
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Record<string, boolean>>({})
-  const [isPersonalActiveCollapsed, setIsPersonalActiveCollapsed] = useState(true)
-  const [isPersonalCompletedCollapsed, setIsPersonalCompletedCollapsed] = useState(true)
+  const [isPersonalActiveCollapsed, setIsPersonalActiveCollapsed] = useState(false)
+  const [isPersonalCompletedCollapsed, setIsPersonalCompletedCollapsed] = useState(false)
   const [expandedPersonalMemoIds, setExpandedPersonalMemoIds] = useState<string[]>([])
-  const [expandedPanels, setExpandedPanels] = useState<MyPagePanel[]>([])
   const [myMemo, setMyMemo] = useState("")
   const [isSavingMemo, setIsSavingMemo] = useState(false)
-  const [departmentOrgSettings, setDepartmentOrgSettings] = useState<DepartmentOrgSettings>(DEFAULT_DEPARTMENT_ORG_SETTINGS)
   const [editableFieldsConfig, setEditableFieldsConfig] = useState<MyPageEditableFieldsSettings>([
     ...DEFAULT_MY_PAGE_EDITABLE_FIELDS,
   ])
+  const projectDateRange = useMemo(() => buildProjectDateRange(projectDateRangePreset), [projectDateRangePreset])
+  const memoPreview = useMemo(() => myMemo.trim().replace(/\s+/g, " ") || "메모 없음", [myMemo])
 
   useEffect(() => {
     let disposed = false
-    void Promise.all([fetchMyPageEditableFields(), fetchDepartmentOrgSettings()])
-      .then(([fields, orgSettings]) => {
+    void fetchMyPageEditableFields()
+      .then((fields) => {
         if (disposed) return
         setEditableFieldsConfig(fields)
-        setDepartmentOrgSettings(orgSettings)
       })
       .catch((error) => {
         console.error("My-page settings fetch failed:", error)
@@ -321,13 +350,16 @@ export default function MyPage() {
       return
     }
 
-    const unsubscribeStrategy = subscribeStrategyProjectsByPersonKeys(aliases, setStrategyProjects)
-    const unsubscribeFa = subscribeFaProjectsByPersonKeys(aliases, setFaProjects)
+    setStrategyProjects([])
+    setFaProjects([])
+    const options = projectDateRange ? { dateRange: projectDateRange.query } : undefined
+    const unsubscribeStrategy = subscribeStrategyProjectsByPersonKeys(aliases, setStrategyProjects, options)
+    const unsubscribeFa = subscribeFaProjectsByPersonKeys(aliases, setFaProjects, options)
     return () => {
       unsubscribeStrategy()
       unsubscribeFa()
     }
-  }, [aliases, user?.email])
+  }, [aliases, projectDateRange, user?.email])
 
   const groupedProjects = useMemo<GroupedProject[]>(() => {
     const toGrouped = (projects: Project[], departmentPage: GroupedProject["departmentPage"]) =>
@@ -348,59 +380,6 @@ export default function MyPage() {
 
     return [...toGrouped(strategyProjects, "전략사업부"), ...toGrouped(faProjects, "FA 사업부")]
   }, [aliases, strategyProjects, faProjects, taskPreferences])
-
-  const ledDepartmentGroups = useMemo(
-    () => getLedDepartmentGroupsForAliases(aliases, departmentOrgSettings),
-    [aliases, departmentOrgSettings],
-  )
-  const canViewAllRecentChanges = isAdmin || pagePermissions.recentChangesWidget
-  const canRollbackRecentChanges = isAdmin
-  const canViewRecentChanges =
-    canViewAllRecentChanges || hasChangeNotificationScope(aliases, ledDepartmentGroups)
-
-  const loadVisibleRecentChanges = async (): Promise<RecentChangeEntry[]> => {
-    const historyFilter = {
-      personKeys: aliases,
-      departmentGroups: Array.from(ledDepartmentGroups),
-    }
-    const [visibleStrategy, visibleFa] = await Promise.all(
-      canViewAllRecentChanges
-        ? [fetchStrategyHistoryEntries(50), fetchFaHistoryEntries(50)]
-        : [
-            fetchStrategyNotificationHistoryEntries(50, historyFilter),
-            fetchFaNotificationHistoryEntries(50, historyFilter),
-          ],
-    )
-
-    return [
-      ...visibleStrategy.map((entry) => ({
-        ...entry,
-        id: `strategy:${entry.id}`,
-        source: entry.source || "work-management",
-      })),
-      ...visibleFa.map((entry) => ({
-        ...entry,
-        id: `fa:${entry.id}`,
-        source: entry.source || "fa-work-management",
-      })),
-    ]
-      .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0))
-      .slice(0, 30)
-  }
-
-  const rollbackVisibleRecentChange = async (entry: RecentChangeEntry) => {
-    if (!canRollbackRecentChanges) return
-    if (entry.id.startsWith("fa:")) {
-      const rawId = entry.id.replace(/^fa:/, "")
-      await rollbackFaHistoryEntry({ ...entry, id: rawId } as never)
-      await deleteFaHistoryEntry(rawId)
-      return
-    }
-
-    const rawId = entry.id.replace(/^strategy:/, "")
-    await rollbackStrategyHistoryEntry({ ...entry, id: rawId } as never)
-    await deleteStrategyHistoryEntry(rawId)
-  }
 
   const allProjectTasks = useMemo<ProjectTaskItem[]>(() => {
     return groupedProjects.flatMap((project) => project.tasks)
@@ -503,12 +482,7 @@ export default function MyPage() {
     }
   }
 
-  const expandPanel = (panel: MyPagePanel) => {
-    setExpandedPanels((prev) => (prev.includes(panel) ? prev : [...prev, panel]))
-  }
-
   const toggleProjectStatusFilter = (status: ProjectStatusFilter) => {
-    expandPanel("project")
     setIsProjectActiveCollapsed(false)
     setSelectedProjectStatus((prev) => (prev === status ? null : status))
   }
@@ -617,8 +591,6 @@ export default function MyPage() {
       id: `personal-${now}`,
       title,
       memo: draftMemo.trim() || undefined,
-      startDate: draftStartDate || undefined,
-      endDate: draftEndDate || draftStartDate || undefined,
       checked: false,
       priority: "medium",
       important: false,
@@ -628,8 +600,6 @@ export default function MyPage() {
     }
     setDraftTitle("")
     setDraftMemo("")
-    setDraftStartDate("")
-    setDraftEndDate("")
     void savePersonal([...personalTasks, next])
   }
 
@@ -646,7 +616,6 @@ export default function MyPage() {
       const expanding = !prev.includes(id)
       if (expanding) {
         const task = personalTasks.find((item) => item.id === id)
-        expandPanel("personal")
         if (task?.checked) setIsPersonalCompletedCollapsed(false)
         else setIsPersonalActiveCollapsed(false)
       }
@@ -672,14 +641,10 @@ export default function MyPage() {
     updatePersonal(editingId, {
       title: editingTitle.trim(),
       memo: editingMemo.trim() || undefined,
-      startDate: editingStartDate || undefined,
-      endDate: editingEndDate || editingStartDate || undefined,
     })
     setEditingId(null)
     setEditingTitle("")
     setEditingMemo("")
-    setEditingStartDate("")
-    setEditingEndDate("")
   }
 
   const logout = async () => {
@@ -708,7 +673,6 @@ export default function MyPage() {
     setCollapsedProjectGroups((prev) => {
       const expanding = Boolean(prev[groupKey])
       if (expanding) {
-        expandPanel("project")
         if (groupKey.startsWith("hidden-")) setIsProjectHiddenCollapsed(false)
         else setIsProjectActiveCollapsed(false)
       }
@@ -720,46 +684,10 @@ export default function MyPage() {
     })
   }
 
-  const togglePanel = (panel: MyPagePanel) => {
-    const expanding = !expandedPanels.includes(panel)
-    if (panel === "today") {
-      setIsTodayActiveCollapsed(!expanding)
-      setIsTodayCompletedCollapsed(!expanding)
-    }
-    if (panel === "project") {
-      setIsProjectActiveCollapsed(!expanding)
-      setIsProjectHiddenCollapsed(!expanding)
-      if (expanding) {
-        setCollapsedProjectGroups({})
-      }
-    }
-    if (panel === "personal") {
-      setIsPersonalActiveCollapsed(!expanding)
-      setIsPersonalCompletedCollapsed(!expanding)
-    }
-    setExpandedPanels((prev) => (expanding ? [...prev, panel] : prev.filter((item) => item !== panel)))
-  }
+  const sectionCardClass = (orderClass: string) =>
+    cn("flex h-[70vh] min-h-[360px] flex-col overflow-hidden xl:h-[calc(100vh-220px)] xl:min-h-[420px]", orderClass)
 
-  const isPanelExpanded = (panel: MyPagePanel) => expandedPanels.includes(panel)
-
-  const panelCardClass = (panel: MyPagePanel, orderClass: string) =>
-    cn(
-      "flex min-h-0 flex-col transition-[height,min-height,box-shadow] duration-300 ease-out",
-      isPanelExpanded(panel)
-        ? "h-auto overflow-visible shadow-xl ring-1 ring-sky-200"
-        : "h-[260px] overflow-hidden",
-      orderClass,
-    )
-
-  const renderPanelToggleButton = (panel: MyPagePanel) => {
-    const expanded = isPanelExpanded(panel)
-    return (
-      <Button type="button" variant="outline" size="sm" onClick={() => togglePanel(panel)} className="shrink-0">
-        <ChevronDown className={cn("h-4 w-4 transition-transform", expanded && "rotate-180")} />
-        {expanded ? "접기" : "펼치기"}
-      </Button>
-    )
-  }
+  const sectionContentClass = "min-h-0 flex-1 overflow-y-auto overscroll-contain pr-3"
 
   const renderProjectTaskCard = (item: ProjectTaskItem, options?: { hiddenList?: boolean }) => {
     const pref = taskPreferences[item.key] || DEFAULT_TASK_PREFERENCE
@@ -968,7 +896,6 @@ export default function MyPage() {
   const renderPersonalTaskCard = (task: MyPagePersonalTask) => {
 	    const hasMemo = Boolean(task.memo)
 	    const isMemoExpanded = expandedPersonalMemoIds.includes(task.id)
-    const hasSchedule = Boolean(task.startDate || task.endDate)
 
     return (
     <div
@@ -1047,12 +974,6 @@ export default function MyPage() {
           <CheckCircle2 className="h-4 w-4" />
         </button>
 	        <p className={cn("flex-1 font-semibold", task.checked && "line-through")}>{task.title}</p>
-        {hasSchedule ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700">
-            <Calendar className="h-3.5 w-3.5" />
-            {task.startDate || "-"} ~ {task.endDate || task.startDate || "-"}
-          </span>
-        ) : null}
 	        {hasMemo ? (
           <button
             type="button"
@@ -1093,8 +1014,6 @@ export default function MyPage() {
             setEditingId(task.id)
             setEditingTitle(task.title)
             setEditingMemo(task.memo || "")
-            setEditingStartDate(task.startDate || "")
-            setEditingEndDate(task.endDate || task.startDate || "")
           }}
         >
 	          <Pencil className="h-3.5 w-3.5" />수정
@@ -1107,16 +1026,8 @@ export default function MyPage() {
 	        <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
 	          <Input value={editingTitle} onChange={(e) => setEditingTitle(e.target.value)} />
 	          <Textarea value={editingMemo} onChange={(e) => setEditingMemo(e.target.value)} rows={3} />
-          <div className="grid gap-2 sm:grid-cols-[auto_1fr_1fr] sm:items-center">
-            <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500">
-              <Calendar className="h-3.5 w-3.5" />
-              일정
-            </span>
-            <Input type="date" value={editingStartDate} onChange={(e) => setEditingStartDate(e.target.value)} aria-label="개인 업무 시작일" />
-            <Input type="date" value={editingEndDate} onChange={(e) => setEditingEndDate(e.target.value)} aria-label="개인 업무 종료일" />
-          </div>
 	          <div className="flex justify-end gap-2">
-	            <Button type="button" variant="outline" size="sm" onClick={() => { setEditingId(null); setEditingStartDate(""); setEditingEndDate("") }}>취소</Button>
+	            <Button type="button" variant="outline" size="sm" onClick={() => setEditingId(null)}>취소</Button>
 	            <Button type="button" size="sm" onClick={submitEdit}>저장</Button>
 	          </div>
         </div>
@@ -1134,7 +1045,40 @@ export default function MyPage() {
             <h1 className="text-3xl font-bold tracking-tight text-slate-900">마이 워크</h1>
             <p className="mt-2 text-sm text-slate-600">프로젝트 연동 업무와 개인 업무를 분리했습니다.</p>
           </div>
-          <div className="flex flex-wrap gap-1.5 lg:ml-5">
+          <div className="flex flex-1 flex-wrap items-center gap-1.5 lg:ml-5 lg:justify-end">
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="max-w-full justify-start border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 sm:max-w-[300px]"
+                >
+                  <MessageSquareText className="h-4 w-4" />
+                  <span>메모장</span>
+                  <span data-memo-preview className="hidden max-w-[150px] overflow-hidden text-ellipsis text-xs font-normal text-amber-700 sm:inline-block">
+                    {memoPreview}
+                  </span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>메모장</DialogTitle>
+                  <DialogDescription>상단 헤더에서 바로 열어 필요한 내용을 확인하고 저장합니다.</DialogDescription>
+                </DialogHeader>
+                <Textarea
+                  value={myMemo}
+                  onChange={(e) => setMyMemo(e.target.value)}
+                  placeholder="메모를 입력하세요"
+                  rows={12}
+                  className="min-h-[320px] resize-y"
+                />
+                <DialogFooter>
+                  <Button type="button" onClick={() => void saveMemo()} disabled={isSavingMemo}>
+                    {isSavingMemo ? "저장 중..." : "메모 저장"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
             <Button asChild variant="outline"><Link href="/"><Home className="h-4 w-4" />메인</Link></Button>
             <Button type="button" variant="outline" onClick={logout}><LogOut className="h-4 w-4" />로그아웃</Button>
           </div>
@@ -1148,32 +1092,17 @@ export default function MyPage() {
           />
         </header>
 
-        {canViewRecentChanges && (
-          <section id="recent-changes" className="scroll-mt-6">
-            <RecentChangesWidget
-              loadEntries={loadVisibleRecentChanges}
-              rollbackEntry={canRollbackRecentChanges ? rollbackVisibleRecentChange : undefined}
-              projects={[...strategyProjects, ...faProjects]}
-              currentUserEmail={user?.email || undefined}
-              title="최근 사용자 변경"
-              description="권한이 있는 프로젝트의 최근 업무 수정 이력을 확인합니다."
-              emptyMessage="확인할 최근 사용자 변경이 없습니다."
-            />
-          </section>
-        )}
-
-	        <section className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-2">
-	            <Card className={panelCardClass("today", "lg:order-1")}>
+	        <section className="grid grid-cols-1 items-stretch gap-4 xl:grid-cols-[minmax(280px,0.9fr)_minmax(420px,1.35fr)_minmax(320px,1fr)]">
+	            <Card className={sectionCardClass("xl:order-1")}>
 	              <CardHeader className="pb-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
 		                  <CardTitle>오늘의 업무</CardTitle>
 		                  <CardDescription>오늘 처리해야 할 프로젝트 업무를 체크리스트로 확인합니다.</CardDescription>
                     </div>
-                    {renderPanelToggleButton("today")}
                   </div>
 	              </CardHeader>
-	              <CardContent className="min-h-0 flex-1">
+	              <CardContent className={sectionContentClass}>
 	                {todayProjectTasks.length === 0 ? (
 	                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-sm text-slate-500">
 	                    오늘 처리할 프로젝트 업무가 없습니다.
@@ -1184,7 +1113,6 @@ export default function MyPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            if (isTodayActiveCollapsed) expandPanel("today")
                             setIsTodayActiveCollapsed((prev) => !prev)
                           }}
                           className="flex items-center gap-1 text-xs font-semibold text-slate-500"
@@ -1204,7 +1132,6 @@ export default function MyPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            if (isTodayCompletedCollapsed) expandPanel("today")
                             setIsTodayCompletedCollapsed((prev) => !prev)
                           }}
                           className="mb-2 flex items-center gap-1 text-xs font-semibold text-slate-500"
@@ -1225,7 +1152,7 @@ export default function MyPage() {
 	              </CardContent>
 	            </Card>
 
-	          <Card className={panelCardClass("project", "lg:order-3")}>
+	          <Card className={sectionCardClass("xl:order-2")}>
             <CardHeader className="pb-0">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -1254,13 +1181,35 @@ export default function MyPage() {
                       )
                     })}
                   </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span className="mr-1 text-xs font-semibold text-slate-500">조회 기간</span>
+                    {PROJECT_DATE_RANGE_PRESETS.map((preset) => {
+                      const isSelected = projectDateRangePreset === preset.value
+                      return (
+                        <button
+                          key={preset.value}
+                          type="button"
+                          onClick={() => setProjectDateRangePreset(preset.value)}
+                          className={cn(
+                            "rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors",
+                            isSelected
+                              ? "border-sky-600 bg-sky-600 text-white shadow-sm"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-sky-300 hover:bg-sky-50",
+                          )}
+                          aria-pressed={isSelected}
+                        >
+                          {preset.label}
+                        </button>
+                      )
+                    })}
+                    <span className="text-xs text-slate-500">
+                      {projectDateRange ? projectDateRange.display : "전체 조회"}
+                    </span>
+                  </div>
 	                </div>
-	                  <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-	                    {renderPanelToggleButton("project")}
-	                  </div>
 	              </div>
 	            </CardHeader>
-	              <CardContent className="min-h-0 flex-1 pt-0">
+	              <CardContent className={cn(sectionContentClass, "pt-0")}>
 	                {projectTasks.length === 0 && hiddenProjectTasks.length === 0 ? (
 	                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
 	                    <UserRoundSearch className="mx-auto mb-2 h-6 w-6" />연동된 업무가 없습니다.
@@ -1271,7 +1220,6 @@ export default function MyPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (isProjectActiveCollapsed) expandPanel("project")
                           setIsProjectActiveCollapsed((prev) => !prev)
                         }}
                         className="flex items-center gap-1 text-xs font-semibold text-slate-500"
@@ -1310,7 +1258,6 @@ export default function MyPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            if (isProjectHiddenCollapsed) expandPanel("project")
                             setIsProjectHiddenCollapsed((prev) => !prev)
                           }}
                           className="flex items-center gap-1 text-xs font-semibold text-slate-500"
@@ -1359,17 +1306,16 @@ export default function MyPage() {
 	              </CardContent>
 		          </Card>
 
-					            <Card className={panelCardClass("personal", "lg:order-2")}>
+					            <Card className={sectionCardClass("xl:order-3")}>
 		              <CardHeader>
                     <div className="flex items-start justify-between gap-3">
                       <div>
 		                <CardTitle>개인 업무</CardTitle>
 		                <CardDescription>완료/미완료가 분리되며 개별 작성/수정/삭제가 가능합니다.</CardDescription>
                       </div>
-                      {renderPanelToggleButton("personal")}
                     </div>
 		              </CardHeader>
-		              <CardContent className="min-h-0 flex-1 space-y-3">
+		              <CardContent className={cn(sectionContentClass, "space-y-3")}>
                 <div className="grid gap-2 md:grid-cols-[1fr_2fr_auto] md:items-start">
 	                  <Input value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} placeholder="업무 제목" />
 	                  <Textarea
@@ -1381,15 +1327,6 @@ export default function MyPage() {
 	                  />
 	                  <Button type="button" onClick={addPersonal}><Plus className="h-4 w-4" />추가</Button>
 	                </div>
-                <div className="grid gap-2 sm:grid-cols-[auto_1fr_1fr] sm:items-center">
-                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500">
-                    <Calendar className="h-3.5 w-3.5" />
-                    일정
-                  </span>
-                  <Input type="date" value={draftStartDate} onChange={(e) => setDraftStartDate(e.target.value)} aria-label="개인 업무 시작일" />
-                  <Input type="date" value={draftEndDate} onChange={(e) => setDraftEndDate(e.target.value)} aria-label="개인 업무 종료일" />
-                </div>
-
                 {personalTasks.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-sm text-slate-500">등록된 개인 업무가 없습니다.</div>
                 ) : (
@@ -1398,7 +1335,6 @@ export default function MyPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (isPersonalActiveCollapsed) expandPanel("personal")
                           setIsPersonalActiveCollapsed((prev) => !prev)
                         }}
                         className="flex items-center gap-1 text-xs font-semibold text-slate-500"
@@ -1412,7 +1348,6 @@ export default function MyPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (isPersonalCompletedCollapsed) expandPanel("personal")
                           setIsPersonalCompletedCollapsed((prev) => !prev)
                         }}
                         className="mb-2 flex items-center gap-1 text-xs font-semibold text-slate-500"
@@ -1432,32 +1367,6 @@ export default function MyPage() {
                 )}
               </CardContent>
             </Card>
-
-			            <Card className={panelCardClass("memo", "lg:order-4")}>
-		              <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-		                <CardTitle>메모장</CardTitle>
-		                <CardDescription>필요한 내용을 자유롭게 입력하고 수정해 저장합니다.</CardDescription>
-                      </div>
-                      {renderPanelToggleButton("memo")}
-                    </div>
-		              </CardHeader>
-		              <CardContent className="flex min-h-0 flex-1 flex-col space-y-3">
-	                <Textarea
-	                  value={myMemo}
-	                  onChange={(e) => setMyMemo(e.target.value)}
-	                  placeholder="메모를 입력하세요"
-	                  rows={8}
-	                  className="min-h-0 flex-1 resize-none"
-	                />
-                <div className="flex justify-end">
-                  <Button type="button" onClick={() => void saveMemo()} disabled={isSavingMemo}>
-                    {isSavingMemo ? "저장 중..." : "메모 저장"}
-                  </Button>
-                </div>
-              </CardContent>
-	            </Card>
 
 	        </section>
       </div>

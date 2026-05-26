@@ -60,6 +60,7 @@ import {
   hasChangeNotificationScope,
   isTaskChangeNotificationEntry,
 } from "@/lib/recent-change-visibility"
+import { extendAncestorEndDatesFromSubtasks } from "@/lib/task-date-range"
 
 export default function StrategyWorkManagementPage() {
   const { user, loading: authLoading, isAdmin, pagePermissions } = useAuth()
@@ -1014,6 +1015,7 @@ export default function StrategyWorkManagementPage() {
   }
 
   const handleAddTask = async (newTask: Task) => {
+    const beforeProjectList = projectList
     const targetProject = projectList.find((project) => project.id === newTask.projectId)
     const computedDepth = resolveNewTaskDepth(targetProject?.tasks || [], newTask.parentId)
     const taskWithDepth: Task = {
@@ -1023,6 +1025,13 @@ export default function StrategyWorkManagementPage() {
       createdByName: defaultTaskPerson || undefined,
       subTasks: newTask.subTasks || [],
     }
+    const parentDatePropagation =
+      targetProject && newTask.parentId
+        ? extendAncestorEndDatesFromSubtasks(
+            insertTaskIntoTree(targetProject.tasks, newTask.parentId, taskWithDepth),
+            newTask.parentId,
+          )
+        : { tasks: undefined, updates: [] }
 
     setProjectList((prev) =>
       prev.map((project) => {
@@ -1031,7 +1040,7 @@ export default function StrategyWorkManagementPage() {
         if (newTask.parentId) {
           return {
             ...project,
-            tasks: insertTaskIntoTree(project.tasks, newTask.parentId, taskWithDepth),
+            tasks: parentDatePropagation.tasks || insertTaskIntoTree(project.tasks, newTask.parentId, taskWithDepth),
           }
         }
 
@@ -1067,18 +1076,32 @@ export default function StrategyWorkManagementPage() {
         projectId: newTask.projectId,
         after: sanitizedTaskData as unknown as Record<string, unknown>,
       })
+      if (parentDatePropagation.updates.length > 0) {
+        try {
+          await Promise.all(
+            parentDatePropagation.updates.map((item) => updateTaskInDB(item.id, item.updates)),
+          )
+          await recordHistory(
+            {
+              entityType: "batch",
+              action: "batch_update",
+              projectId: newTask.projectId,
+              batch: parentDatePropagation.updates.map((item) => ({
+                entityType: "task",
+                entityId: item.id,
+                before: serializeTaskData(item.before),
+                after: serializeTaskData(item.after),
+              })),
+            },
+            { refreshHistory: false },
+          )
+        } catch (error) {
+          toast.error("상위 업무 기간 자동 갱신 실패")
+        }
+      }
       toast.success("업무가 추가되었습니다.")
     } catch (error) {
-      setProjectList((prev) =>
-        prev.map((project) =>
-          project.id === newTask.projectId
-            ? {
-                ...project,
-                tasks: removeTaskFromTree(project.tasks, newTask.id),
-              }
-            : project,
-        ),
-      )
+      setProjectList(beforeProjectList)
       toast.error("업무 추가 실패")
     }
   }

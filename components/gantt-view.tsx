@@ -3905,13 +3905,14 @@ function MobileGanttView({
 
 function DateCell({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const selected = parseDateToDate(value)
+  const displayValue = selected ? formatDateKey(selected) : value
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" className="h-7 justify-start px-2 text-[11px] font-normal">
           <CalendarIcon className="mr-1 h-3.5 w-3.5" />
-          <span className="truncate">{value || "날짜 선택"}</span>
+          <span className="truncate">{displayValue || "날짜 선택"}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align="start">

@@ -159,6 +159,11 @@ export function EditTaskDialog({
     return format(date, "MM월 dd일", { locale: ko })
   }
 
+  const formatDateDisplay = (date: Date | undefined) => {
+    if (!date) return ""
+    return format(date, "yyyy-MM-dd", { locale: ko })
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!taskName) return
@@ -390,7 +395,7 @@ export function EditTaskDialog({
                       disabled={!isFieldEditable("startDate")}
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {startDate ? format(startDate, "MM월 dd일", { locale: ko }) : <span>날짜 선택</span>}
+                      {startDate ? formatDateDisplay(startDate) : <span>날짜 선택</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
@@ -411,7 +416,7 @@ export function EditTaskDialog({
                       disabled={!isFieldEditable("endDate")}
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {endDate ? format(endDate, "MM월 dd일", { locale: ko }) : <span>날짜 선택</span>}
+                      {endDate ? formatDateDisplay(endDate) : <span>날짜 선택</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
