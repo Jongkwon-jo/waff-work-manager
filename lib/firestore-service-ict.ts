@@ -633,6 +633,116 @@ function taskOverlapsQueryDateRange(task: any, range?: QueryDateRange) {
   return startDate <= rangeEnd || endDate >= rangeStart
 }
 
+type ProjectTaskSubscriptionPoolOptions = {
+  collectionName: string
+  groupPrefix: string
+  taskGroups: Map<string, any[]>
+  mapSnapshot: (snapshot: any) => any[]
+  onChange: () => void
+  onError: (error: unknown) => void
+  buildConstraints?: (projectIds: string[]) => any[]
+}
+
+function createProjectTaskSubscriptionPool({
+  collectionName,
+  groupPrefix,
+  taskGroups,
+  mapSnapshot,
+  onChange,
+  onError,
+  buildConstraints,
+}: ProjectTaskSubscriptionPoolOptions) {
+  const chunks: Array<{ ids: string[]; unsubscribe?: () => void; ready: boolean }> = []
+  const chunkByProjectId = new Map<string, number>()
+
+  const groupKey = (index: number) => `${groupPrefix}:${index}`
+  const constraintsFor = (ids: string[]) => buildConstraints?.(ids) || [where("projectId", "in", ids)]
+
+  const detachChunk = (index: number) => {
+    const chunk = chunks[index]
+    if (!chunk) return
+    chunk.unsubscribe?.()
+    chunk.unsubscribe = undefined
+    chunk.ready = true
+    taskGroups.delete(groupKey(index))
+  }
+
+  const attachChunk = (index: number) => {
+    const chunk = chunks[index]
+    if (!chunk) return
+
+    detachChunk(index)
+    if (chunk.ids.length === 0) {
+      onChange()
+      return
+    }
+
+    chunk.ready = false
+    chunk.unsubscribe = onSnapshot(
+      query(collection(db, collectionName), ...constraintsFor(chunk.ids)),
+      (snapshot) => {
+        taskGroups.set(groupKey(index), mapSnapshot(snapshot))
+        chunk.ready = true
+        onChange()
+      },
+      (error) => {
+        chunk.ready = true
+        onError(error)
+      },
+    )
+  }
+
+  return {
+    sync(projectIds: string[]) {
+      const nextIds = uniqueTrimmedStrings(projectIds)
+      const nextIdSet = new Set(nextIds)
+      const changedChunks = new Set<number>()
+
+      Array.from(chunkByProjectId.entries()).forEach(([projectId, chunkIndex]) => {
+        if (nextIdSet.has(projectId)) return
+        const chunk = chunks[chunkIndex]
+        if (chunk) {
+          chunk.ids = chunk.ids.filter((id) => id !== projectId)
+          changedChunks.add(chunkIndex)
+        }
+        chunkByProjectId.delete(projectId)
+      })
+
+      nextIds.forEach((projectId) => {
+        if (chunkByProjectId.has(projectId)) return
+        let chunkIndex = chunks.findIndex((chunk) => chunk.ids.length < 30)
+        if (chunkIndex === -1) {
+          chunkIndex = chunks.length
+          chunks.push({ ids: [], ready: true })
+        }
+        chunks[chunkIndex].ids.push(projectId)
+        chunkByProjectId.set(projectId, chunkIndex)
+        changedChunks.add(chunkIndex)
+      })
+
+      if (changedChunks.size === 0) return
+      changedChunks.forEach((chunkIndex) => attachChunk(chunkIndex))
+      onChange()
+    },
+    isReady() {
+      return chunks.every((chunk) => chunk.ids.length === 0 || chunk.ready)
+    },
+    unsubscribe() {
+      chunks.forEach((_, index) => detachChunk(index))
+      chunks.length = 0
+      chunkByProjectId.clear()
+    },
+  }
+}
+
+function queueScheduleCallback(callback: () => void) {
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(callback)
+    return
+  }
+  void Promise.resolve().then(callback)
+}
+
 export function subscribeProjectsWithTasksByPersonKeys(
   personKeys: string[],
   callback: (projects: Project[]) => void,
@@ -767,13 +877,16 @@ export function subscribeProjectsWithTasksByScheduleScope(
   const strategyTaskGroups = new Map<string, any[]>()
   const ictPmProjectsById = new Map<string, any>()
   const strategyPmProjectsById = new Map<string, any>()
-  let ictPmTaskUnsubscribes: Array<() => void> = []
-  let strategyPmTaskUnsubscribes: Array<() => void> = []
   let hiddenLinkedStrategyProjectIds: string[] = []
   let disposed = false
   let notifyToken = 0
+  let notifyScheduled = false
+  let ictPmTaskPool: ReturnType<typeof createProjectTaskSubscriptionPool> | null = null
+  let strategyPmTaskPool: ReturnType<typeof createProjectTaskSubscriptionPool> | null = null
 
   const notify = async () => {
+    if (ictPmTaskPool && !ictPmTaskPool.isReady()) return
+    if (strategyPmTaskPool && !strategyPmTaskPool.isReady()) return
     const currentToken = ++notifyToken
 
     const ictTasksById = new Map<string, any>()
@@ -830,76 +943,39 @@ export function subscribeProjectsWithTasksByScheduleScope(
     }
   }
 
-  const resetIctPmTaskSubscriptions = (projectIds: string[]) => {
-    ictPmTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
-    ictPmTaskUnsubscribes = []
-    Array.from(ictTaskGroups.keys())
-      .filter((key) => key.startsWith("pm:"))
-      .forEach((key) => ictTaskGroups.delete(key))
-
-    const chunks = chunkValues(projectIds, 30)
-    if (chunks.length === 0) {
+  const scheduleNotify = () => {
+    if (notifyScheduled) return
+    notifyScheduled = true
+    queueScheduleCallback(() => {
+      notifyScheduled = false
       void notify().catch((error) => {
-        console.error("Schedule PM ICT data snapshot error:", error)
+        console.error("Schedule ICT data snapshot error:", error)
         if (!disposed) callback([])
       })
-      return
-    }
-
-    ictPmTaskUnsubscribes = chunks.map((chunk, index) => {
-      const constraints: any[] = [where("projectId", "in", chunk)]
-      return onSnapshot(
-        query(collection(db, TASKS_COLLECTION), ...constraints),
-        (snapshot) => {
-          ictTaskGroups.set(`pm:${index}`, snapshot.docs.map(mapIctTaskDoc))
-          void notify().catch((error) => {
-            console.error("Schedule PM ICT data snapshot error:", error)
-            if (!disposed) callback([])
-          })
-        },
-        (error) => {
-          console.error("Schedule PM ICT tasks snapshot error:", error)
-        },
-      )
     })
   }
 
-  const resetStrategyPmTaskSubscriptions = (projectIds: string[]) => {
-    strategyPmTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
-    strategyPmTaskUnsubscribes = []
-    Array.from(strategyTaskGroups.keys())
-      .filter((key) => key.startsWith("pm:"))
-      .forEach((key) => strategyTaskGroups.delete(key))
+  ictPmTaskPool = createProjectTaskSubscriptionPool({
+    collectionName: TASKS_COLLECTION,
+    groupPrefix: "pm-ict",
+    taskGroups: ictTaskGroups,
+    mapSnapshot: (snapshot) => snapshot.docs.map(mapIctTaskDoc),
+    onChange: scheduleNotify,
+    onError: (error) => {
+      console.error("Schedule PM ICT tasks snapshot error:", error)
+    },
+  })
 
-    const chunks = chunkValues(projectIds, 30)
-    if (chunks.length === 0) {
-      void notify().catch((error) => {
-        console.error("Schedule PM linked strategy data snapshot error:", error)
-        if (!disposed) callback([])
-      })
-      return
-    }
-
-    strategyPmTaskUnsubscribes = chunks.map((chunk, index) => {
-      const constraints: any[] = [where("projectId", "in", chunk)]
-      return onSnapshot(
-        query(collection(db, STRATEGY_TASKS_COLLECTION), ...constraints),
-        (snapshot) => {
-          strategyTaskGroups.set(
-            `pm:${index}`,
-            snapshot.docs.filter((docSnap) => isIctTask(docSnap.data())).map(mapStrategyTaskDoc),
-          )
-          void notify().catch((error) => {
-            console.error("Schedule PM linked strategy data snapshot error:", error)
-            if (!disposed) callback([])
-          })
-        },
-        (error) => {
-          console.error("Schedule PM linked strategy tasks snapshot error:", error)
-        },
-      )
-    })
-  }
+  strategyPmTaskPool = createProjectTaskSubscriptionPool({
+    collectionName: STRATEGY_TASKS_COLLECTION,
+    groupPrefix: "pm-strategy",
+    taskGroups: strategyTaskGroups,
+    mapSnapshot: (snapshot) => snapshot.docs.filter((docSnap: any) => isIctTask(docSnap.data())).map(mapStrategyTaskDoc),
+    onChange: scheduleNotify,
+    onError: (error) => {
+      console.error("Schedule PM linked strategy tasks snapshot error:", error)
+    },
+  })
 
   const unsubscribes: Array<() => void> = [
     onSnapshot(
@@ -908,9 +984,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
         hiddenLinkedStrategyProjectIds = normalizeHiddenLinkedStrategyProjectIds(
           snapshot.data()?.[HIDDEN_LINKED_STRATEGY_PROJECT_IDS_FIELD],
         )
-        void notify().catch((error) => {
-          console.error("Schedule ICT visibility snapshot error:", error)
-        })
+        scheduleNotify()
       },
       (error) => {
         console.error("Schedule ICT visibility snapshot error:", error)
@@ -926,10 +1000,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
         query(collection(db, TASKS_COLLECTION), ...ictConstraints),
         (snapshot) => {
           ictTaskGroups.set(`person:${index}`, snapshot.docs.map(mapIctTaskDoc))
-          void notify().catch((error) => {
-            console.error("Schedule assignee ICT data snapshot error:", error)
-            if (!disposed) callback([])
-          })
+          scheduleNotify()
         },
         (error) => {
           console.error("Schedule assignee ICT tasks snapshot error:", error)
@@ -944,10 +1015,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
               .filter((docSnap) => isIctTask(docSnap.data()))
               .map(mapStrategyTaskDoc),
           )
-          void notify().catch((error) => {
-            console.error("Schedule assignee linked strategy data snapshot error:", error)
-            if (!disposed) callback([])
-          })
+          scheduleNotify()
         },
         (error) => {
           console.error("Schedule assignee linked strategy tasks snapshot error:", error)
@@ -965,10 +1033,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
             "creator",
             snapshot.docs.map(mapIctTaskDoc),
           )
-          void notify().catch((error) => {
-            console.error("Schedule creator ICT data snapshot error:", error)
-            if (!disposed) callback([])
-          })
+          scheduleNotify()
         },
         (error) => {
           console.error("Schedule creator ICT tasks snapshot error:", error)
@@ -986,10 +1051,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
               })
               .map(mapStrategyTaskDoc),
           )
-          void notify().catch((error) => {
-            console.error("Schedule creator linked strategy data snapshot error:", error)
-            if (!disposed) callback([])
-          })
+          scheduleNotify()
         },
         (error) => {
           console.error("Schedule creator linked strategy tasks snapshot error:", error)
@@ -1016,7 +1078,8 @@ export function subscribeProjectsWithTasksByScheduleScope(
               sourceSchedule: "ict",
             })
           })
-          resetIctPmTaskSubscriptions(snapshot.docs.map((docSnap) => docSnap.id))
+          ictPmTaskPool?.sync(snapshot.docs.map((docSnap) => docSnap.id))
+          scheduleNotify()
         },
         (error) => {
           console.error("Schedule PM ICT projects snapshot error:", error)
@@ -1034,7 +1097,8 @@ export function subscribeProjectsWithTasksByScheduleScope(
               sourceSchedule: "strategy",
             })
           })
-          resetStrategyPmTaskSubscriptions(snapshot.docs.map((docSnap) => docSnap.id))
+          strategyPmTaskPool?.sync(snapshot.docs.map((docSnap) => docSnap.id))
+          scheduleNotify()
         },
         (error) => {
           console.error("Schedule PM linked strategy projects snapshot error:", error)
@@ -1046,8 +1110,8 @@ export function subscribeProjectsWithTasksByScheduleScope(
   return () => {
     disposed = true
     unsubscribes.forEach((unsubscribe) => unsubscribe())
-    ictPmTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
-    strategyPmTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+    ictPmTaskPool?.unsubscribe()
+    strategyPmTaskPool?.unsubscribe()
   }
 }
 
@@ -1254,24 +1318,20 @@ export function subscribeToData(
     let strategyProjects: any[] = []
     let strategyProjectSourceIds: string[] = []
     let hiddenLinkedStrategyProjectIds: string[] = []
-    const ictTaskGroups = new Map<number, any[]>()
-    const strategyTaskGroups = new Map<number, any[]>()
+    const ictTaskGroups = new Map<string, any[]>()
+    const strategyTaskGroups = new Map<string, any[]>()
     let linkedStrategyPersonTasks: any[] = []
-    let ictTaskUnsubscribes: Array<() => void> = []
-    let strategyTaskUnsubscribes: Array<() => void> = []
     let areIctProjectsReady = false
     let areStrategyProjectsReady = false
     let isLinkedStrategyVisibilityReady = false
     let areLinkedStrategyPersonTasksReady = LINKED_STRATEGY_PERSON_KEYS.length === 0
-    let expectedIctTaskGroupCount = 0
-    let expectedStrategyTaskGroupCount = 0
-    const readyIctTaskGroupIndexes = new Set<number>()
-    const readyStrategyTaskGroupIndexes = new Set<number>()
+    let notifyScheduled = false
+    let ictTaskPool: ReturnType<typeof createProjectTaskSubscriptionPool>
+    let strategyTaskPool: ReturnType<typeof createProjectTaskSubscriptionPool>
 
     const updateAndNotify = () => {
       if (!areIctProjectsReady || !areStrategyProjectsReady || !isLinkedStrategyVisibilityReady || !areLinkedStrategyPersonTasksReady) return
-      if (readyIctTaskGroupIndexes.size < expectedIctTaskGroupCount) return
-      if (readyStrategyTaskGroupIndexes.size < expectedStrategyTaskGroupCount) return
+      if (!ictTaskPool.isReady() || !strategyTaskPool.isReady()) return
       const strategyTasks = mergeStrategyTaskSources(
         Array.from(strategyTaskGroups.values()).flat(),
         linkedStrategyPersonTasks,
@@ -1300,63 +1360,42 @@ export function subscribeToData(
       }
     }
 
-    const resetIctTaskSubscriptions = (projectIds: string[]) => {
-      ictTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
-      ictTaskUnsubscribes = []
-      ictTaskGroups.clear()
-      readyIctTaskGroupIndexes.clear()
-
-      const chunks = chunkValues(projectIds, 30)
-      expectedIctTaskGroupCount = chunks.length
-      if (chunks.length === 0) {
+    const scheduleUpdate = () => {
+      if (notifyScheduled) return
+      notifyScheduled = true
+      queueScheduleCallback(() => {
+        notifyScheduled = false
         updateAndNotify()
-        return
-      }
-
-      ictTaskUnsubscribes = chunks.map((chunk, index) =>
-        onSnapshot(
-          query(collection(db, TASKS_COLLECTION), where("projectId", "in", chunk)),
-          (snapshot) => {
-            ictTaskGroups.set(index, snapshot.docs.map(mapIctTaskDoc))
-            readyIctTaskGroupIndexes.add(index)
-            updateAndNotify()
-          },
-          (error) => {
-            console.error("Visible ICT project tasks snapshot error:", error)
-          },
-        ),
-      )
+      })
     }
 
-    const resetStrategyTaskSubscriptions = () => {
-      strategyTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
-      strategyTaskUnsubscribes = []
-      strategyTaskGroups.clear()
-      readyStrategyTaskGroupIndexes.clear()
-
+    const getVisibleStrategyProjectIds = () => {
       const hiddenIds = new Set(hiddenLinkedStrategyProjectIds.map((id) => stripStrategyId(id) || id))
-      const visibleProjectIds = strategyProjectSourceIds.filter((projectId) => !hiddenIds.has(projectId))
-      const chunks = chunkValues(visibleProjectIds, 30)
-      expectedStrategyTaskGroupCount = chunks.length
-      if (chunks.length === 0) {
-        updateAndNotify()
-        return
-      }
-
-      strategyTaskUnsubscribes = chunks.map((chunk, index) =>
-        onSnapshot(
-          query(collection(db, STRATEGY_TASKS_COLLECTION), where("projectId", "in", chunk), where("isIct", "==", true)),
-          (snapshot) => {
-            strategyTaskGroups.set(index, snapshot.docs.map(mapStrategyTaskDoc))
-            readyStrategyTaskGroupIndexes.add(index)
-            updateAndNotify()
-          },
-          (error) => {
-            console.error("Visible linked strategy project tasks snapshot error:", error)
-          },
-        ),
-      )
+      return strategyProjectSourceIds.filter((projectId) => !hiddenIds.has(projectId))
     }
+
+    ictTaskPool = createProjectTaskSubscriptionPool({
+      collectionName: TASKS_COLLECTION,
+      groupPrefix: "visible-ict",
+      taskGroups: ictTaskGroups,
+      mapSnapshot: (snapshot) => snapshot.docs.map(mapIctTaskDoc),
+      onChange: scheduleUpdate,
+      onError: (error) => {
+        console.error("Visible ICT project tasks snapshot error:", error)
+      },
+    })
+
+    strategyTaskPool = createProjectTaskSubscriptionPool({
+      collectionName: STRATEGY_TASKS_COLLECTION,
+      groupPrefix: "visible-strategy",
+      taskGroups: strategyTaskGroups,
+      mapSnapshot: (snapshot) => snapshot.docs.map(mapStrategyTaskDoc),
+      onChange: scheduleUpdate,
+      onError: (error) => {
+        console.error("Visible linked strategy project tasks snapshot error:", error)
+      },
+      buildConstraints: (projectIds) => [where("projectId", "in", projectIds), where("isIct", "==", true)],
+    })
 
     const unsubscribeProjects = onSnapshot(
       query(collection(db, PROJECTS_COLLECTION), where("isHidden", "==", false)),
@@ -1368,7 +1407,8 @@ export function subscribeToData(
           sourceSchedule: "ict",
         }))
         areIctProjectsReady = true
-        resetIctTaskSubscriptions(snapshot.docs.map((docSnap) => docSnap.id))
+        ictTaskPool.sync(snapshot.docs.map((docSnap) => docSnap.id))
+        scheduleUpdate()
       },
       (error) => {
         console.error("Projects snapshot error:", error)
@@ -1386,7 +1426,8 @@ export function subscribeToData(
         }))
         strategyProjectSourceIds = snapshot.docs.map((docSnap) => docSnap.id)
         areStrategyProjectsReady = true
-        resetStrategyTaskSubscriptions()
+        strategyTaskPool.sync(getVisibleStrategyProjectIds())
+        scheduleUpdate()
       },
       (error) => {
         console.error("Strategy projects snapshot error:", error)
@@ -1400,7 +1441,8 @@ export function subscribeToData(
           snapshot.data()?.[HIDDEN_LINKED_STRATEGY_PROJECT_IDS_FIELD],
         )
         isLinkedStrategyVisibilityReady = true
-        resetStrategyTaskSubscriptions()
+        strategyTaskPool.sync(getVisibleStrategyProjectIds())
+        scheduleUpdate()
       },
       (error) => {
         console.error("Linked strategy project visibility snapshot error:", error)
@@ -1419,7 +1461,7 @@ export function subscribeToData(
                 .filter((docSnap) => isIctTask(docSnap.data()))
                 .map(mapStrategyTaskDoc)
               areLinkedStrategyPersonTasksReady = true
-              updateAndNotify()
+              scheduleUpdate()
             },
             (error) => {
               console.error("Linked strategy person tasks snapshot error:", error)
@@ -1432,8 +1474,8 @@ export function subscribeToData(
       unsubscribeStrategyProjects()
       unsubscribeLinkedStrategyVisibility()
       unsubscribeLinkedStrategyPersonTasks()
-      ictTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
-      strategyTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+      ictTaskPool.unsubscribe()
+      strategyTaskPool.unsubscribe()
     }
   }
 
