@@ -493,7 +493,8 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
   const taskGroups = new Map<string, any[]>()
   const pmProjectsById = new Map<string, any>()
-  let pmTaskUnsubscribes: Array<() => void> = []
+  const creatorProjectsById = new Map<string, any>()
+  let scopedProjectTaskUnsubscribes: Array<() => void> = []
   let disposed = false
   let notifyToken = 0
 
@@ -510,15 +511,16 @@ export function subscribeProjectsWithTasksByScheduleScope(
     const projectsById = new Map<string, any>()
     relatedProjects.forEach((project) => projectsById.set(toStringOrEmpty(project.id), project))
     pmProjectsById.forEach((project, projectId) => projectsById.set(projectId, project))
+    creatorProjectsById.forEach((project, projectId) => projectsById.set(projectId, project))
 
     if (!disposed && currentToken === notifyToken) {
       callback(buildProjectTree(Array.from(projectsById.values()), allTasks))
     }
   }
 
-  const resetPmTaskSubscriptions = (projectIds: string[]) => {
-    pmTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
-    pmTaskUnsubscribes = []
+  const resetScopedProjectTaskSubscriptions = (projectIds: string[]) => {
+    scopedProjectTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+    scopedProjectTaskUnsubscribes = []
     Array.from(taskGroups.keys())
       .filter((key) => key.startsWith("pm:"))
       .forEach((key) => taskGroups.delete(key))
@@ -532,7 +534,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
       return
     }
 
-    pmTaskUnsubscribes = chunks.map((chunk, index) => {
+    scopedProjectTaskUnsubscribes = chunks.map((chunk, index) => {
       const constraints: any[] = [where("projectId", "in", chunk)]
       return onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...constraints),
@@ -548,6 +550,12 @@ export function subscribeProjectsWithTasksByScheduleScope(
         },
       )
     })
+  }
+
+  const resetScopedProjectTasks = () => {
+    resetScopedProjectTaskSubscriptions(
+      Array.from(new Set([...pmProjectsById.keys(), ...creatorProjectsById.keys()])),
+    )
   }
 
   const unsubscribes: Array<() => void> = []
@@ -586,6 +594,21 @@ export function subscribeProjectsWithTasksByScheduleScope(
           console.error("Schedule creator FA tasks snapshot error:", error)
         },
       ),
+      onSnapshot(
+        query(collection(db, PROJECTS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail)),
+        (snapshot) => {
+          creatorProjectsById.clear()
+          snapshot.docs
+            .filter((docSnap) => includeHidden || !toBooleanOr(docSnap.data().isHidden ?? docSnap.data().is_hidden, false))
+            .forEach((docSnap) => {
+              creatorProjectsById.set(docSnap.id, { ...docSnap.data(), id: docSnap.id })
+            })
+          resetScopedProjectTasks()
+        },
+        (error) => {
+          console.error("Schedule creator FA projects snapshot error:", error)
+        },
+      ),
     )
   }
 
@@ -600,7 +623,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
           snapshot.docs.forEach((docSnap) => {
             pmProjectsById.set(docSnap.id, { ...docSnap.data(), id: docSnap.id })
           })
-          resetPmTaskSubscriptions(snapshot.docs.map((docSnap) => docSnap.id))
+          resetScopedProjectTasks()
         },
         (error) => {
           console.error("Schedule PM FA projects snapshot error:", error)
@@ -612,7 +635,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
   return () => {
     disposed = true
     unsubscribes.forEach((unsubscribe) => unsubscribe())
-    pmTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+    scopedProjectTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
   }
 }
 
@@ -801,12 +824,15 @@ export async function fetchProjectsWithTasks(
 }
 
 export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Promise<string> {
-  const docRef = await addDoc(collection(db, PROJECTS_COLLECTION), {
-    ...project,
-    isHidden: typeof project.isHidden === "boolean" ? project.isHidden : false,
-    displayOrder: Date.now(),
-    createdAt: serverTimestamp(),
-  })
+  const docRef = await addDoc(
+    collection(db, PROJECTS_COLLECTION),
+    compactObject({
+      ...project,
+      isHidden: typeof project.isHidden === "boolean" ? project.isHidden : false,
+      displayOrder: Date.now(),
+      createdAt: serverTimestamp(),
+    }),
+  )
   return docRef.id
 }
 

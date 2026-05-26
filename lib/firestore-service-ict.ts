@@ -767,8 +767,10 @@ export function subscribeProjectsWithTasksByScheduleScope(
   const strategyTaskGroups = new Map<string, any[]>()
   const ictPmProjectsById = new Map<string, any>()
   const strategyPmProjectsById = new Map<string, any>()
-  let ictPmTaskUnsubscribes: Array<() => void> = []
-  let strategyPmTaskUnsubscribes: Array<() => void> = []
+  const ictCreatorProjectsById = new Map<string, any>()
+  const strategyCreatorProjectsById = new Map<string, any>()
+  let ictScopedProjectTaskUnsubscribes: Array<() => void> = []
+  let strategyScopedProjectTaskUnsubscribes: Array<() => void> = []
   let hiddenLinkedStrategyProjectIds: string[] = []
   let disposed = false
   let notifyToken = 0
@@ -799,10 +801,12 @@ export function subscribeProjectsWithTasksByScheduleScope(
     const ictProjectsById = new Map<string, any>()
     ictRelatedProjects.forEach((project) => ictProjectsById.set(toStringOrEmpty(project.id), project))
     ictPmProjectsById.forEach((project, projectId) => ictProjectsById.set(projectId, project))
+    ictCreatorProjectsById.forEach((project, projectId) => ictProjectsById.set(projectId, project))
 
     const strategyProjectsById = new Map<string, any>()
     strategyRelatedProjects.forEach((project) => strategyProjectsById.set(stripSourceId(toStringOrEmpty(project.id)) || toStringOrEmpty(project.id), project))
     strategyPmProjectsById.forEach((project, projectId) => strategyProjectsById.set(projectId, project))
+    strategyCreatorProjectsById.forEach((project, projectId) => strategyProjectsById.set(projectId, project))
 
     if (!disposed && currentToken === notifyToken) {
       callback(
@@ -830,9 +834,9 @@ export function subscribeProjectsWithTasksByScheduleScope(
     }
   }
 
-  const resetIctPmTaskSubscriptions = (projectIds: string[]) => {
-    ictPmTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
-    ictPmTaskUnsubscribes = []
+  const resetIctScopedProjectTaskSubscriptions = (projectIds: string[]) => {
+    ictScopedProjectTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+    ictScopedProjectTaskUnsubscribes = []
     Array.from(ictTaskGroups.keys())
       .filter((key) => key.startsWith("pm:"))
       .forEach((key) => ictTaskGroups.delete(key))
@@ -846,7 +850,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
       return
     }
 
-    ictPmTaskUnsubscribes = chunks.map((chunk, index) => {
+    ictScopedProjectTaskUnsubscribes = chunks.map((chunk, index) => {
       const constraints: any[] = [where("projectId", "in", chunk)]
       return onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...constraints),
@@ -864,9 +868,9 @@ export function subscribeProjectsWithTasksByScheduleScope(
     })
   }
 
-  const resetStrategyPmTaskSubscriptions = (projectIds: string[]) => {
-    strategyPmTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
-    strategyPmTaskUnsubscribes = []
+  const resetStrategyScopedProjectTaskSubscriptions = (projectIds: string[]) => {
+    strategyScopedProjectTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+    strategyScopedProjectTaskUnsubscribes = []
     Array.from(strategyTaskGroups.keys())
       .filter((key) => key.startsWith("pm:"))
       .forEach((key) => strategyTaskGroups.delete(key))
@@ -880,7 +884,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
       return
     }
 
-    strategyPmTaskUnsubscribes = chunks.map((chunk, index) => {
+    strategyScopedProjectTaskUnsubscribes = chunks.map((chunk, index) => {
       const constraints: any[] = [where("projectId", "in", chunk)]
       return onSnapshot(
         query(collection(db, STRATEGY_TASKS_COLLECTION), ...constraints),
@@ -899,6 +903,22 @@ export function subscribeProjectsWithTasksByScheduleScope(
         },
       )
     })
+  }
+
+  const resetIctScopedProjectTasks = () => {
+    resetIctScopedProjectTaskSubscriptions(
+      Array.from(
+        new Set(
+          [...ictPmProjectsById.keys(), ...ictCreatorProjectsById.keys()].map((id) => stripIctId(id) || id),
+        ),
+      ),
+    )
+  }
+
+  const resetStrategyScopedProjectTasks = () => {
+    resetStrategyScopedProjectTaskSubscriptions(
+      Array.from(new Set([...strategyPmProjectsById.keys(), ...strategyCreatorProjectsById.keys()])),
+    )
   }
 
   const unsubscribes: Array<() => void> = [
@@ -995,6 +1015,46 @@ export function subscribeProjectsWithTasksByScheduleScope(
           console.error("Schedule creator linked strategy tasks snapshot error:", error)
         },
       ),
+      onSnapshot(
+        query(collection(db, PROJECTS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail)),
+        (snapshot) => {
+          ictCreatorProjectsById.clear()
+          snapshot.docs
+            .filter((docSnap) => includeHidden || !toBooleanOr(docSnap.data().isHidden ?? docSnap.data().is_hidden, false))
+            .forEach((docSnap) => {
+              ictCreatorProjectsById.set(`${ICT_SOURCE_PREFIX}${docSnap.id}`, {
+                ...docSnap.data(),
+                id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
+                originalProjectId: docSnap.id,
+                sourceSchedule: "ict",
+              })
+            })
+          resetIctScopedProjectTasks()
+        },
+        (error) => {
+          console.error("Schedule creator ICT projects snapshot error:", error)
+        },
+      ),
+      onSnapshot(
+        query(collection(db, STRATEGY_PROJECTS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail)),
+        (snapshot) => {
+          strategyCreatorProjectsById.clear()
+          snapshot.docs
+            .filter((docSnap) => includeHidden || !toBooleanOr(docSnap.data().isHidden ?? docSnap.data().is_hidden, false))
+            .forEach((docSnap) => {
+              strategyCreatorProjectsById.set(docSnap.id, {
+                ...docSnap.data(),
+                id: docSnap.id,
+                originalProjectId: docSnap.id,
+                sourceSchedule: "strategy",
+              })
+            })
+          resetStrategyScopedProjectTasks()
+        },
+        (error) => {
+          console.error("Schedule creator linked strategy projects snapshot error:", error)
+        },
+      ),
     )
   }
 
@@ -1016,7 +1076,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
               sourceSchedule: "ict",
             })
           })
-          resetIctPmTaskSubscriptions(snapshot.docs.map((docSnap) => docSnap.id))
+          resetIctScopedProjectTasks()
         },
         (error) => {
           console.error("Schedule PM ICT projects snapshot error:", error)
@@ -1034,7 +1094,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
               sourceSchedule: "strategy",
             })
           })
-          resetStrategyPmTaskSubscriptions(snapshot.docs.map((docSnap) => docSnap.id))
+          resetStrategyScopedProjectTasks()
         },
         (error) => {
           console.error("Schedule PM linked strategy projects snapshot error:", error)
@@ -1046,8 +1106,8 @@ export function subscribeProjectsWithTasksByScheduleScope(
   return () => {
     disposed = true
     unsubscribes.forEach((unsubscribe) => unsubscribe())
-    ictPmTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
-    strategyPmTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+    ictScopedProjectTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+    strategyScopedProjectTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
   }
 }
 
@@ -1660,12 +1720,15 @@ export async function fetchProjectsWithTasks(
 }
 
 export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Promise<string> {
-  const docRef = await addDoc(collection(db, PROJECTS_COLLECTION), {
-    ...stripSourcePrefixFromRecord(project as Record<string, unknown>),
-    isHidden: typeof project.isHidden === "boolean" ? project.isHidden : false,
-    displayOrder: Date.now(),
-    createdAt: serverTimestamp(),
-  })
+  const docRef = await addDoc(
+    collection(db, PROJECTS_COLLECTION),
+    compactObject({
+      ...stripSourcePrefixFromRecord(project as Record<string, unknown>),
+      isHidden: typeof project.isHidden === "boolean" ? project.isHidden : false,
+      displayOrder: Date.now(),
+      createdAt: serverTimestamp(),
+    }),
+  )
   return `${ICT_SOURCE_PREFIX}${docRef.id}`
 }
 

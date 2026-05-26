@@ -64,6 +64,8 @@ export interface Project {
   type: ProjectType
   period?: string
   pmEmail?: string
+  createdByEmail?: string
+  createdByName?: string
   tasks: Task[]
   createdAt?: Date
 }

@@ -283,6 +283,8 @@ export default function StrategyWorkManagementPage() {
       type: project.type,
       period: project.period,
       pmEmail: project.pmEmail,
+      createdByEmail: project.createdByEmail,
+      createdByName: project.createdByName,
       isHidden: project.isHidden,
       displayOrder: project.displayOrder,
       createdAt: project.createdAt,
@@ -906,13 +908,18 @@ export default function StrategyWorkManagementPage() {
 
   const handleAddProject = async (newProject: Project) => {
     try {
-      const { id, tasks, ...projectData } = newProject
+      const projectWithCreator: Project = {
+        ...newProject,
+        createdByEmail: user?.email?.trim().toLowerCase() || undefined,
+        createdByName: defaultTaskPerson || undefined,
+      }
+      const { id, tasks, ...projectData } = projectWithCreator
       const newProjectId = await addProjectToDB(projectData)
       await recordHistory({
         entityType: "project",
         action: "create",
         entityId: newProjectId,
-        after: serializeProjectData({ ...newProject, id: newProjectId }),
+        after: serializeProjectData({ ...projectWithCreator, id: newProjectId }),
       })
       toast.success("프로젝트가 추가되었습니다.")
     } catch (error) {
