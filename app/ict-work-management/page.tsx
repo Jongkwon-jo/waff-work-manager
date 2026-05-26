@@ -54,6 +54,7 @@ import { Bell, CalendarDays, Building2, Home, List, BarChart3, LayoutGrid, Rotat
 import { cn, keepIfShallowEqual } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useScheduleListenerActive } from "@/hooks/use-schedule-listener-active"
 import { toast } from "sonner"
 import { RecentChangesWidget } from "@/components/recent-changes-widget"
 import {
@@ -67,6 +68,7 @@ import { extendAncestorEndDatesFromSubtasks } from "@/lib/task-date-range"
 export default function IctWorkManagementPage() {
   const { user, loading: authLoading, isAdmin, pagePermissions } = useAuth()
   const isMobile = useIsMobile()
+  const isScheduleListenerActive = useScheduleListenerActive()
   const canEdit = isAdmin || pagePermissions.ictWorkManagementEdit
   const [projectList, setProjectList] = useState<Project[]>([])
   const visibleProjectListRef = useRef<Project[]>([])
@@ -790,6 +792,7 @@ export default function IctWorkManagementPage() {
       }
       return
     }
+    if (!isScheduleListenerActive) return
 
     if (!hasLoadedProjectListRef.current) setLoading(true)
     const unsubscribe = subscribeProjectsWithTasksByScheduleScope(
@@ -811,24 +814,26 @@ export default function IctWorkManagementPage() {
 
     return () => unsubscribe()
   }, [
-    user,
+    user?.email,
     canViewFullSchedule,
     currentProfileEmail,
     currentUserEmail,
     isCurrentProfileReady,
     isDepartmentOrgReady,
+    isScheduleListenerActive,
     scheduleScopeAliases,
   ])
 
   useEffect(() => {
-    if (!user || !canViewFullSchedule) {
+    if (!currentUserEmail || !canViewFullSchedule) {
       setHiddenProjectOptions([])
       setSelectedHiddenProjectIds([])
       return
     }
+    if (!isScheduleListenerActive) return
 
     return subscribeHiddenProjectSummaries(setHiddenProjectOptions)
-  }, [user, canViewFullSchedule])
+  }, [currentUserEmail, canViewFullSchedule, isScheduleListenerActive])
 
   useEffect(() => {
     const availableHiddenIds = new Set(hiddenProjectOptions.map((project) => project.id))
@@ -839,17 +844,18 @@ export default function IctWorkManagementPage() {
   }, [hiddenProjectOptions])
 
   useEffect(() => {
-    if (!user || selectedHiddenProjectIds.length === 0) {
+    if (!currentUserEmail || selectedHiddenProjectIds.length === 0) {
       selectedHiddenProjectListRef.current = []
       setProjectList(mergeProjectLists(visibleProjectListRef.current, []))
       return
     }
+    if (!isScheduleListenerActive) return
 
     return subscribeProjectsWithTasksByProjectIds(selectedHiddenProjectIds, (data) => {
       selectedHiddenProjectListRef.current = data
       setProjectList(mergeProjectLists(visibleProjectListRef.current, data))
     })
-  }, [user, selectedHiddenProjectIds])
+  }, [currentUserEmail, selectedHiddenProjectIds, isScheduleListenerActive])
 
   const canViewAllRecentChanges = isAdmin || pagePermissions.recentChangesWidget
   const canRollbackRecentChanges = isAdmin
