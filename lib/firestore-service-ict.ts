@@ -22,7 +22,9 @@ import {
 import type { Project, Task } from "./data"
 import {
   addHistoryEntry as addStrategyHistoryEntry,
-  computeIsIctFromDepartment,
+  computeIsIctFromTaskFields,
+  computeIsIctFromTaskFieldsWithSettings,
+  DEFAULT_DEPARTMENT_PERSON_SETTINGS,
   deleteHistoryEntry as deleteStrategyHistoryEntry,
   rollbackHistoryEntry as rollbackStrategyHistoryEntry,
 } from "./firestore-service"
@@ -57,6 +59,7 @@ const ICT_GANTT_DETAIL_PANEL_WIDTH_FIELD = "ictGanttDetailPanelWidth"
 const USER_PAGE_PERMISSIONS_COLLECTION = "user_page_permissions"
 const STRATEGY_SOURCE_PREFIX = "strategy:"
 const ICT_SOURCE_PREFIX = "ict:"
+const LINKED_STRATEGY_PERSON_KEYS = buildTaskPersonKeysFromValues(DEFAULT_DEPARTMENT_PERSON_SETTINGS.ICT).slice(0, 30)
 
 export type DashboardSortBy = "name" | "type" | "progress" | "latest"
 export type GanttCollapseState = {
@@ -310,7 +313,28 @@ function buildProjectTree(projectsData: any[], allTasksData: any[]): Project[] {
 }
 
 function isIctTask(raw: any) {
-  return toStringOrEmpty(raw?.department).toUpperCase().includes("ICT")
+  return computeIsIctFromTaskFields(raw?.department, raw?.person)
+}
+
+function mapStrategyTaskDoc(docSnap: any) {
+  const raw = docSnap.data()
+  return {
+    ...raw,
+    id: docSnap.id,
+    originalTaskId: docSnap.id,
+    originalProjectId: toStringOrEmpty(raw.projectId),
+    sourceSchedule: "strategy",
+  }
+}
+
+function mergeStrategyTaskSources(...sources: any[][]): any[] {
+  const byId = new Map<string, any>()
+  sources.flat().forEach((task) => {
+    const id = stripSourceId(toStringOrEmpty(task.id)) || toStringOrEmpty(task.originalTaskId)
+    if (!id) return
+    byId.set(id, { ...task, id })
+  })
+  return Array.from(byId.values())
 }
 
 function buildStrategyIctProjectTree(
@@ -670,9 +694,7 @@ export function subscribeProjectsWithTasksByPersonKeys(
   chunks.forEach((chunk, index) => {
     const ictConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
     if (dateRange) ictConstraints.push(where("endDate", ">=", dateRange.startDate))
-    // ICT 스케줄에 보일 strategy task = department 에 "ICT" 포함된 것만 (isIctTask 와 동일).
-    const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk), where("isIct", "==", true)]
-    if (dateRange) strategyConstraints.push(where("endDate", ">=", dateRange.startDate))
+    const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
     unsubscribes.push(
       onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...ictConstraints),
@@ -702,7 +724,7 @@ export function subscribeProjectsWithTasksByPersonKeys(
             index,
             snapshot.docs
               .filter((docSnap) => isIctTask(docSnap.data()))
-              .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
+              .map(mapStrategyTaskDoc)
               .filter((task) => taskOverlapsQueryDateRange(task, dateRange)),
           )
           void notify().catch((error) => console.error("Scoped linked strategy data snapshot error:", error))
@@ -859,11 +881,14 @@ export function subscribeProjectsWithTasksByScheduleScope(
     }
 
     strategyPmTaskUnsubscribes = chunks.map((chunk, index) => {
-      const constraints: any[] = [where("projectId", "in", chunk), where("isIct", "==", true)]
+      const constraints: any[] = [where("projectId", "in", chunk)]
       return onSnapshot(
         query(collection(db, STRATEGY_TASKS_COLLECTION), ...constraints),
         (snapshot) => {
-          strategyTaskGroups.set(`pm:${index}`, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+          strategyTaskGroups.set(
+            `pm:${index}`,
+            snapshot.docs.filter((docSnap) => isIctTask(docSnap.data())).map(mapStrategyTaskDoc),
+          )
           void notify().catch((error) => {
             console.error("Schedule PM linked strategy data snapshot error:", error)
             if (!disposed) callback([])
@@ -895,7 +920,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
   chunkValues(queryKeys, 30).forEach((chunk, index) => {
     const ictConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
-    const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk), where("isIct", "==", true)]
+    const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
     unsubscribes.push(
       onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...ictConstraints),
@@ -917,7 +942,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
             `person:${index}`,
             snapshot.docs
               .filter((docSnap) => isIctTask(docSnap.data()))
-              .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })),
+              .map(mapStrategyTaskDoc),
           )
           void notify().catch((error) => {
             console.error("Schedule assignee linked strategy data snapshot error:", error)
@@ -950,7 +975,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
         },
       ),
       onSnapshot(
-        query(collection(db, STRATEGY_TASKS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail), where("isIct", "==", true)),
+        query(collection(db, STRATEGY_TASKS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail)),
         (snapshot) => {
           strategyTaskGroups.set(
             "creator",
@@ -959,7 +984,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
                 const data = docSnap.data()
                 return isIctTask(data)
               })
-              .map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })),
+              .map(mapStrategyTaskDoc),
           )
           void notify().catch((error) => {
             console.error("Schedule creator linked strategy data snapshot error:", error)
@@ -1231,26 +1256,32 @@ export function subscribeToData(
     let hiddenLinkedStrategyProjectIds: string[] = []
     const ictTaskGroups = new Map<number, any[]>()
     const strategyTaskGroups = new Map<number, any[]>()
+    let linkedStrategyPersonTasks: any[] = []
     let ictTaskUnsubscribes: Array<() => void> = []
     let strategyTaskUnsubscribes: Array<() => void> = []
     let areIctProjectsReady = false
     let areStrategyProjectsReady = false
     let isLinkedStrategyVisibilityReady = false
+    let areLinkedStrategyPersonTasksReady = LINKED_STRATEGY_PERSON_KEYS.length === 0
     let expectedIctTaskGroupCount = 0
     let expectedStrategyTaskGroupCount = 0
     const readyIctTaskGroupIndexes = new Set<number>()
     const readyStrategyTaskGroupIndexes = new Set<number>()
 
     const updateAndNotify = () => {
-      if (!areIctProjectsReady || !areStrategyProjectsReady || !isLinkedStrategyVisibilityReady) return
+      if (!areIctProjectsReady || !areStrategyProjectsReady || !isLinkedStrategyVisibilityReady || !areLinkedStrategyPersonTasksReady) return
       if (readyIctTaskGroupIndexes.size < expectedIctTaskGroupCount) return
       if (readyStrategyTaskGroupIndexes.size < expectedStrategyTaskGroupCount) return
+      const strategyTasks = mergeStrategyTaskSources(
+        Array.from(strategyTaskGroups.values()).flat(),
+        linkedStrategyPersonTasks,
+      )
       callback(
         buildIctScheduleProjectTree(
           ictProjects,
           Array.from(ictTaskGroups.values()).flat(),
           strategyProjects,
-          Array.from(strategyTaskGroups.values()).flat(),
+          strategyTasks,
           hiddenLinkedStrategyProjectIds,
         ),
       )
@@ -1316,7 +1347,7 @@ export function subscribeToData(
         onSnapshot(
           query(collection(db, STRATEGY_TASKS_COLLECTION), where("projectId", "in", chunk), where("isIct", "==", true)),
           (snapshot) => {
-            strategyTaskGroups.set(index, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
+            strategyTaskGroups.set(index, snapshot.docs.map(mapStrategyTaskDoc))
             readyStrategyTaskGroupIndexes.add(index)
             updateAndNotify()
           },
@@ -1376,10 +1407,31 @@ export function subscribeToData(
       },
     )
 
+    const unsubscribeLinkedStrategyPersonTasks =
+      LINKED_STRATEGY_PERSON_KEYS.length > 0
+        ? onSnapshot(
+            query(
+              collection(db, STRATEGY_TASKS_COLLECTION),
+              where("personKeys", "array-contains-any", LINKED_STRATEGY_PERSON_KEYS),
+            ),
+            (snapshot) => {
+              linkedStrategyPersonTasks = snapshot.docs
+                .filter((docSnap) => isIctTask(docSnap.data()))
+                .map(mapStrategyTaskDoc)
+              areLinkedStrategyPersonTasksReady = true
+              updateAndNotify()
+            },
+            (error) => {
+              console.error("Linked strategy person tasks snapshot error:", error)
+            },
+          )
+        : () => {}
+
     return () => {
       unsubscribeProjects()
       unsubscribeStrategyProjects()
       unsubscribeLinkedStrategyVisibility()
+      unsubscribeLinkedStrategyPersonTasks()
       ictTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
       strategyTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
     }
@@ -1389,14 +1441,20 @@ export function subscribeToData(
   const tasksQuery = query(collection(db, TASKS_COLLECTION))
   const strategyProjectsQuery = query(collection(db, STRATEGY_PROJECTS_COLLECTION))
   const strategyTasksQuery = query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true))
+  const linkedStrategyPersonTasksQuery =
+    LINKED_STRATEGY_PERSON_KEYS.length > 0
+      ? query(collection(db, STRATEGY_TASKS_COLLECTION), where("personKeys", "array-contains-any", LINKED_STRATEGY_PERSON_KEYS))
+      : null
 
   let ictProjects: any[] = []
   let ictTasks: any[] = []
   let strategyProjects: any[] = []
   let strategyTasks: any[] = []
+  let linkedStrategyPersonTasks: any[] = []
   let hiddenLinkedStrategyProjectIds: string[] = []
   const readySources = new Set<string>()
-  const requiredSources = ["ictProjects", "ictTasks", "strategyProjects", "strategyTasks", "linkedStrategyVisibility"]
+  const requiredSources = ["ictProjects", "ictTasks", "strategyProjects", "strategyTasks", "linkedStrategyPersonTasks", "linkedStrategyVisibility"]
+  if (!linkedStrategyPersonTasksQuery) readySources.add("linkedStrategyPersonTasks")
 
   const updateAndNotify = () => {
     if (readySources.size < requiredSources.length) return
@@ -1405,7 +1463,7 @@ export function subscribeToData(
         ictProjects,
         ictTasks,
         strategyProjects,
-        strategyTasks,
+        mergeStrategyTaskSources(strategyTasks, linkedStrategyPersonTasks),
         hiddenLinkedStrategyProjectIds,
       ),
     )
@@ -1471,13 +1529,7 @@ export function subscribeToData(
   const unsubscribeStrategyTasks = onSnapshot(
     strategyTasksQuery,
     (snapshot) => {
-      strategyTasks = snapshot.docs.map((docSnap) => ({
-        ...docSnap.data(),
-        id: docSnap.id,
-        originalTaskId: docSnap.id,
-        originalProjectId: toStringOrEmpty(docSnap.data().projectId),
-        sourceSchedule: "strategy",
-      }))
+      strategyTasks = snapshot.docs.map(mapStrategyTaskDoc)
       readySources.add("strategyTasks")
       updateAndNotify()
     },
@@ -1485,6 +1537,20 @@ export function subscribeToData(
       console.error("Strategy tasks snapshot error:", error)
     },
   )
+
+  const unsubscribeLinkedStrategyPersonTasks = linkedStrategyPersonTasksQuery
+    ? onSnapshot(
+        linkedStrategyPersonTasksQuery,
+        (snapshot) => {
+          linkedStrategyPersonTasks = snapshot.docs.filter((docSnap) => isIctTask(docSnap.data())).map(mapStrategyTaskDoc)
+          readySources.add("linkedStrategyPersonTasks")
+          updateAndNotify()
+        },
+        (error) => {
+          console.error("Linked strategy person tasks snapshot error:", error)
+        },
+      )
+    : () => {}
 
   const unsubscribeLinkedStrategyVisibility = onSnapshot(
     linkedStrategyVisibilityRef,
@@ -1505,6 +1571,7 @@ export function subscribeToData(
     unsubscribeTasks()
     unsubscribeStrategyProjects()
     unsubscribeStrategyTasks()
+    unsubscribeLinkedStrategyPersonTasks()
     unsubscribeLinkedStrategyVisibility()
   }
 }
@@ -1522,16 +1589,30 @@ export async function fetchProjectsWithTasks(
   const strategyProjectsQuery = includeHidden
     ? query(collection(db, STRATEGY_PROJECTS_COLLECTION))
     : query(collection(db, STRATEGY_PROJECTS_COLLECTION), where("isHidden", "==", false))
-  // 위 subscribeToData 와 동일 — server-side isIct 필터.
+  // 위 subscribeToData 와 동일하게 isIct 필터에 ICT 담당자 보조 조회를 합친다.
   const strategyTasksQuery = includeHidden
     ? query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true))
     : query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true), where("isHidden", "==", false))
+  const linkedStrategyPersonTasksQuery =
+    LINKED_STRATEGY_PERSON_KEYS.length > 0
+      ? query(collection(db, STRATEGY_TASKS_COLLECTION), where("personKeys", "array-contains-any", LINKED_STRATEGY_PERSON_KEYS))
+      : null
 
-  const projectsSnapshot = await getDocs(projectsQuery)
-  const tasksSnapshot = await getDocs(tasksQuery)
-  const strategyProjectsSnapshot = await getDocs(strategyProjectsQuery)
-  const strategyTasksSnapshot = await getDocs(strategyTasksQuery)
-  const linkedStrategyVisibilitySnapshot = await getDoc(doc(db, SETTINGS_COLLECTION, LINKED_STRATEGY_PROJECT_VISIBILITY_DOC))
+  const [
+    projectsSnapshot,
+    tasksSnapshot,
+    strategyProjectsSnapshot,
+    strategyTasksSnapshot,
+    linkedStrategyPersonTasksSnapshot,
+    linkedStrategyVisibilitySnapshot,
+  ] = await Promise.all([
+    getDocs(projectsQuery),
+    getDocs(tasksQuery),
+    getDocs(strategyProjectsQuery),
+    getDocs(strategyTasksQuery),
+    linkedStrategyPersonTasksQuery ? getDocs(linkedStrategyPersonTasksQuery) : Promise.resolve(undefined),
+    getDoc(doc(db, SETTINGS_COLLECTION, LINKED_STRATEGY_PROJECT_VISIBILITY_DOC)),
+  ])
 
   const projectsData = projectsSnapshot.docs.map((docSnap) => ({
     ...docSnap.data(),
@@ -1557,13 +1638,13 @@ export async function fetchProjectsWithTasks(
     originalProjectId: docSnap.id,
     sourceSchedule: "strategy",
   }))
-  const strategyTasksData = strategyTasksSnapshot.docs.map((docSnap) => ({
-    ...docSnap.data(),
-    id: docSnap.id,
-    originalTaskId: docSnap.id,
-    originalProjectId: toStringOrEmpty(docSnap.data().projectId),
-    sourceSchedule: "strategy",
-  }))
+  const linkedStrategyPersonTasksData = linkedStrategyPersonTasksSnapshot
+    ? linkedStrategyPersonTasksSnapshot.docs.filter((docSnap) => isIctTask(docSnap.data())).map(mapStrategyTaskDoc)
+    : []
+  const strategyTasksData = mergeStrategyTaskSources(
+    strategyTasksSnapshot.docs.map(mapStrategyTaskDoc),
+    linkedStrategyPersonTasksData,
+  ).filter((task) => includeHidden || !toBooleanOr(task.isHidden ?? task.is_hidden, false))
 
   const hiddenLinkedStrategyProjectIds = normalizeHiddenLinkedStrategyProjectIds(
     linkedStrategyVisibilitySnapshot.data()?.[HIDDEN_LINKED_STRATEGY_PROJECT_IDS_FIELD],
@@ -1651,7 +1732,10 @@ export async function addTaskToDB(task: Omit<Task, "id">): Promise<string> {
   const cleanTask = stripSourcePrefixFromRecord(task as unknown as Record<string, unknown>)
   // ICT 페이지에서 strategy task 를 만드는 경우 server-side isIct 필터에도 잡혀야 함
   const isIctValue = isStrategyTask
-    ? computeIsIctFromDepartment((cleanTask as { department?: unknown }).department ?? task.department)
+    ? await computeIsIctFromTaskFieldsWithSettings(
+        (cleanTask as { department?: unknown }).department ?? task.department,
+        (cleanTask as { person?: unknown }).person ?? task.person,
+      )
     : undefined
   const docRef = await addDoc(collection(db, targetCollection), {
     ...cleanTask,
@@ -1667,9 +1751,22 @@ export async function updateTaskInDB(taskId: string, updates: Omit<Partial<Task>
   const isStrategyTask = isStrategyId(taskId)
   const taskRef = doc(db, isStrategyTask ? STRATEGY_TASKS_COLLECTION : TASKS_COLLECTION, stripSourceId(taskId) || taskId)
   const cleanUpdates = stripSourcePrefixFromRecord(updates as Record<string, unknown>)
+  const shouldUpdateIctMarker = isStrategyTask && (typeof updates.department === "string" || typeof updates.person === "string")
+  let isIctUpdate: { isIct?: boolean } = {}
+  if (shouldUpdateIctMarker) {
+    const currentSnap = await getDoc(taskRef)
+    const current = currentSnap.data() || {}
+    isIctUpdate = {
+      isIct: await computeIsIctFromTaskFieldsWithSettings(
+        typeof cleanUpdates.department === "string" ? cleanUpdates.department : current.department,
+        typeof cleanUpdates.person === "string" ? cleanUpdates.person : current.person,
+      ),
+    }
+  }
   const payload = {
     ...cleanUpdates,
     ...(typeof updates.person === "string" ? { personKeys: buildTaskPersonKeys(updates.person) } : {}),
+    ...isIctUpdate,
   }
   await updateDoc(taskRef, payload as any)
 }

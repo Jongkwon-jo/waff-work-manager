@@ -96,6 +96,11 @@ export function AddTaskDialog({
     return format(date, "MM월 dd일", { locale: ko })
   }
 
+  const formatDateDisplay = (date: Date | undefined) => {
+    if (!date) return ""
+    return format(date, "yyyy-MM-dd", { locale: ko })
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!taskName || !startDate || !endDate) return
@@ -288,7 +293,7 @@ export function AddTaskDialog({
                   <PopoverTrigger asChild>
                     <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !startDate && "text-muted-foreground")}>
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {startDate ? format(startDate, "yy-MM", { locale: ko }) : <span>날짜 선택</span>}
+                      {startDate ? formatDateDisplay(startDate) : <span>날짜 선택</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
@@ -302,7 +307,7 @@ export function AddTaskDialog({
                   <PopoverTrigger asChild>
                     <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !endDate && "text-muted-foreground")}>
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {endDate ? format(endDate, "yy-MM", { locale: ko }) : <span>날짜 선택</span>}
+                      {endDate ? formatDateDisplay(endDate) : <span>날짜 선택</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">

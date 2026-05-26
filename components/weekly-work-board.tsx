@@ -159,6 +159,14 @@ function toTaskDateKey(date: Date) {
   return format(date, "MM월 dd일", { locale: ko })
 }
 
+function getPersonalTaskCreatedDate(task: MyPagePersonalTask) {
+  const timestamp = typeof task.createdAt === "number" ? task.createdAt : undefined
+  if (!timestamp || !Number.isFinite(timestamp)) return undefined
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return undefined
+  return date
+}
+
 function splitPersons(value?: string) {
   const normalized = (value || "").trim()
   if (!normalized) return ["미지정"]
@@ -414,7 +422,7 @@ export function WeeklyWorkBoard({
       const profilePerson = profileDefaultPerson || user?.email?.split("@")[0] || ""
       const shouldIncludePersonalPerson =
         profilePerson &&
-        profilePersonalTasks.some((task) => task.startDate || task.endDate) &&
+        profilePersonalTasks.some((task) => getPersonalTaskCreatedDate(task)) &&
         (selectedDepartment === "all" || selectedDepartment === profileDepartment)
       if (shouldIncludePersonalPerson) people.push(profilePerson)
       return Array.from(new Set(people)).sort((a, b) => a.localeCompare(b, "ko"))
@@ -521,10 +529,25 @@ export function WeeklyWorkBoard({
       (selectedDepartment === "all" || selectedDepartment === profileDepartment) && allowedPersonSet.has(profilePerson)
     const personalWeeklyTasks: WeeklyTaskItem[] = shouldIncludePersonalTasks
       ? profilePersonalTasks
-          .filter((task) => task.startDate || task.endDate)
-          .filter((task) =>
-            isTaskInCurrentWeek(
-              {
+          .map((task) => ({ task, createdDate: getPersonalTaskCreatedDate(task) }))
+          .filter(
+            (entry): entry is { task: MyPagePersonalTask; createdDate: Date } =>
+              entry.createdDate instanceof Date && isWithinInterval(entry.createdDate, { start: weekStart, end: weekEnd }),
+          )
+          .map(({ task, createdDate }) => {
+            const dateKey = toTaskDateKey(createdDate)
+            return {
+              projectId: `personal-${task.id}`,
+              projectName: "개인 업무",
+              subProjectName: "",
+              projectType: "Etc",
+              departmentGroup: profileDepartment || "기타",
+              departmentLabel: "개인",
+              managementHref: "/my-page",
+              team: personalTeam.teamName,
+              teamOrder: personalTeam.order,
+              person: profilePerson,
+              task: {
                 id: task.id,
                 projectId: "personal",
                 task: task.title,
@@ -532,41 +555,14 @@ export function WeeklyWorkBoard({
                 category: task.important ? "중요" : "일반",
                 department: profileDepartment || "기타",
                 person: profilePerson,
-                startDate: task.startDate || task.endDate || "",
-                endDate: task.endDate || task.startDate || "",
+                startDate: dateKey,
+                endDate: dateKey,
                 status: task.checked ? "완료" : "진행",
                 manDays: 0,
               },
-              weekStart,
-              weekEnd,
-            ),
-          )
-          .map((task) => ({
-            projectId: `personal-${task.id}`,
-            projectName: "개인 업무",
-            subProjectName: "",
-            projectType: "Etc",
-            departmentGroup: profileDepartment || "기타",
-            departmentLabel: "개인",
-            managementHref: "/my-page",
-            team: personalTeam.teamName,
-            teamOrder: personalTeam.order,
-            person: profilePerson,
-            task: {
-              id: task.id,
-              projectId: "personal",
-              task: task.title,
-              memo: task.memo,
-              category: task.important ? "중요" : "일반",
-              department: profileDepartment || "기타",
-              person: profilePerson,
-              startDate: task.startDate || task.endDate || "",
-              endDate: task.endDate || task.startDate || "",
-              status: task.checked ? "완료" : "진행",
-              manDays: 0,
-            },
-            startTime: parseTaskDate(task.startDate || task.endDate)?.getTime() ?? Number.MAX_SAFE_INTEGER,
-          }))
+              startTime: createdDate.getTime(),
+            }
+          })
       : []
 
     const visibleStrategyProjectIds = new Set(

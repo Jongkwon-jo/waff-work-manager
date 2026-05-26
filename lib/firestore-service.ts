@@ -1175,16 +1175,48 @@ export async function deleteProjectFromDB(projectId: string): Promise<void> {
 }
 
 // ICT 스케줄 페이지에서 strategy tasks 를 server-side 필터하기 위한 boolean.
-// lib/firestore-service-ict.ts 의 isIctTask 와 동일 규칙.
+// 부서가 ICT 이거나 ICT 담당자가 배정된 업무를 연동 대상으로 본다.
+function hasMatchingPerson(person: unknown, personNames: string[]): boolean {
+  const tokens = toStringOrEmpty(person)
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+  const normalizedNames = personNames.map((value) => value.trim().toLowerCase()).filter(Boolean)
+
+  return tokens.some((token) =>
+    normalizedNames.some((name) => token === name || token.includes(name) || name.includes(token)),
+  )
+}
+
+export function computeIsIctFromTaskFields(
+  department: unknown,
+  person?: unknown,
+  ictPersonNames: string[] = DEFAULT_DEPARTMENT_PERSON_SETTINGS.ICT,
+): boolean {
+  return (
+    (typeof department === "string" && department.toUpperCase().includes("ICT")) ||
+    hasMatchingPerson(person, ictPersonNames)
+  )
+}
+
 export function computeIsIctFromDepartment(department: unknown): boolean {
-  return typeof department === "string" && department.toUpperCase().includes("ICT")
+  return computeIsIctFromTaskFields(department)
+}
+
+export async function computeIsIctFromTaskFieldsWithSettings(
+  department: unknown,
+  person?: unknown,
+): Promise<boolean> {
+  const settings = await fetchDepartmentPersonSettings()
+  return computeIsIctFromTaskFields(department, person, settings.ICT)
 }
 
 export async function addTaskToDB(task: Omit<Task, "id">): Promise<string> {
+  const isIct = await computeIsIctFromTaskFieldsWithSettings(task.department, task.person)
   const docRef = await addDoc(collection(db, TASKS_COLLECTION), {
     ...task,
     personKeys: buildTaskPersonKeys(task.person || ""),
-    isIct: computeIsIctFromDepartment(task.department),
+    isIct,
     // where("isHidden", "==", false) 쿼리에서 누락되지 않도록 항상 boolean 으로 저장
     isHidden: typeof task.isHidden === "boolean" ? task.isHidden : false,
     displayOrder: typeof task.displayOrder === "number" ? task.displayOrder : Date.now(),
@@ -1194,10 +1226,22 @@ export async function addTaskToDB(task: Omit<Task, "id">): Promise<string> {
 
 export async function updateTaskInDB(taskId: string, updates: Omit<Partial<Task>, "parentId"> & { parentId?: string | null }): Promise<void> {
   const taskRef = doc(db, TASKS_COLLECTION, taskId)
+  const shouldUpdateIctMarker = typeof updates.department === "string" || typeof updates.person === "string"
+  let isIctUpdate: { isIct?: boolean } = {}
+  if (shouldUpdateIctMarker) {
+    const currentSnap = await getDoc(taskRef)
+    const current = currentSnap.data() || {}
+    isIctUpdate = {
+      isIct: await computeIsIctFromTaskFieldsWithSettings(
+        typeof updates.department === "string" ? updates.department : current.department,
+        typeof updates.person === "string" ? updates.person : current.person,
+      ),
+    }
+  }
   const payload = {
     ...updates,
     ...(typeof updates.person === "string" ? { personKeys: buildTaskPersonKeys(updates.person) } : {}),
-    ...(typeof updates.department === "string" ? { isIct: computeIsIctFromDepartment(updates.department) } : {}),
+    ...isIctUpdate,
   }
   await updateDoc(taskRef, payload)
 }
@@ -1522,6 +1566,17 @@ export function subscribeDepartmentPersonSettings(callback: (settings: Departmen
       callback({ ...DEFAULT_DEPARTMENT_PERSON_SETTINGS })
     },
   )
+}
+
+export async function fetchDepartmentPersonSettings(): Promise<DepartmentPersonSettings> {
+  try {
+    const snap = await getDoc(doc(db, SETTINGS_COLLECTION, DEPARTMENT_PERSON_SETTINGS_DOC))
+    const raw = snap.data() as Partial<Record<DepartmentPersonGroup, unknown>> | undefined
+    return normalizeDepartmentPersonSettings(raw)
+  } catch (error) {
+    console.error("Department person settings fetch error:", error)
+    return { ...DEFAULT_DEPARTMENT_PERSON_SETTINGS }
+  }
 }
 
 export async function saveDepartmentPersonSettings(settings: DepartmentPersonSettings): Promise<void> {
