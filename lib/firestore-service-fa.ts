@@ -410,6 +410,116 @@ function taskOverlapsQueryDateRange(task: any, range?: QueryDateRange) {
   return startDate <= rangeEnd || endDate >= rangeStart
 }
 
+type ProjectTaskSubscriptionPoolOptions = {
+  collectionName: string
+  groupPrefix: string
+  taskGroups: Map<string, any[]>
+  mapSnapshot: (snapshot: any) => any[]
+  onChange: () => void
+  onError: (error: unknown) => void
+  buildConstraints?: (projectIds: string[]) => any[]
+}
+
+function createProjectTaskSubscriptionPool({
+  collectionName,
+  groupPrefix,
+  taskGroups,
+  mapSnapshot,
+  onChange,
+  onError,
+  buildConstraints,
+}: ProjectTaskSubscriptionPoolOptions) {
+  const chunks: Array<{ ids: string[]; unsubscribe?: () => void; ready: boolean }> = []
+  const chunkByProjectId = new Map<string, number>()
+
+  const groupKey = (index: number) => `${groupPrefix}:${index}`
+  const constraintsFor = (ids: string[]) => buildConstraints?.(ids) || [where("projectId", "in", ids)]
+
+  const detachChunk = (index: number) => {
+    const chunk = chunks[index]
+    if (!chunk) return
+    chunk.unsubscribe?.()
+    chunk.unsubscribe = undefined
+    chunk.ready = true
+    taskGroups.delete(groupKey(index))
+  }
+
+  const attachChunk = (index: number) => {
+    const chunk = chunks[index]
+    if (!chunk) return
+
+    detachChunk(index)
+    if (chunk.ids.length === 0) {
+      onChange()
+      return
+    }
+
+    chunk.ready = false
+    chunk.unsubscribe = onSnapshot(
+      query(collection(db, collectionName), ...constraintsFor(chunk.ids)),
+      (snapshot) => {
+        taskGroups.set(groupKey(index), mapSnapshot(snapshot))
+        chunk.ready = true
+        onChange()
+      },
+      (error) => {
+        chunk.ready = true
+        onError(error)
+      },
+    )
+  }
+
+  return {
+    sync(projectIds: string[]) {
+      const nextIds = uniqueTrimmedStrings(projectIds)
+      const nextIdSet = new Set(nextIds)
+      const changedChunks = new Set<number>()
+
+      Array.from(chunkByProjectId.entries()).forEach(([projectId, chunkIndex]) => {
+        if (nextIdSet.has(projectId)) return
+        const chunk = chunks[chunkIndex]
+        if (chunk) {
+          chunk.ids = chunk.ids.filter((id) => id !== projectId)
+          changedChunks.add(chunkIndex)
+        }
+        chunkByProjectId.delete(projectId)
+      })
+
+      nextIds.forEach((projectId) => {
+        if (chunkByProjectId.has(projectId)) return
+        let chunkIndex = chunks.findIndex((chunk) => chunk.ids.length < 30)
+        if (chunkIndex === -1) {
+          chunkIndex = chunks.length
+          chunks.push({ ids: [], ready: true })
+        }
+        chunks[chunkIndex].ids.push(projectId)
+        chunkByProjectId.set(projectId, chunkIndex)
+        changedChunks.add(chunkIndex)
+      })
+
+      if (changedChunks.size === 0) return
+      changedChunks.forEach((chunkIndex) => attachChunk(chunkIndex))
+      onChange()
+    },
+    isReady() {
+      return chunks.every((chunk) => chunk.ids.length === 0 || chunk.ready)
+    },
+    unsubscribe() {
+      chunks.forEach((_, index) => detachChunk(index))
+      chunks.length = 0
+      chunkByProjectId.clear()
+    },
+  }
+}
+
+function queueScheduleCallback(callback: () => void) {
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(callback)
+    return
+  }
+  void Promise.resolve().then(callback)
+}
+
 export function subscribeProjectsWithTasksByPersonKeys(
   personKeys: string[],
   callback: (projects: Project[]) => void,
@@ -494,11 +604,13 @@ export function subscribeProjectsWithTasksByScheduleScope(
   const taskGroups = new Map<string, any[]>()
   const pmProjectsById = new Map<string, any>()
   const creatorProjectsById = new Map<string, any>()
-  let scopedProjectTaskUnsubscribes: Array<() => void> = []
   let disposed = false
   let notifyToken = 0
+  let notifyScheduled = false
+  let pmTaskPool: ReturnType<typeof createProjectTaskSubscriptionPool> | null = null
 
   const notify = async () => {
+    if (pmTaskPool && !pmTaskPool.isReady()) return
     const currentToken = ++notifyToken
     const tasksById = new Map<string, any>()
     taskGroups.forEach((tasks) => {
@@ -518,47 +630,34 @@ export function subscribeProjectsWithTasksByScheduleScope(
     }
   }
 
-  const resetScopedProjectTaskSubscriptions = (projectIds: string[]) => {
-    scopedProjectTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
-    scopedProjectTaskUnsubscribes = []
-    Array.from(taskGroups.keys())
-      .filter((key) => key.startsWith("pm:"))
-      .forEach((key) => taskGroups.delete(key))
-
-    const chunks = chunkValues(projectIds, 30)
-    if (chunks.length === 0) {
+  const scheduleNotify = () => {
+    if (notifyScheduled) return
+    notifyScheduled = true
+    queueScheduleCallback(() => {
+      notifyScheduled = false
       void notify().catch((error) => {
-        console.error("Schedule PM FA data snapshot error:", error)
+        console.error("Schedule FA data snapshot error:", error)
         if (!disposed) callback([])
       })
-      return
-    }
-
-    scopedProjectTaskUnsubscribes = chunks.map((chunk, index) => {
-      const constraints: any[] = [where("projectId", "in", chunk)]
-      return onSnapshot(
-        query(collection(db, TASKS_COLLECTION), ...constraints),
-        (snapshot) => {
-          taskGroups.set(`pm:${index}`, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
-          void notify().catch((error) => {
-            console.error("Schedule PM FA data snapshot error:", error)
-            if (!disposed) callback([])
-          })
-        },
-        (error) => {
-          console.error("Schedule PM FA tasks snapshot error:", error)
-        },
-      )
     })
   }
 
   const resetScopedProjectTasks = () => {
-    resetScopedProjectTaskSubscriptions(
-      Array.from(new Set([...pmProjectsById.keys(), ...creatorProjectsById.keys()])),
-    )
+    pmTaskPool?.sync(Array.from(new Set([...pmProjectsById.keys(), ...creatorProjectsById.keys()])))
   }
 
   const unsubscribes: Array<() => void> = []
+
+  pmTaskPool = createProjectTaskSubscriptionPool({
+    collectionName: TASKS_COLLECTION,
+    groupPrefix: "pm",
+    taskGroups,
+    mapSnapshot: (snapshot) => snapshot.docs.map((docSnap: any) => ({ ...docSnap.data(), id: docSnap.id })),
+    onChange: scheduleNotify,
+    onError: (error) => {
+      console.error("Schedule PM FA tasks snapshot error:", error)
+    },
+  })
 
   chunkValues(queryKeys, 30).forEach((chunk, index) => {
     const constraints: any[] = [where("personKeys", "array-contains-any", chunk)]
@@ -567,10 +666,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
         query(collection(db, TASKS_COLLECTION), ...constraints),
         (snapshot) => {
           taskGroups.set(`person:${index}`, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
-          void notify().catch((error) => {
-            console.error("Schedule assignee FA data snapshot error:", error)
-            if (!disposed) callback([])
-          })
+          scheduleNotify()
         },
         (error) => {
           console.error("Schedule assignee FA tasks snapshot error:", error)
@@ -585,10 +681,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
         query(collection(db, TASKS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail)),
         (snapshot) => {
           taskGroups.set("creator", snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
-          void notify().catch((error) => {
-            console.error("Schedule creator FA data snapshot error:", error)
-            if (!disposed) callback([])
-          })
+          scheduleNotify()
         },
         (error) => {
           console.error("Schedule creator FA tasks snapshot error:", error)
@@ -604,6 +697,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
               creatorProjectsById.set(docSnap.id, { ...docSnap.data(), id: docSnap.id })
             })
           resetScopedProjectTasks()
+          scheduleNotify()
         },
         (error) => {
           console.error("Schedule creator FA projects snapshot error:", error)
@@ -624,6 +718,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
             pmProjectsById.set(docSnap.id, { ...docSnap.data(), id: docSnap.id })
           })
           resetScopedProjectTasks()
+          scheduleNotify()
         },
         (error) => {
           console.error("Schedule PM FA projects snapshot error:", error)
@@ -635,7 +730,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
   return () => {
     disposed = true
     unsubscribes.forEach((unsubscribe) => unsubscribe())
-    scopedProjectTaskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+    pmTaskPool?.unsubscribe()
   }
 }
 
@@ -701,49 +796,41 @@ export function subscribeToData(
   const includeHidden = options.includeHidden === true
   if (!includeHidden) {
     let projects: any[] = []
-    const taskGroups = new Map<number, any[]>()
-    let taskUnsubscribes: Array<() => void> = []
-    let expectedTaskGroupCount = 0
-    const readyTaskGroupIndexes = new Set<number>()
+    const taskGroups = new Map<string, any[]>()
+    let notifyScheduled = false
+    let taskPool: ReturnType<typeof createProjectTaskSubscriptionPool>
 
     const notify = () => {
-      if (readyTaskGroupIndexes.size < expectedTaskGroupCount) return
+      if (!taskPool.isReady()) return
       callback(buildProjectTree(projects, Array.from(taskGroups.values()).flat()))
     }
 
-    const resetTaskSubscriptions = (projectIds: string[]) => {
-      taskUnsubscribes.forEach((unsubscribe) => unsubscribe())
-      taskUnsubscribes = []
-      taskGroups.clear()
-      readyTaskGroupIndexes.clear()
-
-      const chunks = chunkValues(projectIds, 30)
-      expectedTaskGroupCount = chunks.length
-      if (chunks.length === 0) {
+    const scheduleNotify = () => {
+      if (notifyScheduled) return
+      notifyScheduled = true
+      queueScheduleCallback(() => {
+        notifyScheduled = false
         notify()
-        return
-      }
-
-      taskUnsubscribes = chunks.map((chunk, index) =>
-        onSnapshot(
-          query(collection(db, TASKS_COLLECTION), where("projectId", "in", chunk)),
-          (snapshot) => {
-            taskGroups.set(index, snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id })))
-            readyTaskGroupIndexes.add(index)
-            notify()
-          },
-          (error) => {
-            console.error("Visible FA project tasks snapshot error:", error)
-          },
-        ),
-      )
+      })
     }
+
+    taskPool = createProjectTaskSubscriptionPool({
+      collectionName: TASKS_COLLECTION,
+      groupPrefix: "visible",
+      taskGroups,
+      mapSnapshot: (snapshot) => snapshot.docs.map((docSnap: any) => ({ ...docSnap.data(), id: docSnap.id })),
+      onChange: scheduleNotify,
+      onError: (error) => {
+        console.error("Visible FA project tasks snapshot error:", error)
+      },
+    })
 
     const unsubscribeProjects = onSnapshot(
       query(collection(db, PROJECTS_COLLECTION), where("isHidden", "==", false)),
       (snapshot) => {
         projects = snapshot.docs.map((docSnap) => ({ ...docSnap.data(), id: docSnap.id }))
-        resetTaskSubscriptions(snapshot.docs.map((docSnap) => docSnap.id))
+        taskPool.sync(snapshot.docs.map((docSnap) => docSnap.id))
+        scheduleNotify()
       },
       (error) => {
         console.error("Projects snapshot error:", error)
@@ -752,7 +839,7 @@ export function subscribeToData(
 
     return () => {
       unsubscribeProjects()
-      taskUnsubscribes.forEach((unsubscribe) => unsubscribe())
+      taskPool.unsubscribe()
     }
   }
 
