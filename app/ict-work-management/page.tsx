@@ -16,7 +16,6 @@ import {
   addTaskToDB,
   updateTaskInDB,
   deleteTaskFromDB,
-  updateProjectOrdersInDB,
   updateTaskOrdersInDB,
   saveDashboardSortBy,
   fetchDashboardSortBy,
@@ -34,6 +33,7 @@ import {
   DEFAULT_DEPARTMENT_ORG_SETTINGS,
   saveSeenRecentChangeIds,
   saveUserHiddenOwnerOptions,
+  saveUserIctProjectOrderIds,
   subscribeCurrentUserProfileBundle,
   fetchDepartmentOrgSettings,
   fetchGlobalSchedules,
@@ -95,6 +95,7 @@ export default function IctWorkManagementPage() {
   const [isGanttCollapseStateReady, setIsGanttCollapseStateReady] = useState(false)
   const [ganttLeftPanelWidth, setGanttLeftPanelWidth] = useState<number | null>(null)
   const [ganttDetailPanelWidth, setGanttDetailPanelWidth] = useState<number | null>(null)
+  const [ictProjectOrderIds, setIctProjectOrderIds] = useState<string[]>([])
   const [defaultTaskPerson, setDefaultTaskPerson] = useState("")
   const [currentTaskAliases, setCurrentTaskAliases] = useState<string[]>([])
   const [currentProfileEmail, setCurrentProfileEmail] = useState("")
@@ -216,6 +217,7 @@ export default function IctWorkManagementPage() {
     setIsGanttCollapseStateReady(false)
     setGanttLeftPanelWidth(null)
     setGanttDetailPanelWidth(null)
+    setIctProjectOrderIds([])
 
     if (!email) {
       setDefaultTaskPerson("")
@@ -237,6 +239,7 @@ export default function IctWorkManagementPage() {
       setIsGanttCollapseStateReady(true)
       setGanttLeftPanelWidth(bundle.ganttLeftPanelWidth)
       setGanttDetailPanelWidth(bundle.ganttDetailPanelWidth)
+      setIctProjectOrderIds((prev) => keepIfShallowEqual(prev, bundle.projectOrderIds))
 
       const profile = bundle.profile
       const accountDefaultPerson = (profile?.taskAliases || [])[0]?.trim() || ""
@@ -676,6 +679,7 @@ export default function IctWorkManagementPage() {
 
   const sortedProjects = useMemo(() => {
     const list = [...projectList]
+    const personalOrderMap = new Map(ictProjectOrderIds.map((projectId, index) => [projectId, index]))
     const getTime = (project: Project) => (project.createdAt ? new Date(project.createdAt).getTime() : 0)
     const baseCompare = (a: Project, b: Project) => {
       const orderA = typeof a.displayOrder === "number" ? a.displayOrder : Number.MAX_SAFE_INTEGER
@@ -688,10 +692,21 @@ export default function IctWorkManagementPage() {
 
       return a.id.localeCompare(b.id)
     }
+    const personalOrderCompare = (a: Project, b: Project) => {
+      const orderA = personalOrderMap.get(a.id)
+      const orderB = personalOrderMap.get(b.id)
+      if (orderA !== undefined || orderB !== undefined) {
+        const normalizedA = orderA ?? Number.MAX_SAFE_INTEGER
+        const normalizedB = orderB ?? Number.MAX_SAFE_INTEGER
+        if (normalizedA !== normalizedB) return normalizedA - normalizedB
+      }
+
+      return baseCompare(a, b)
+    }
 
     return list.sort((a, b) => {
       if (sortBy === "latest") {
-        return baseCompare(a, b)
+        return personalOrderCompare(a, b)
       }
       if (sortBy === "name") {
         const byName = a.name.localeCompare(b.name, "ko")
@@ -717,7 +732,7 @@ export default function IctWorkManagementPage() {
       }
       return baseCompare(a, b)
     })
-  }, [projectList, sortBy])
+  }, [ictProjectOrderIds, projectList, sortBy])
 
   const pmOptions = useMemo<ProjectPmOption[]>(
     () =>
@@ -1562,28 +1577,50 @@ export default function IctWorkManagementPage() {
     }
   }
 
-  const handleMoveProject = async (projectId: string, direction: "up" | "down") => {
-    let movedProjectIds: string[] | null = null
+  const mergeMovedVisibleProjectIds = (
+    fullProjectIds: string[],
+    visibleProjectIds: string[] | undefined,
+    projectId: string,
+    direction: "up" | "down",
+  ): string[] | null => {
+    const fullProjectIdSet = new Set(fullProjectIds)
+    const scopedVisibleProjectIds = (visibleProjectIds?.length ? visibleProjectIds : fullProjectIds).filter((id) =>
+      fullProjectIdSet.has(id),
+    )
+    const currentIndex = scopedVisibleProjectIds.indexOf(projectId)
+    if (currentIndex === -1) return null
 
-    setProjectList((prev) => {
-      const currentIndex = prev.findIndex((project) => project.id === projectId)
-      if (currentIndex === -1) return prev
+    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
+    if (targetIndex < 0 || targetIndex >= scopedVisibleProjectIds.length) return null
 
-      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
-      if (targetIndex < 0 || targetIndex >= prev.length) return prev
+    const movedVisibleProjectIds = moveArrayItem(scopedVisibleProjectIds, currentIndex, targetIndex)
+    if (!visibleProjectIds?.length) return movedVisibleProjectIds
 
-      const moved = moveArrayItem(prev, currentIndex, targetIndex).map((project, index) => ({
-        ...project,
-        displayOrder: index,
-      }))
-      movedProjectIds = moved.map((project) => project.id)
-      return moved
-    })
+    const visibleProjectIdSet = new Set(scopedVisibleProjectIds)
+    const movedQueue = [...movedVisibleProjectIds]
+    return fullProjectIds.map((id) => (visibleProjectIdSet.has(id) ? movedQueue.shift() || id : id))
+  }
 
+  const handleMoveProject = async (
+    projectId: string,
+    direction: "up" | "down",
+    visibleProjectIds?: string[],
+  ) => {
+    if (!user?.email) return
+
+    const movedProjectIds = mergeMovedVisibleProjectIds(
+      sortedProjects.map((project) => project.id),
+      visibleProjectIds,
+      projectId,
+      direction,
+    )
     if (!movedProjectIds) return
 
+    setSortBy("latest")
+    setIctProjectOrderIds((prev) => keepIfShallowEqual(prev, movedProjectIds))
+
     try {
-      await updateProjectOrdersInDB(movedProjectIds)
+      await saveUserIctProjectOrderIds(user.email, movedProjectIds)
     } catch (error) {
       toast.error("프로젝트 순서 저장 실패")
     }

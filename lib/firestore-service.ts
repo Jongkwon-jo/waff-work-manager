@@ -53,6 +53,7 @@ const USER_PROFILES_COLLECTION = "user_profiles"
 const GANTT_COLLAPSE_STATE_FIELD = "ganttCollapseState"
 const GANTT_LEFT_PANEL_WIDTH_FIELD = "ganttLeftPanelWidth"
 const GANTT_DETAIL_PANEL_WIDTH_FIELD = "ganttDetailPanelWidth"
+const ICT_PROJECT_ORDER_IDS_FIELD = "ictProjectOrderIds"
 const USER_PAGE_PERMISSIONS_COLLECTION = "user_page_permissions"
 
 export type DashboardSortBy = "name" | "type" | "progress" | "latest"
@@ -1989,6 +1990,7 @@ type GanttFieldMap = {
   collapse: string
   leftWidth: string
   detailWidth: string
+  projectOrder?: string
 }
 
 const GANTT_FIELD_MAP: Record<GanttScope, GanttFieldMap> = {
@@ -2001,6 +2003,7 @@ const GANTT_FIELD_MAP: Record<GanttScope, GanttFieldMap> = {
     collapse: "ictGanttCollapseState",
     leftWidth: "ictGanttLeftPanelWidth",
     detailWidth: "ictGanttDetailPanelWidth",
+    projectOrder: ICT_PROJECT_ORDER_IDS_FIELD,
   },
   fa: {
     collapse: "faGanttCollapseState",
@@ -2014,6 +2017,7 @@ export type CurrentUserProfileBundle = {
   ganttCollapseState: GanttCollapseState
   ganttLeftPanelWidth: number | null
   ganttDetailPanelWidth: number | null
+  projectOrderIds: string[]
 }
 
 const EMPTY_BUNDLE: CurrentUserProfileBundle = {
@@ -2021,6 +2025,7 @@ const EMPTY_BUNDLE: CurrentUserProfileBundle = {
   ganttCollapseState: { ...DEFAULT_GANTT_COLLAPSE_STATE },
   ganttLeftPanelWidth: null,
   ganttDetailPanelWidth: null,
+  projectOrderIds: [],
 }
 
 /**
@@ -2053,12 +2058,17 @@ export function subscribeCurrentUserProfileBundle(
       const collapseRaw = raw[fields.collapse] as Partial<Record<keyof GanttCollapseState, unknown>> | undefined
       const leftWidth = toNumberOr(raw[fields.leftWidth], DEFAULT_GANTT_LEFT_PANEL_WIDTH)
       const detailWidth = toNumberOr(raw[fields.detailWidth], DEFAULT_GANTT_DETAIL_PANEL_WIDTH)
+      const projectOrderIds =
+        fields.projectOrder && Array.isArray(raw[fields.projectOrder])
+          ? uniqueTrimmedStrings((raw[fields.projectOrder] as unknown[]).filter((value): value is string => typeof value === "string"))
+          : []
 
       callback({
         profile: parseUserProfileSnapshot(raw),
         ganttCollapseState: normalizeGanttCollapseState(collapseRaw),
         ganttLeftPanelWidth: leftWidth > 0 ? leftWidth : null,
         ganttDetailPanelWidth: detailWidth > 0 ? detailWidth : null,
+        projectOrderIds,
       })
     },
     (error) => {
@@ -2092,6 +2102,21 @@ export async function saveUserHiddenOwnerOptions(email: string, hiddenOwnerOptio
     {
       email: normalizedEmail,
       hiddenOwnerOptions: Array.from(new Set(hiddenOwnerOptions.map((owner) => owner.trim()).filter(Boolean))),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+export async function saveUserIctProjectOrderIds(email: string, projectOrderIds: string[]): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  await setDoc(
+    doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
+    {
+      email: normalizedEmail,
+      [ICT_PROJECT_ORDER_IDS_FIELD]: uniqueTrimmedStrings(projectOrderIds),
       updatedAt: serverTimestamp(),
     },
     { merge: true },

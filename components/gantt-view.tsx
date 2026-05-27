@@ -67,7 +67,7 @@ interface GanttViewProps {
   onDeleteTask: (taskId: string, projectId: string) => void
   onDeleteTasks?: (tasks: Array<{ taskId: string; projectId: string }>) => Promise<void> | void
   onCopyTasks?: (taskIds: string[]) => Promise<void> | void
-  onMoveProject: (projectId: string, direction: "up" | "down") => void
+  onMoveProject: (projectId: string, direction: "up" | "down", visibleProjectIds?: string[]) => void
   onMoveTask: (projectId: string, taskId: string, direction: "up" | "down") => void
   onMoveTaskToProjectTop?: (targetProjectId: string, draggedTaskId: string) => Promise<void> | void
   onSelectedHiddenProjectIdsChange?: (projectIds: string[]) => void
@@ -1015,6 +1015,8 @@ export function GanttView({
         return true
       })
   }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds, hiddenTaskIds, hiddenProjectIds, showHiddenProjects, expandedHiddenParentIds, expandedHiddenProjectIds, collapsedHiddenParentIds, highlightedTaskId, hasHiddenProjectSelector, selectedHiddenProjectIdSet])
+
+  const filteredProjectIds = useMemo(() => filteredProjects.map((project) => project.id), [filteredProjects])
 
   const visibleTaskMap = useMemo(() => {
     const map = new Map<string, FlattenedTask>()
@@ -2608,7 +2610,7 @@ export function GanttView({
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6 text-white hover:bg-white/15 hover:text-white"
-                          onClick={() => onMoveProject(project.id, "up")}
+                          onClick={() => onMoveProject(project.id, "up", filteredProjectIds)}
                         >
                           <ArrowUp className="h-3 w-3" />
                         </Button>
@@ -2617,7 +2619,7 @@ export function GanttView({
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6 text-white hover:bg-white/15 hover:text-white"
-                          onClick={() => onMoveProject(project.id, "down")}
+                          onClick={() => onMoveProject(project.id, "down", filteredProjectIds)}
                         >
                           <ArrowDown className="h-3 w-3" />
                         </Button>
