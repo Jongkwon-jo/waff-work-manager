@@ -603,6 +603,7 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
   const taskGroups = new Map<string, any[]>()
   const pmProjectsById = new Map<string, any>()
+  const pmProjectGroups = new Map<string, any[]>()
   const creatorProjectsById = new Map<string, any>()
   let disposed = false
   let notifyToken = 0
@@ -644,6 +645,16 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
   const resetScopedProjectTasks = () => {
     pmTaskPool?.sync(Array.from(new Set([...pmProjectsById.keys(), ...creatorProjectsById.keys()])))
+  }
+
+  const syncPmProjectGroup = (key: string, projects: any[]) => {
+    pmProjectGroups.set(key, projects)
+    pmProjectsById.clear()
+    pmProjectGroups.forEach((items) => {
+      items.forEach((project) => pmProjectsById.set(toStringOrEmpty(project.id), project))
+    })
+    resetScopedProjectTasks()
+    scheduleNotify()
   }
 
   const unsubscribes: Array<() => void> = []
@@ -707,18 +718,26 @@ export function subscribeProjectsWithTasksByScheduleScope(
   }
 
   if (normalizedPmEmail) {
-    const projectConstraints: any[] = [where("pmEmail", "==", normalizedPmEmail)]
-    if (!includeHidden) projectConstraints.push(where("isHidden", "==", false))
+    const legacyProjectConstraints: any[] = [where("pmEmail", "==", normalizedPmEmail)]
+    const multiProjectConstraints: any[] = [where("pmEmails", "array-contains", normalizedPmEmail)]
+    const mapVisibleProjectDocs = (snapshot: any) =>
+      snapshot.docs
+        .filter((docSnap: any) => includeHidden || !toBooleanOr(docSnap.data().isHidden ?? docSnap.data().is_hidden, false))
+        .map((docSnap: any) => ({ ...docSnap.data(), id: docSnap.id }))
     unsubscribes.push(
       onSnapshot(
-        query(collection(db, PROJECTS_COLLECTION), ...projectConstraints),
+        query(collection(db, PROJECTS_COLLECTION), ...legacyProjectConstraints),
         (snapshot) => {
-          pmProjectsById.clear()
-          snapshot.docs.forEach((docSnap) => {
-            pmProjectsById.set(docSnap.id, { ...docSnap.data(), id: docSnap.id })
-          })
-          resetScopedProjectTasks()
-          scheduleNotify()
+          syncPmProjectGroup("pmEmail", mapVisibleProjectDocs(snapshot))
+        },
+        (error) => {
+          console.error("Schedule PM FA projects snapshot error:", error)
+        },
+      ),
+      onSnapshot(
+        query(collection(db, PROJECTS_COLLECTION), ...multiProjectConstraints),
+        (snapshot) => {
+          syncPmProjectGroup("pmEmails", mapVisibleProjectDocs(snapshot))
         },
         (error) => {
           console.error("Schedule PM FA projects snapshot error:", error)

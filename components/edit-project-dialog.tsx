@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ProjectPmSelect } from "@/components/project-pm-select"
+import { makeProjectPmFields, normalizeProjectPmEmails } from "@/lib/data"
 import type { Project, ProjectPmOption, ProjectType } from "@/lib/data"
 
 interface EditProjectDialogProps {
@@ -38,14 +39,14 @@ export function EditProjectDialog({ project, onEditProject, trigger, pmOptions =
   const [name, setName] = useState(project.name)
   const [type, setType] = useState<ProjectType>(project.type)
   const [period, setPeriod] = useState(project.period || "")
-  const [pmEmail, setPmEmail] = useState(project.pmEmail || UNASSIGNED_PM_VALUE)
+  const [pmEmails, setPmEmails] = useState<string[]>(() => normalizeProjectPmEmails(project))
 
   useEffect(() => {
     if (open) {
       setName(project.name)
       setType(project.type)
       setPeriod(project.period || "")
-      setPmEmail(project.pmEmail || UNASSIGNED_PM_VALUE)
+      setPmEmails(normalizeProjectPmEmails(project))
     }
   }, [open, project])
 
@@ -58,7 +59,7 @@ export function EditProjectDialog({ project, onEditProject, trigger, pmOptions =
       name,
       type,
       period,
-      pmEmail: pmEmail === UNASSIGNED_PM_VALUE ? "" : pmEmail,
+      ...makeProjectPmFields(pmEmails),
     })
     setOpen(false)
   }
@@ -119,8 +120,8 @@ export function EditProjectDialog({ project, onEditProject, trigger, pmOptions =
               <Label htmlFor="edit-pm">PM</Label>
               <ProjectPmSelect
                 id="edit-pm"
-                value={pmEmail}
-                onChange={setPmEmail}
+                value={pmEmails}
+                onChange={setPmEmails}
                 options={pmOptions}
                 unassignedValue={UNASSIGNED_PM_VALUE}
               />

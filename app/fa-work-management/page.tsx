@@ -4,6 +4,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { useState, useMemo, useEffect, useDeferredValue, useRef } from "react"
 import { signOut } from "firebase/auth"
+import { makeProjectPmFields, normalizeProjectPmEmails } from "@/lib/data"
 import type { Project, ProjectPmOption, Task, TaskStatus } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import {
@@ -104,6 +105,7 @@ export default function FaWorkManagementPage() {
   const [departmentOrgSettings, setDepartmentOrgSettings] = useState<DepartmentOrgSettings>(DEFAULT_DEPARTMENT_ORG_SETTINGS)
   const [isDepartmentOrgReady, setIsDepartmentOrgReady] = useState(false)
   const [globalSchedules, setGlobalSchedules] = useState<GlobalSchedule[]>([])
+  const [operationInProgress, setOperationInProgress] = useState<"copy" | "delete" | null>(null)
   const deferredSearchQuery = useDeferredValue(searchQuery)
 
   useEffect(() => {
@@ -280,6 +282,7 @@ export default function FaWorkManagementPage() {
       type: project.type,
       period: project.period,
       pmEmail: project.pmEmail,
+      pmEmails: normalizeProjectPmEmails(project),
       createdByEmail: project.createdByEmail,
       createdByName: project.createdByName,
       isHidden: project.isHidden,
@@ -299,7 +302,10 @@ export default function FaWorkManagementPage() {
     )
   }
 
-  const recordHistory = async (entry: Omit<ChangeHistoryEntry, "id" | "createdAt">) => {
+  const recordHistory = async (
+    entry: Omit<ChangeHistoryEntry, "id" | "createdAt">,
+    options?: { refreshHistory?: boolean },
+  ) => {
     try {
       await addHistoryEntry({
         ...entry,
@@ -307,7 +313,9 @@ export default function FaWorkManagementPage() {
         actorName: defaultTaskPerson || undefined,
         source: entry.source || "fa-work-management",
       })
-      await loadHistory()
+      if (options?.refreshHistory ?? true) {
+        await loadHistory()
+      }
     } catch (error) {
       console.error("History write failed:", error)
     }
@@ -731,6 +739,7 @@ export default function FaWorkManagementPage() {
     [departmentOrgSettings, scheduleScopeAliases],
   )
   const canViewFullSchedule = isAdmin || ledScheduleDepartmentGroups.has("FA")
+  const canCopySelectedTasks = canEdit || canViewFullSchedule
   const emptyStateTitle = canViewFullSchedule ? "표시할 데이터가 없습니다" : "조회 가능한 업무가 없습니다"
   const emptyStateDescription = canViewFullSchedule
     ? "새로운 프로젝트를 추가하여 업무 관리를 시작해 보세요."
@@ -992,10 +1001,16 @@ export default function FaWorkManagementPage() {
   }
 
   const handleDeleteProject = async (projectId: string) => {
+    if (operationInProgress) {
+      toast.info("다른 작업이 진행 중입니다.")
+      return
+    }
+
     try {
       if (confirm("프로젝트를 삭제하면 모든 하위 업무도 함께 삭제됩니다. 계속하시겠습니까?")) {
         const beforeProject = projectList.find((p) => p.id === projectId)
         const beforeTasks = beforeProject ? flattenTaskRecords(beforeProject.tasks) : []
+        setOperationInProgress("delete")
         await deleteProjectFromDB(projectId)
         if (beforeProject) {
           await recordHistory({
@@ -1012,6 +1027,8 @@ export default function FaWorkManagementPage() {
       }
     } catch (error) {
       toast.error("프로젝트 삭제 실패")
+    } finally {
+      setOperationInProgress(null)
     }
   }
 
@@ -1149,12 +1166,18 @@ export default function FaWorkManagementPage() {
   }
 
   const handleDeleteTask = async (taskId: string, projectId: string) => {
+    if (operationInProgress) {
+      toast.info("다른 작업이 진행 중입니다.")
+      return
+    }
+
     try {
       const beforeTask = allTasksFlat.find((t) => t.id === taskId)
       if (!canEdit && !isTaskCreatedByCurrentUser(beforeTask)) {
         toast.error("작성자 본인의 업무만 삭제할 수 있습니다.")
         return
       }
+      setOperationInProgress("delete")
       await deleteTaskFromDB(taskId)
       if (beforeTask) {
         await recordHistory({
@@ -1168,54 +1191,79 @@ export default function FaWorkManagementPage() {
       toast.success("업무가 삭제되었습니다.")
     } catch (error) {
       toast.error("업무 삭제 실패")
+    } finally {
+      setOperationInProgress(null)
     }
   }
 
   const handleDeleteTasksBulk = async (targets: Array<{ taskId: string; projectId: string }>) => {
+    if (operationInProgress) {
+      toast.info("다른 작업이 진행 중입니다.")
+      return
+    }
+
     const uniqueTargets = Array.from(new Map(targets.map((target) => [target.taskId, target])).values())
     if (uniqueTargets.length === 0) return
 
     let deletedCount = 0
     let failedCount = 0
+    let wroteHistory = false
 
-    for (const target of uniqueTargets) {
-      try {
-        const beforeTask = allTasksFlat.find((task) => task.id === target.taskId)
-        await deleteTaskFromDB(target.taskId)
-        if (beforeTask) {
-          await recordHistory({
-            entityType: "task",
-            action: "delete",
-            entityId: target.taskId,
-            projectId: target.projectId,
-            before: serializeTaskData(beforeTask),
-          })
+    setOperationInProgress("delete")
+    try {
+      for (const target of uniqueTargets) {
+        try {
+          const beforeTask = allTasksFlat.find((task) => task.id === target.taskId)
+          await deleteTaskFromDB(target.taskId)
+          if (beforeTask) {
+            await recordHistory(
+              {
+                entityType: "task",
+                action: "delete",
+                entityId: target.taskId,
+                projectId: target.projectId,
+                before: serializeTaskData(beforeTask),
+              },
+              { refreshHistory: false },
+            )
+            wroteHistory = true
+          }
+          deletedCount += 1
+        } catch (error) {
+          failedCount += 1
         }
-        deletedCount += 1
-      } catch (error) {
-        failedCount += 1
       }
-    }
+      if (wroteHistory) {
+        await loadHistory()
+      }
 
-    if (deletedCount > 0) {
-      toast.success(`${deletedCount}개 업무가 삭제되었습니다.`)
-    }
-    if (failedCount > 0) {
-      toast.error(`${failedCount}개 업무 삭제에 실패했습니다.`)
+      if (deletedCount > 0) {
+        toast.success(`${deletedCount}개 업무가 삭제되었습니다.`)
+      }
+      if (failedCount > 0) {
+        toast.error(`${failedCount}개 업무 삭제에 실패했습니다.`)
+      }
+    } finally {
+      setOperationInProgress(null)
     }
   }
 
   const handleCopyTasksBulk = async (taskIds: string[]) => {
+    if (operationInProgress) {
+      toast.info("다른 작업이 진행 중입니다.")
+      return
+    }
+
     const uniqueIds = Array.from(new Set(taskIds))
     if (uniqueIds.length === 0) return
 
     const taskMap = new Map(allTasksFlat.map((task) => [task.id, task]))
     const allowedIds = uniqueIds.filter((id) => {
       const task = taskMap.get(id)
-      return Boolean(task && (canEdit || isTaskCreatedByCurrentUser(task)))
+      return Boolean(task && (canCopySelectedTasks || isTaskCreatedByCurrentUser(task)))
     })
     if (allowedIds.length === 0) {
-      toast.error("작성자 본인의 업무만 삭제할 수 있습니다.")
+      toast.error("복사할 수 있는 업무가 없습니다.")
       return
     }
     const selectedSet = new Set(allowedIds)
@@ -1275,54 +1323,195 @@ export default function FaWorkManagementPage() {
     let copiedCount = 0
     let failedCount = 0
     const createdIdByTempId = new Map<string, string>()
+    let wroteHistory = false
 
-    for (const payload of payloads) {
-      try {
-        const { id: _ignoredId, subTasks, ...taskData } = payload.data as Task
-        const resolvedParentId = payload.parentTempId
-          ? createdIdByTempId.get(payload.parentTempId)
-          : payload.originalParentId
+    setOperationInProgress("copy")
+    try {
+      for (const payload of payloads) {
+        try {
+          const { id: _ignoredId, subTasks, ...taskData } = payload.data as Task
+          const resolvedParentId = payload.parentTempId
+            ? createdIdByTempId.get(payload.parentTempId)
+            : payload.originalParentId
 
-        if (payload.parentTempId && !resolvedParentId) {
+          if (payload.parentTempId && !resolvedParentId) {
+            failedCount += 1
+            continue
+          }
+
+          const sanitizedTaskData = compact({
+            ...(taskData as Record<string, unknown>),
+            parentId: resolvedParentId,
+            isSubTask: Boolean(resolvedParentId),
+            createdByEmail: user?.email?.trim().toLowerCase() || undefined,
+            createdByName: defaultTaskPerson || undefined,
+          }) as Omit<Task, "id">
+
+          if (sanitizedTaskData.parentId === undefined) {
+            delete sanitizedTaskData.parentId
+          }
+          if (sanitizedTaskData.isSubTask === undefined) {
+            delete sanitizedTaskData.isSubTask
+          }
+
+          const createdTaskId = await addTaskToDB(sanitizedTaskData)
+          createdIdByTempId.set(payload.tempId, createdTaskId)
+          await recordHistory(
+            {
+              entityType: "task",
+              action: "create",
+              entityId: createdTaskId,
+              projectId: payload.projectId,
+              after: sanitizedTaskData as unknown as Record<string, unknown>,
+            },
+            { refreshHistory: false },
+          )
+          wroteHistory = true
+          copiedCount += 1
+        } catch (error) {
           failedCount += 1
-          continue
         }
-
-        const sanitizedTaskData = compact({
-          ...(taskData as Record<string, unknown>),
-          parentId: resolvedParentId,
-          isSubTask: Boolean(resolvedParentId),
-          createdByEmail: user?.email?.trim().toLowerCase() || undefined,
-          createdByName: defaultTaskPerson || undefined,
-        }) as Omit<Task, "id">
-
-        if (sanitizedTaskData.parentId === undefined) {
-          delete sanitizedTaskData.parentId
-        }
-        if (sanitizedTaskData.isSubTask === undefined) {
-          delete sanitizedTaskData.isSubTask
-        }
-
-        const createdTaskId = await addTaskToDB(sanitizedTaskData)
-        createdIdByTempId.set(payload.tempId, createdTaskId)
-        await recordHistory({
-          entityType: "task",
-          action: "create",
-          entityId: createdTaskId,
-          projectId: payload.projectId,
-          after: sanitizedTaskData as unknown as Record<string, unknown>,
-        })
-        copiedCount += 1
-      } catch (error) {
-        failedCount += 1
       }
+      if (wroteHistory) {
+        await loadHistory()
+      }
+
+      if (copiedCount > 0) {
+        toast.success(`${copiedCount}개 업무가 복사되었습니다.`)
+      }
+      if (failedCount > 0) {
+        toast.error(`${failedCount}개 업무 복사에 실패했습니다.`)
+      }
+    } finally {
+      setOperationInProgress(null)
+    }
+  }
+
+  const sortTasksForProjectCopy = (tasks: Task[]) =>
+    [...tasks].sort((a, b) => {
+      const orderA = Number(a.displayOrder ?? Number.MAX_SAFE_INTEGER)
+      const orderB = Number(b.displayOrder ?? Number.MAX_SAFE_INTEGER)
+      if (orderA !== orderB) return orderA - orderB
+      const byName = (a.task || "").localeCompare(b.task || "", "ko")
+      if (byName !== 0) return byName
+      return a.id.localeCompare(b.id)
+    })
+
+  const handleCopyProject = async (projectId: string) => {
+    if (operationInProgress) {
+      toast.info("다른 작업이 진행 중입니다.")
+      return
     }
 
-    if (copiedCount > 0) {
-      toast.success(`${copiedCount}개 업무가 복사되었습니다.`)
-    }
-    if (failedCount > 0) {
-      toast.error(`${failedCount}개 업무 복사에 실패했습니다.`)
+    const sourceProject = projectList.find((project) => project.id === projectId)
+    if (!sourceProject) return
+
+    const taskCount = flattenTasks(sourceProject.tasks).length
+    if (!confirm(`"${sourceProject.name}" 프로젝트와 하위 업무 ${taskCount}개를 복사하시겠습니까?`)) return
+
+    const creatorEmail = user?.email?.trim().toLowerCase() || undefined
+    const creatorName = defaultTaskPerson || undefined
+    const copiedProjectData = compact({
+      name: `${sourceProject.name} (복사)`,
+      type: sourceProject.type,
+      period: sourceProject.period,
+      ...makeProjectPmFields(normalizeProjectPmEmails(sourceProject)),
+      createdByEmail: creatorEmail,
+      createdByName: creatorName,
+      isHidden: false,
+    }) as Omit<Project, "id" | "tasks">
+
+    let copiedTaskCount = 0
+    let failedTaskCount = 0
+    let wroteHistory = false
+
+    setOperationInProgress("copy")
+    try {
+      const copiedProjectId = await addProjectToDB(copiedProjectData)
+      await recordHistory(
+        {
+          entityType: "project",
+          action: "create",
+          entityId: copiedProjectId,
+          after: serializeProjectData({
+            id: copiedProjectId,
+            tasks: [],
+            ...copiedProjectData,
+          } as Project),
+        },
+        { refreshHistory: false },
+      )
+      wroteHistory = true
+
+      const copyTaskSubtree = async (sourceTask: Task, parentId: string | undefined, displayOrder: number) => {
+        try {
+          const {
+            id: _ignoredId,
+            subTasks,
+            sourceSchedule: _sourceSchedule,
+            originalTaskId: _originalTaskId,
+            originalProjectId: _originalProjectId,
+            projectId: _sourceProjectId,
+            parentId: _sourceParentId,
+            ...taskData
+          } = sourceTask
+          const sanitizedTaskData = compact({
+            ...(taskData as Record<string, unknown>),
+            projectId: copiedProjectId,
+            parentId,
+            isSubTask: Boolean(parentId),
+            isHidden: false,
+            displayOrder,
+            createdByEmail: creatorEmail,
+            createdByName: creatorName,
+          }) as Omit<Task, "id">
+
+          if (sanitizedTaskData.parentId === undefined) {
+            delete sanitizedTaskData.parentId
+          }
+
+          const copiedTaskId = await addTaskToDB(sanitizedTaskData)
+          await recordHistory(
+            {
+              entityType: "task",
+              action: "create",
+              entityId: copiedTaskId,
+              projectId: copiedProjectId,
+              after: sanitizedTaskData as unknown as Record<string, unknown>,
+            },
+            { refreshHistory: false },
+          )
+          wroteHistory = true
+          copiedTaskCount += 1
+
+          for (const [childIndex, child] of sortTasksForProjectCopy(subTasks || []).entries()) {
+            await copyTaskSubtree(child, copiedTaskId, childIndex)
+          }
+        } catch (error) {
+          failedTaskCount += 1
+        }
+      }
+
+      for (const [rootIndex, rootTask] of sortTasksForProjectCopy(sourceProject.tasks).entries()) {
+        await copyTaskSubtree(rootTask, undefined, rootIndex)
+      }
+
+      if (wroteHistory) {
+        await loadHistory()
+      }
+
+      toast.success(
+        copiedTaskCount > 0
+          ? `프로젝트와 ${copiedTaskCount}개 업무가 복사되었습니다.`
+          : "빈 프로젝트가 복사되었습니다.",
+      )
+      if (failedTaskCount > 0) {
+        toast.error(`${failedTaskCount}개 업무 복사에 실패했습니다.`)
+      }
+    } catch (error) {
+      toast.error("프로젝트 복사 실패")
+    } finally {
+      setOperationInProgress(null)
     }
   }
 
@@ -1879,15 +2068,18 @@ export default function FaWorkManagementPage() {
                 hiddenProjectOptions={hiddenProjectOptions}
                 selectedHiddenProjectIds={selectedHiddenProjectIds}
                 canEdit={canEdit}
+                canCopyTasks={canCopySelectedTasks}
                 canDeleteTask={isTaskCreatedByCurrentUser}
                 onAddProject={handleAddProject}
                 onEditProject={handleEditProject}
+                onDeleteProject={handleDeleteProject}
                 onAddTask={handleAddTask}
                 onEditTask={handleEditTask}
                 onSetTaskTreeHidden={handleSetTaskTreeHidden}
                 onDeleteTask={handleDeleteTask}
                 onDeleteTasks={handleDeleteTasksBulk}
                 onCopyTasks={handleCopyTasksBulk}
+                onCopyProject={handleCopyProject}
                 onMoveProject={handleMoveProject}
                 onMoveTask={handleMoveTask}
                 onMoveTaskToProjectTop={handleMoveTaskToProjectTop}
@@ -1916,6 +2108,17 @@ export default function FaWorkManagementPage() {
           </div>
         )}
       </main>
+      {operationInProgress && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/25 backdrop-blur-[1px]">
+          <div className="min-w-[220px] rounded-lg border border-border bg-card px-6 py-5 text-center shadow-xl">
+            <div className="mx-auto mb-3 h-7 w-7 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+            <p className="text-sm font-semibold text-foreground">
+              {operationInProgress === "copy" ? "복사 중입니다." : "삭제 중입니다."}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">처리 중에는 다른 작업이 잠시 제한됩니다.</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
