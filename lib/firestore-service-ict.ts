@@ -401,10 +401,106 @@ function buildIctScheduleProjectTree(
   strategyTasks: any[],
   hiddenLinkedStrategyProjectIds: string[] = [],
 ): Project[] {
-  return [
-    ...buildProjectTree(ictProjects, ictTasks),
-    ...buildStrategyIctProjectTree(strategyProjects, strategyTasks, hiddenLinkedStrategyProjectIds),
+  const hiddenStrategyProjectIdSet = new Set(hiddenLinkedStrategyProjectIds.map((id) => stripStrategyId(id) || id))
+  const ictProjectIds = new Set(ictProjects.map((project) => stripSourceId(toStringOrEmpty(project.id))).filter(Boolean))
+  const strategyProjectIds = new Set(
+    strategyProjects.map((project) => stripSourceId(toStringOrEmpty(project.id))).filter(Boolean),
+  )
+
+  const normalizedProjects = [
+    ...ictProjects.map((project) => {
+      const sourceProjectId = stripSourceId(toStringOrEmpty(project.id)) || toStringOrEmpty(project.id)
+      return {
+        ...project,
+        id: `${ICT_SOURCE_PREFIX}${sourceProjectId}`,
+        originalProjectId: sourceProjectId,
+        sourceSchedule: "ict",
+      }
+    }),
+    ...strategyProjects.map((project) => {
+      const sourceProjectId = stripSourceId(toStringOrEmpty(project.id)) || toStringOrEmpty(project.id)
+      return {
+        ...project,
+        id: `${STRATEGY_SOURCE_PREFIX}${sourceProjectId}`,
+        isHidden: hiddenStrategyProjectIdSet.has(sourceProjectId),
+        originalProjectId: sourceProjectId,
+        sourceSchedule: "strategy",
+      }
+    }),
   ]
+
+  type SourceTask = {
+    raw: any
+    source: "ict" | "strategy"
+    sourcePrefix: typeof ICT_SOURCE_PREFIX | typeof STRATEGY_SOURCE_PREFIX
+    rawId: string
+    rawParentId?: string
+    rawProjectId: string
+    projectId: string
+  }
+
+  const resolveProjectId = (rawProjectId: string, source: SourceTask["source"]) => {
+    if (!rawProjectId) return ""
+    if (source === "ict") {
+      if (ictProjectIds.has(rawProjectId)) return `${ICT_SOURCE_PREFIX}${rawProjectId}`
+      if (strategyProjectIds.has(rawProjectId)) return `${STRATEGY_SOURCE_PREFIX}${rawProjectId}`
+      return `${ICT_SOURCE_PREFIX}${rawProjectId}`
+    }
+    if (strategyProjectIds.has(rawProjectId)) return `${STRATEGY_SOURCE_PREFIX}${rawProjectId}`
+    if (ictProjectIds.has(rawProjectId)) return `${ICT_SOURCE_PREFIX}${rawProjectId}`
+    return `${STRATEGY_SOURCE_PREFIX}${rawProjectId}`
+  }
+
+  const makeSourceTask = (raw: any, source: SourceTask["source"]): SourceTask | null => {
+    const sourcePrefix = source === "ict" ? ICT_SOURCE_PREFIX : STRATEGY_SOURCE_PREFIX
+    const rawId = stripSourceId(toStringOrEmpty(raw.id)) || toStringOrEmpty(raw.originalTaskId)
+    const rawProjectId = stripSourceId(toStringOrEmpty(raw.projectId)) || toStringOrEmpty(raw.originalProjectId)
+    if (!rawId || !rawProjectId) return null
+
+    return {
+      raw,
+      source,
+      sourcePrefix,
+      rawId,
+      rawParentId: stripSourceId(toOptionalString(raw.parentId)) || undefined,
+      rawProjectId,
+      projectId: resolveProjectId(rawProjectId, source),
+    }
+  }
+
+  const sourceTasks = [
+    ...ictTasks.map((task) => makeSourceTask(task, "ict")),
+    ...strategyTasks.map((task) => makeSourceTask(task, "strategy")),
+  ].filter((task): task is SourceTask => Boolean(task))
+
+  const tasksByRawId = new Map<string, SourceTask[]>()
+  sourceTasks.forEach((task) => {
+    const list = tasksByRawId.get(task.rawId) || []
+    list.push(task)
+    tasksByRawId.set(task.rawId, list)
+  })
+
+  const resolveParentId = (task: SourceTask) => {
+    if (!task.rawParentId) return undefined
+    const candidates = tasksByRawId.get(task.rawParentId) || []
+    const parent =
+      candidates.find((candidate) => candidate.projectId === task.projectId) ||
+      candidates.find((candidate) => candidate.source === task.source) ||
+      candidates[0]
+    return `${parent?.sourcePrefix || task.sourcePrefix}${task.rawParentId}`
+  }
+
+  const normalizedTasks = sourceTasks.map((task) => ({
+    ...task.raw,
+    id: `${task.sourcePrefix}${task.rawId}`,
+    projectId: task.projectId,
+    parentId: resolveParentId(task),
+    originalTaskId: task.rawId,
+    originalProjectId: task.rawProjectId,
+    sourceSchedule: task.source,
+  }))
+
+  return buildProjectTree(normalizedProjects, normalizedTasks)
 }
 
 function chunkValues<T>(values: T[], size: number): T[][] {
@@ -773,15 +869,9 @@ export function subscribeProjectsWithTasksByPersonKeys(
 
     const ictTasks = Array.from(ictTasksById.values())
     const strategyTasks = Array.from(strategyTasksById.values())
-    const ictProjects = await fetchProjectsForTaskIds(
-      ictTasks.map((task) => toStringOrEmpty(task.projectId)),
-      PROJECTS_COLLECTION,
-      ICT_SOURCE_PREFIX,
-    )
-    const strategyProjects = await fetchProjectsForTaskIds(
-      strategyTasks.map((task) => toStringOrEmpty(task.projectId)),
-      STRATEGY_PROJECTS_COLLECTION,
-    )
+    const taskProjectIds = [...ictTasks, ...strategyTasks].map((task) => toStringOrEmpty(task.projectId))
+    const ictProjects = await fetchProjectsForTaskIds(taskProjectIds, PROJECTS_COLLECTION, ICT_SOURCE_PREFIX)
+    const strategyProjects = await fetchProjectsForTaskIds(taskProjectIds, STRATEGY_PROJECTS_COLLECTION)
 
     if (!disposed) {
       callback(buildIctScheduleProjectTree(ictProjects, ictTasks, strategyProjects, strategyTasks, hiddenLinkedStrategyProjectIds))
@@ -877,6 +967,8 @@ export function subscribeProjectsWithTasksByScheduleScope(
   const strategyTaskGroups = new Map<string, any[]>()
   const ictPmProjectsById = new Map<string, any>()
   const strategyPmProjectsById = new Map<string, any>()
+  const ictPmProjectGroups = new Map<string, any[]>()
+  const strategyPmProjectGroups = new Map<string, any[]>()
   const ictCreatorProjectsById = new Map<string, any>()
   const strategyCreatorProjectsById = new Map<string, any>()
   let hiddenLinkedStrategyProjectIds: string[] = []
@@ -901,15 +993,9 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
     const ictTasks = Array.from(ictTasksById.values())
     const strategyTasks = Array.from(strategyTasksById.values())
-    const ictRelatedProjects = await fetchProjectsForTaskIds(
-      ictTasks.map((task) => toStringOrEmpty(task.projectId)),
-      PROJECTS_COLLECTION,
-      ICT_SOURCE_PREFIX,
-    )
-    const strategyRelatedProjects = await fetchProjectsForTaskIds(
-      strategyTasks.map((task) => toStringOrEmpty(task.projectId)),
-      STRATEGY_PROJECTS_COLLECTION,
-    )
+    const taskProjectIds = [...ictTasks, ...strategyTasks].map((task) => toStringOrEmpty(task.projectId))
+    const ictRelatedProjects = await fetchProjectsForTaskIds(taskProjectIds, PROJECTS_COLLECTION, ICT_SOURCE_PREFIX)
+    const strategyRelatedProjects = await fetchProjectsForTaskIds(taskProjectIds, STRATEGY_PROJECTS_COLLECTION)
 
     const ictProjectsById = new Map<string, any>()
     ictRelatedProjects.forEach((project) => ictProjectsById.set(toStringOrEmpty(project.id), project))
@@ -991,6 +1077,26 @@ export function subscribeProjectsWithTasksByScheduleScope(
 
   const resetStrategyScopedProjectTasks = () => {
     strategyPmTaskPool?.sync(Array.from(new Set([...strategyPmProjectsById.keys(), ...strategyCreatorProjectsById.keys()])))
+  }
+
+  const syncIctPmProjectGroup = (key: string, projects: any[]) => {
+    ictPmProjectGroups.set(key, projects)
+    ictPmProjectsById.clear()
+    ictPmProjectGroups.forEach((items) => {
+      items.forEach((project) => ictPmProjectsById.set(toStringOrEmpty(project.id), project))
+    })
+    resetIctScopedProjectTasks()
+    scheduleNotify()
+  }
+
+  const syncStrategyPmProjectGroup = (key: string, projects: any[]) => {
+    strategyPmProjectGroups.set(key, projects)
+    strategyPmProjectsById.clear()
+    strategyPmProjectGroups.forEach((items) => {
+      items.forEach((project) => strategyPmProjectsById.set(toStringOrEmpty(project.id), project))
+    })
+    resetStrategyScopedProjectTasks()
+    scheduleNotify()
   }
 
   const unsubscribes: Array<() => void> = [
@@ -1119,44 +1225,62 @@ export function subscribeProjectsWithTasksByScheduleScope(
   }
 
   if (normalizedPmEmail) {
-    const ictProjectConstraints: any[] = [where("pmEmail", "==", normalizedPmEmail)]
-    if (!includeHidden) ictProjectConstraints.push(where("isHidden", "==", false))
-    const strategyProjectConstraints: any[] = [where("pmEmail", "==", normalizedPmEmail)]
-    if (!includeHidden) strategyProjectConstraints.push(where("isHidden", "==", false))
+    const ictLegacyProjectConstraints: any[] = [where("pmEmail", "==", normalizedPmEmail)]
+    const ictMultiProjectConstraints: any[] = [where("pmEmails", "array-contains", normalizedPmEmail)]
+    const strategyLegacyProjectConstraints: any[] = [where("pmEmail", "==", normalizedPmEmail)]
+    const strategyMultiProjectConstraints: any[] = [where("pmEmails", "array-contains", normalizedPmEmail)]
+
+    const mapIctProjectDocs = (snapshot: any) =>
+      snapshot.docs
+        .filter((docSnap: any) => includeHidden || !toBooleanOr(docSnap.data().isHidden ?? docSnap.data().is_hidden, false))
+        .map((docSnap: any) => ({
+          ...docSnap.data(),
+          id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
+          originalProjectId: docSnap.id,
+          sourceSchedule: "ict",
+        }))
+    const mapStrategyProjectDocs = (snapshot: any) =>
+      snapshot.docs
+        .filter((docSnap: any) => includeHidden || !toBooleanOr(docSnap.data().isHidden ?? docSnap.data().is_hidden, false))
+        .map((docSnap: any) => ({
+          ...docSnap.data(),
+          id: docSnap.id,
+          originalProjectId: docSnap.id,
+          sourceSchedule: "strategy",
+        }))
+
     unsubscribes.push(
       onSnapshot(
-        query(collection(db, PROJECTS_COLLECTION), ...ictProjectConstraints),
+        query(collection(db, PROJECTS_COLLECTION), ...ictLegacyProjectConstraints),
         (snapshot) => {
-          ictPmProjectsById.clear()
-          snapshot.docs.forEach((docSnap) => {
-            ictPmProjectsById.set(`${ICT_SOURCE_PREFIX}${docSnap.id}`, {
-              ...docSnap.data(),
-              id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
-              originalProjectId: docSnap.id,
-              sourceSchedule: "ict",
-            })
-          })
-          resetIctScopedProjectTasks()
-          scheduleNotify()
+          syncIctPmProjectGroup("pmEmail", mapIctProjectDocs(snapshot))
         },
         (error) => {
           console.error("Schedule PM ICT projects snapshot error:", error)
         },
       ),
       onSnapshot(
-        query(collection(db, STRATEGY_PROJECTS_COLLECTION), ...strategyProjectConstraints),
+        query(collection(db, PROJECTS_COLLECTION), ...ictMultiProjectConstraints),
         (snapshot) => {
-          strategyPmProjectsById.clear()
-          snapshot.docs.forEach((docSnap) => {
-            strategyPmProjectsById.set(docSnap.id, {
-              ...docSnap.data(),
-              id: docSnap.id,
-              originalProjectId: docSnap.id,
-              sourceSchedule: "strategy",
-            })
-          })
-          resetStrategyScopedProjectTasks()
-          scheduleNotify()
+          syncIctPmProjectGroup("pmEmails", mapIctProjectDocs(snapshot))
+        },
+        (error) => {
+          console.error("Schedule PM ICT projects snapshot error:", error)
+        },
+      ),
+      onSnapshot(
+        query(collection(db, STRATEGY_PROJECTS_COLLECTION), ...strategyLegacyProjectConstraints),
+        (snapshot) => {
+          syncStrategyPmProjectGroup("pmEmail", mapStrategyProjectDocs(snapshot))
+        },
+        (error) => {
+          console.error("Schedule PM linked strategy projects snapshot error:", error)
+        },
+      ),
+      onSnapshot(
+        query(collection(db, STRATEGY_PROJECTS_COLLECTION), ...strategyMultiProjectConstraints),
+        (snapshot) => {
+          syncStrategyPmProjectGroup("pmEmails", mapStrategyProjectDocs(snapshot))
         },
         (error) => {
           console.error("Schedule PM linked strategy projects snapshot error:", error)

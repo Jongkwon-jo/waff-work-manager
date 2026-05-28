@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ProjectPmSelect } from "@/components/project-pm-select"
+import { makeProjectPmFields } from "@/lib/data"
 import type { Project, ProjectPmOption, ProjectType } from "@/lib/data"
 
 interface AddProjectDialogProps {
@@ -31,7 +32,7 @@ export function AddProjectDialog({ onAddProject, trigger, pmOptions = [] }: AddP
   const [name, setName] = useState("")
   const [type, setType] = useState<ProjectType>("SI")
   const [period, setPeriod] = useState("")
-  const [pmEmail, setPmEmail] = useState(UNASSIGNED_PM_VALUE)
+  const [pmEmails, setPmEmails] = useState<string[]>([])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -42,7 +43,7 @@ export function AddProjectDialog({ onAddProject, trigger, pmOptions = [] }: AddP
       name,
       type,
       period,
-      pmEmail: pmEmail === UNASSIGNED_PM_VALUE ? "" : pmEmail,
+      ...makeProjectPmFields(pmEmails),
       isHidden: false,
       tasks: [],
     }
@@ -52,7 +53,7 @@ export function AddProjectDialog({ onAddProject, trigger, pmOptions = [] }: AddP
     setName("")
     setType("SI")
     setPeriod("")
-    setPmEmail(UNASSIGNED_PM_VALUE)
+    setPmEmails([])
   }
 
   return (
@@ -113,8 +114,8 @@ export function AddProjectDialog({ onAddProject, trigger, pmOptions = [] }: AddP
               <Label htmlFor="pm">PM</Label>
               <ProjectPmSelect
                 id="pm"
-                value={pmEmail}
-                onChange={setPmEmail}
+                value={pmEmails}
+                onChange={setPmEmails}
                 options={pmOptions}
                 unassignedValue={UNASSIGNED_PM_VALUE}
               />

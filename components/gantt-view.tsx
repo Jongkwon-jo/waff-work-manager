@@ -58,6 +58,7 @@ interface GanttViewProps {
   hiddenProjectOptions?: Project[]
   selectedHiddenProjectIds?: string[]
   canEdit?: boolean
+  canCopyTasks?: boolean
   canDeleteTask?: (task: Task) => boolean
   onAddProject: (project: Project) => void
   onEditProject: (project: Project) => void
@@ -67,6 +68,8 @@ interface GanttViewProps {
   onDeleteTask: (taskId: string, projectId: string) => void
   onDeleteTasks?: (tasks: Array<{ taskId: string; projectId: string }>) => Promise<void> | void
   onCopyTasks?: (taskIds: string[]) => Promise<void> | void
+  onCopyProject?: (projectId: string) => Promise<void> | void
+  onDeleteProject?: (projectId: string) => Promise<void> | void
   onMoveProject: (projectId: string, direction: "up" | "down", visibleProjectIds?: string[]) => void
   onMoveTask: (projectId: string, taskId: string, direction: "up" | "down") => void
   onMoveTaskToProjectTop?: (targetProjectId: string, draggedTaskId: string) => Promise<void> | void
@@ -401,6 +404,7 @@ export function GanttView({
   hiddenProjectOptions = [],
   selectedHiddenProjectIds = [],
   canEdit = true,
+  canCopyTasks = canEdit,
   canDeleteTask,
   onAddProject,
   onEditProject,
@@ -410,6 +414,8 @@ export function GanttView({
   onDeleteTask,
   onDeleteTasks,
   onCopyTasks,
+  onCopyProject,
+  onDeleteProject,
   onMoveProject,
   onMoveTask,
   onMoveTaskToProjectTop,
@@ -464,6 +470,7 @@ export function GanttView({
   const [viewportHeight, setViewportHeight] = useState(700)
   const [isDetailColumnsOpen, setIsDetailColumnsOpen] = useState(false)
   const canDeleteTaskItem = useCallback((task: Task) => canEdit || canDeleteTask?.(task) === true, [canEdit, canDeleteTask])
+  const canSelectTasks = canEdit || (canCopyTasks && Boolean(onCopyTasks))
   const [recentlyAddedTaskId, setRecentlyAddedTaskId] = useState<string | null>(null)
   const [timelineScrollLeft, setTimelineScrollLeft] = useState(0)
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
@@ -2298,44 +2305,52 @@ export function GanttView({
                       </div>
                     </DialogContent>
                   </Dialog>
-                  {canEdit && selectedTaskCount > 0 && (
+                  {canSelectTasks && selectedTaskCount > 0 && (
                     <>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 gap-1 border-sky-200 bg-sky-50 px-2 text-[11px] text-sky-700 hover:bg-sky-100 hover:text-sky-800"
-                        onClick={() => void handleBulkMoveSelectedTasks("up")}
-                      >
-                        <ArrowUp className="h-3.5 w-3.5" />
-                        선택 위로 이동
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 gap-1 border-sky-200 bg-sky-50 px-2 text-[11px] text-sky-700 hover:bg-sky-100 hover:text-sky-800"
-                        onClick={() => void handleBulkMoveSelectedTasks("down")}
-                      >
-                        <ArrowDown className="h-3.5 w-3.5" />
-                        선택 아래로 이동
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 gap-1 border-emerald-200 bg-emerald-50 px-2 text-[11px] text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
-                        onClick={() => void handleBulkCopySelectedTasks()}
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                        선택 복사 ({selectedTaskCount})
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        className="h-7 gap-1 px-2 text-[11px]"
-                        onClick={() => void handleBulkDeleteSelectedTasks()}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        선택 삭제 ({selectedTaskCount})
-                      </Button>
+                      {canEdit && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 gap-1 border-sky-200 bg-sky-50 px-2 text-[11px] text-sky-700 hover:bg-sky-100 hover:text-sky-800"
+                            onClick={() => void handleBulkMoveSelectedTasks("up")}
+                          >
+                            <ArrowUp className="h-3.5 w-3.5" />
+                            선택 위로 이동
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 gap-1 border-sky-200 bg-sky-50 px-2 text-[11px] text-sky-700 hover:bg-sky-100 hover:text-sky-800"
+                            onClick={() => void handleBulkMoveSelectedTasks("down")}
+                          >
+                            <ArrowDown className="h-3.5 w-3.5" />
+                            선택 아래로 이동
+                          </Button>
+                        </>
+                      )}
+                      {canCopyTasks && onCopyTasks && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 gap-1 border-emerald-200 bg-emerald-50 px-2 text-[11px] text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
+                          onClick={() => void handleBulkCopySelectedTasks()}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                          선택 복사 ({selectedTaskCount})
+                        </Button>
+                      )}
+                      {canEdit && (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-7 gap-1 px-2 text-[11px]"
+                          onClick={() => void handleBulkDeleteSelectedTasks()}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          선택 삭제 ({selectedTaskCount})
+                        </Button>
+                      )}
                       <Button
                         variant="outline"
                         size="sm"
@@ -2356,7 +2371,7 @@ export function GanttView({
                     {isAllExpanded ? <ChevronsUp className="h-3.5 w-3.5" /> : <ChevronsDown className="h-3.5 w-3.5" />}
                     {isAllExpanded ? "전체 접기" : "전체 펼치기"}
                   </Button>
-                  {canEdit && !isCompactViewport && (
+                  {!isCompactViewport && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -2588,22 +2603,50 @@ export function GanttView({
                       <div className="min-w-0 flex-1" />
                       <div className="ml-auto flex shrink-0 items-center gap-1">
                         {canEdit && (
-                          <AddTaskDialog
-                            projectId={project.id}
-                            defaultPerson={defaultTaskPerson}
-                            defaultDepartment={defaultTaskDepartment}
-                            onAddTask={handleAddProjectLevelTask}
-                            trigger={
+                          <>
+                            <AddTaskDialog
+                              projectId={project.id}
+                              defaultPerson={defaultTaskPerson}
+                              defaultDepartment={defaultTaskDepartment}
+                              onAddTask={handleAddProjectLevelTask}
+                              trigger={
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 shrink-0 px-2 text-[10px]"
+                                >
+                                  업무 추가
+                                </Button>
+                              }
+                            />
+                            {onCopyProject && (
                               <Button
                                 type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-6 shrink-0 px-2 text-[10px]"
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-white hover:bg-white/15 hover:text-white"
+                                onClick={() => void onCopyProject(project.id)}
+                                title="프로젝트 복사"
+                                aria-label="프로젝트 복사"
                               >
-                                업무 추가
+                                <Copy className="h-3 w-3" />
                               </Button>
-                            }
-                          />
+                            )}
+                            {onDeleteProject && project.sourceSchedule !== "strategy" && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-white hover:bg-white/15 hover:text-red-100"
+                                onClick={() => void onDeleteProject(project.id)}
+                                title="프로젝트 삭제"
+                                aria-label="프로젝트 삭제"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </>
                         )}
                         <Button
                           type="button"
@@ -2729,7 +2772,7 @@ export function GanttView({
                               style={{ width: leftPanelWidth }}
                             >
                               <div className="flex items-center gap-1.5 w-full min-w-0">
-                                {canEdit && (
+                                {canSelectTasks && (
                                   <label className="flex h-5 w-5 shrink-0 items-center justify-center">
                                     <input
                                       type="checkbox"
@@ -3048,47 +3091,74 @@ export function GanttView({
                                     className="grid gap-1 text-[11px] text-foreground"
                                     style={{ gridTemplateColumns: detailGridTemplate }}
                                   >
-                                    <div className="-mr-1 flex items-center justify-center -translate-x-2">
-                                      <CategorySingleSelect
-                                        value={task.category}
-                                        onChange={(value) => updateTaskInline(task, { category: value })}
-                                      />
-                                    </div>
+                                    {canEdit ? (
+                                      <>
+                                        <div className="-mr-1 flex items-center justify-center -translate-x-2">
+                                          <CategorySingleSelect
+                                            value={task.category}
+                                            onChange={(value) => updateTaskInline(task, { category: value })}
+                                          />
+                                        </div>
 
-                                    <DepartmentMultiSelect
-                                      value={task.department || ""}
-                                      options={departmentValues}
-                                      onChange={(value) => updateTaskInline(task, { department: value })}
-                                    />
+                                        <DepartmentMultiSelect
+                                          value={task.department || ""}
+                                          options={departmentValues}
+                                          onChange={(value) => updateTaskInline(task, { department: value })}
+                                        />
 
-                                    <OwnerMultiSelect
-                                      value={task.person || ""}
-                                      options={ownerValues}
-                                      onDeleteOption={handleDeleteOwnerOption}
-                                      onChange={(value) => updateTaskInline(task, { person: value })}
-                                    />
+                                        <OwnerMultiSelect
+                                          value={task.person || ""}
+                                          options={ownerValues}
+                                          onDeleteOption={handleDeleteOwnerOption}
+                                          onChange={(value) => updateTaskInline(task, { person: value })}
+                                        />
 
-                                    <DateCell
-                                      value={task.startDate}
-                                      onChange={(value) => onEditTask(buildTaskWithAutoManDays(task, { startDate: value }))}
-                                    />
+                                        <DateCell
+                                          value={task.startDate}
+                                          onChange={(value) => onEditTask(buildTaskWithAutoManDays(task, { startDate: value }))}
+                                        />
 
-                                    <DateCell
-                                      value={task.endDate}
-                                      onChange={(value) => onEditTask(buildTaskWithAutoManDays(task, { endDate: value }))}
-                                    />
+                                        <DateCell
+                                          value={task.endDate}
+                                          onChange={(value) => onEditTask(buildTaskWithAutoManDays(task, { endDate: value }))}
+                                        />
 
-                                    <input
-                                      type="number"
-                                      step="0.5"
-                                      min="0"
-                                      value={Number.isFinite(task.manDays) ? task.manDays : 0}
-                                      onChange={(e) => {
-                                        const next = Number.parseFloat(e.target.value)
-                                        updateTaskInline(task, { manDays: Number.isNaN(next) ? 0 : next })
-                                      }}
-                                      className="h-7 w-full rounded-md border border-input bg-background px-2 text-[11px]"
-                                    />
+                                        <input
+                                          type="number"
+                                          step="0.5"
+                                          min="0"
+                                          value={Number.isFinite(task.manDays) ? task.manDays : 0}
+                                          onChange={(e) => {
+                                            const next = Number.parseFloat(e.target.value)
+                                            updateTaskInline(task, { manDays: Number.isNaN(next) ? 0 : next })
+                                          }}
+                                          className="h-7 w-full rounded-md border border-input bg-background px-2 text-[11px]"
+                                        />
+                                      </>
+                                    ) : (
+                                      <>
+                                        <div className="-mr-1 flex h-7 min-w-0 items-center justify-center -translate-x-2 rounded-md border border-transparent px-1 text-muted-foreground">
+                                          <span className="truncate">{task.category || "-"}</span>
+                                        </div>
+                                        <div className="flex h-7 min-w-0 items-center rounded-md border border-transparent px-2 text-muted-foreground">
+                                          <span className="truncate">{task.department || "-"}</span>
+                                        </div>
+                                        <div className="flex h-7 min-w-0 items-center rounded-md border border-transparent px-2 text-muted-foreground">
+                                          <span className="truncate">{task.person || "-"}</span>
+                                        </div>
+                                        <div className="flex h-7 min-w-0 items-center rounded-md border border-transparent px-2 text-muted-foreground">
+                                          <span className="truncate">{task.startDate || "-"}</span>
+                                        </div>
+                                        <div className="flex h-7 min-w-0 items-center rounded-md border border-transparent px-2 text-muted-foreground">
+                                          <span className="truncate">{task.endDate || "-"}</span>
+                                        </div>
+                                        <div className="flex h-7 min-w-0 items-center rounded-md border border-transparent px-2 text-muted-foreground">
+                                          <span className="truncate">
+                                            {Number.isFinite(task.manDays) ? task.manDays : "-"}
+                                          </span>
+                                        </div>
+                                      </>
+                                    )}
                                   </div>
                                 ) : (
                                   <div className="h-7" />

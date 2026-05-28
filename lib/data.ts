@@ -64,6 +64,7 @@ export interface Project {
   type: ProjectType
   period?: string
   pmEmail?: string
+  pmEmails?: string[]
   createdByEmail?: string
   createdByName?: string
   tasks: Task[]
@@ -73,6 +74,34 @@ export interface Project {
 export type ProjectPmOption = {
   email: string
   label: string
+}
+
+export function normalizeProjectPmEmails(project: Pick<Project, "pmEmail" | "pmEmails">): string[] {
+  return Array.from(
+    new Set(
+      [...(project.pmEmails || []), project.pmEmail || ""]
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  )
+}
+
+export function makeProjectPmFields(pmEmails: string[]): Pick<Project, "pmEmail" | "pmEmails"> {
+  const normalized = Array.from(new Set(pmEmails.map((email) => email.trim().toLowerCase()).filter(Boolean)))
+  return {
+    pmEmail: normalized[0] || "",
+    pmEmails: normalized,
+  }
+}
+
+export function areProjectPmEmailsEqual(
+  left: Pick<Project, "pmEmail" | "pmEmails"> | undefined,
+  right: Pick<Project, "pmEmail" | "pmEmails"> | undefined,
+) {
+  const leftEmails = left ? normalizeProjectPmEmails(left) : []
+  const rightEmails = right ? normalizeProjectPmEmails(right) : []
+  if (leftEmails.length !== rightEmails.length) return false
+  return leftEmails.every((email, index) => email === rightEmails[index])
 }
 
 export const projects: Project[] = []
