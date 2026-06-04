@@ -41,7 +41,12 @@ import {
   type UserProfile,
 } from "@/lib/firestore-service"
 import { EDITABLE_TASK_FIELD_OPTIONS, type EditableTaskField } from "@/lib/data"
-import { getDepartmentOrgPersonNamesFromOrg, type DepartmentOrg, type DepartmentOrgMember } from "@/lib/department-org"
+import {
+  getActiveDepartmentOrgPersonNamesFromOrg,
+  isActiveDepartmentOrgMember,
+  type DepartmentOrg,
+  type DepartmentOrgMember,
+} from "@/lib/department-org"
 import {
   DEFAULT_PAGE_PERMISSIONS,
   PAGE_PERMISSIONS,
@@ -49,6 +54,7 @@ import {
   normalizeEmail,
   type UserPagePermissions,
 } from "@/lib/page-access"
+import { cn } from "@/lib/utils"
 
 type DraftPermissionMap = Record<string, UserPagePermissions>
 type DraftAliasMap = Record<string, string>
@@ -122,7 +128,15 @@ function DepartmentOrgEditor({
   onChange: (org: DepartmentOrg) => void
 }) {
   const updateLeader = (updates: Partial<DepartmentOrgMember>) => {
-    onChange({ ...org, leader: { name: org.leader?.name || "", title: org.leader?.title, ...updates } })
+    onChange({
+      ...org,
+      leader: {
+        name: org.leader?.name || "",
+        title: org.leader?.title,
+        active: org.leader?.active,
+        ...updates,
+      },
+    })
   }
 
   const updateAdvisor = (index: number, updates: Partial<DepartmentOrgMember>) => {
@@ -132,7 +146,7 @@ function DepartmentOrgEditor({
   }
 
   const addAdvisor = () => {
-    onChange({ ...org, advisors: [...(org.advisors || []), { name: "", title: "" }] })
+    onChange({ ...org, advisors: [...(org.advisors || []), { name: "", title: "", active: true }] })
   }
 
   const removeAdvisor = (index: number) => {
@@ -165,7 +179,7 @@ function DepartmentOrgEditor({
 
   const addTeamMember = (teamIndex: number) => {
     const teams = org.teams.map((team, index) =>
-      index === teamIndex ? { ...team, members: [...team.members, { name: "", title: "" }] } : team,
+      index === teamIndex ? { ...team, members: [...team.members, { name: "", title: "", active: true }] } : team,
     )
     onChange({ ...org, teams })
   }
@@ -179,6 +193,24 @@ function DepartmentOrgEditor({
     onChange({ ...org, teams })
   }
 
+  const renderActiveToggle = (member: DepartmentOrgMember, onToggle: (active: boolean) => void) => {
+    const active = isActiveDepartmentOrgMember(member)
+    return (
+      <Button
+        type="button"
+        variant={active ? "outline" : "secondary"}
+        size="sm"
+        className={cn(
+          "h-8 min-w-[58px] px-2 text-xs",
+          active ? "text-emerald-700" : "border-slate-300 bg-slate-100 text-slate-500",
+        )}
+        onClick={() => onToggle(!active)}
+      >
+        {active ? "재직" : "퇴사"}
+      </Button>
+    )
+  }
+
   return (
     <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3 text-xs">
       <div className="flex items-center justify-between gap-2">
@@ -188,7 +220,7 @@ function DepartmentOrgEditor({
 
       <div className="rounded-md bg-white p-2">
         <div className="mb-1 font-semibold text-slate-800">부서장</div>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
           <Input
             value={org.leader?.name || ""}
             onChange={(event) => updateLeader({ name: event.target.value })}
@@ -201,6 +233,7 @@ function DepartmentOrgEditor({
             className="h-8 bg-white text-xs"
             placeholder="직책"
           />
+          {renderActiveToggle(org.leader || { name: "", active: true }, (active) => updateLeader({ active }))}
         </div>
       </div>
 
@@ -214,7 +247,7 @@ function DepartmentOrgEditor({
         {(org.advisors || []).length > 0 ? (
           <div className="grid gap-2">
             {(org.advisors || []).map((advisor, index) => (
-              <div key={`advisor-${index}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+              <div key={`advisor-${index}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
                 <Input
                   value={advisor.name}
                   onChange={(event) => updateAdvisor(index, { name: event.target.value })}
@@ -227,6 +260,7 @@ function DepartmentOrgEditor({
                   className="h-8 bg-white text-xs"
                   placeholder="직책"
                 />
+                {renderActiveToggle(advisor, (active) => updateAdvisor(index, { active }))}
                 <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => removeAdvisor(index)}>
                   삭제
                 </Button>
@@ -254,7 +288,7 @@ function DepartmentOrgEditor({
             </div>
             <div className="grid gap-2">
               {team.members.map((member, memberIndex) => (
-                <div key={`team-${teamIndex}-member-${memberIndex}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                <div key={`team-${teamIndex}-member-${memberIndex}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
                   <Input
                     value={member.name}
                     onChange={(event) => updateTeamMember(teamIndex, memberIndex, { name: event.target.value })}
@@ -267,6 +301,7 @@ function DepartmentOrgEditor({
                     className="h-8 bg-white text-xs"
                     placeholder="직책"
                   />
+                  {renderActiveToggle(member, (active) => updateTeamMember(teamIndex, memberIndex, { active }))}
                   <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => removeTeamMember(teamIndex, memberIndex)}>
                     삭제
                   </Button>
@@ -406,10 +441,10 @@ export default function AdminPage() {
 
   useEffect(() => {
     setDraftDepartmentPersons({
-      ICT: getDepartmentOrgPersonNamesFromOrg(draftDepartmentOrg.ICT).join(", "),
-      FA: getDepartmentOrgPersonNamesFromOrg(draftDepartmentOrg.FA).join(", "),
-      전략기획: getDepartmentOrgPersonNamesFromOrg(draftDepartmentOrg.전략기획).join(", "),
-      기타: getDepartmentOrgPersonNamesFromOrg(draftDepartmentOrg.기타).join(", "),
+      ICT: getActiveDepartmentOrgPersonNamesFromOrg(draftDepartmentOrg.ICT).join(", "),
+      FA: getActiveDepartmentOrgPersonNamesFromOrg(draftDepartmentOrg.FA).join(", "),
+      전략기획: getActiveDepartmentOrgPersonNamesFromOrg(draftDepartmentOrg.전략기획).join(", "),
+      기타: getActiveDepartmentOrgPersonNamesFromOrg(draftDepartmentOrg.기타).join(", "),
     })
   }, [draftDepartmentOrg])
 

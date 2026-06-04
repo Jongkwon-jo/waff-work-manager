@@ -22,8 +22,9 @@ import { EDITABLE_TASK_FIELD_OPTIONS } from "./data"
 import {
   DEFAULT_ORG_DEPARTMENT_PERSON_SETTINGS,
   cloneDepartmentOrgChart,
-  getDepartmentOrgPersonNamesFromOrg,
+  getActiveDepartmentOrgPersonNamesFromOrg,
   type DepartmentOrg,
+  type DepartmentOrgMember,
 } from "./department-org"
 import {
   DEFAULT_PAGE_PERMISSIONS,
@@ -350,13 +351,14 @@ function normalizeDepartmentPersonSettings(
   }
 }
 
-function normalizeOrgMember(raw: unknown) {
+function normalizeOrgMember(raw: unknown): DepartmentOrgMember | undefined {
   if (!raw || typeof raw !== "object") return undefined
   const candidate = raw as Record<string, unknown>
   const name = toStringOrEmpty(candidate.name)
   if (!name) return undefined
   const title = toStringOrEmpty(candidate.title)
-  return title ? { name, title } : { name }
+  const active = toBooleanOr(candidate.active, true)
+  return title ? { name, title, active } : { name, active }
 }
 
 function normalizeDepartmentOrg(raw: unknown, fallback: DepartmentOrg): DepartmentOrg {
@@ -415,10 +417,10 @@ function normalizeDepartmentOrgSettings(raw?: Partial<Record<DepartmentPersonGro
 
 function getDepartmentPersonSettingsFromOrgSettings(settings: DepartmentOrgSettings): DepartmentPersonSettings {
   return {
-    ICT: getDepartmentOrgPersonNamesFromOrg(settings.ICT),
-    FA: getDepartmentOrgPersonNamesFromOrg(settings.FA),
-    전략기획: getDepartmentOrgPersonNamesFromOrg(settings.전략기획),
-    기타: getDepartmentOrgPersonNamesFromOrg(settings.기타),
+    ICT: getActiveDepartmentOrgPersonNamesFromOrg(settings.ICT),
+    FA: getActiveDepartmentOrgPersonNamesFromOrg(settings.FA),
+    전략기획: getActiveDepartmentOrgPersonNamesFromOrg(settings.전략기획),
+    기타: getActiveDepartmentOrgPersonNamesFromOrg(settings.기타),
   }
 }
 

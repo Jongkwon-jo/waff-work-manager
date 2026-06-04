@@ -65,6 +65,7 @@ import {
   isTaskChangeNotificationEntry,
 } from "@/lib/recent-change-visibility"
 import { extendAncestorEndDatesFromSubtasks } from "@/lib/task-date-range"
+import { getInactiveDepartmentOrgPersonNamesFromSettings, isUserProfileActiveForOrg } from "@/lib/department-org"
 
 export default function IctWorkManagementPage() {
   const { user, loading: authLoading, isAdmin, pagePermissions } = useAuth()
@@ -739,11 +740,18 @@ export default function IctWorkManagementPage() {
 
   const pmOptions = useMemo<ProjectPmOption[]>(
     () =>
-      userProfiles.map((profile) => ({
-        email: profile.email,
-        label: profile.taskAliases?.[0] || profile.email,
-      })),
-    [userProfiles],
+      userProfiles
+        .filter((profile) => isUserProfileActiveForOrg(profile, departmentOrgSettings))
+        .map((profile) => ({
+          email: profile.email,
+          label: profile.taskAliases?.[0] || profile.email,
+        })),
+    [departmentOrgSettings, userProfiles],
+  )
+
+  const inactiveOwnerOptions = useMemo(
+    () => getInactiveDepartmentOrgPersonNamesFromSettings(departmentOrgSettings),
+    [departmentOrgSettings],
   )
 
   const currentUserEmail = (user?.email || "").trim().toLowerCase()
@@ -2291,6 +2299,7 @@ export default function IctWorkManagementPage() {
                 defaultTaskDepartment="ICT"
                 defaultTaskPerson={defaultTaskPerson}
                 pmOptions={pmOptions}
+                inactiveOwnerOptions={inactiveOwnerOptions}
                 searchQuery={deferredSearchQuery}
                 hiddenProjectOptions={hiddenProjectOptions}
                 selectedHiddenProjectIds={selectedHiddenProjectIds}

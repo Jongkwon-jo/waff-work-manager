@@ -29,7 +29,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CategoryBadge, ProjectTypeBadge, StatusBadge } from "@/components/status-badge"
 import type { Project, Task } from "@/lib/data"
 import type { UserPagePermissions } from "@/lib/page-access"
-import { UNCLASSIFIED_TEAM_NAME, getOrgTeamForPerson, getTeamScopePersonsForAliases } from "@/lib/department-org"
+import {
+  UNCLASSIFIED_TEAM_NAME,
+  getOrgTeamForPerson,
+  getTeamScopePersonsForAliases,
+  isActiveDepartmentOrgPersonName,
+} from "@/lib/department-org"
 import { cn, keepIfShallowEqual } from "@/lib/utils"
 import { toast } from "sonner"
 import { CalendarDays, ChevronLeft, ChevronRight, Home, LogOut, Users } from "lucide-react"
@@ -268,6 +273,7 @@ export function WeeklyWorkBoard({
   const [projectsBySource, setProjectsBySource] = useState<Record<string, Project[]>>({})
   const [selectedDepartment, setSelectedDepartment] = useState<DepartmentPersonGroup | "all">("all")
   const [hasResolvedInitialDepartment, setHasResolvedInitialDepartment] = useState(false)
+  const [isDepartmentPinnedByUrl, setIsDepartmentPinnedByUrl] = useState(false)
   const [selectedTeam, setSelectedTeam] = useState("all")
   const [selectedPerson, setSelectedPerson] = useState("all")
   const [hasUserSelectedPersonScope, setHasUserSelectedPersonScope] = useState(false)
@@ -374,9 +380,11 @@ export function WeeklyWorkBoard({
     const urlDepartment = getDepartmentFromUrlSearch()
     if (urlDepartment === "all") {
       setSelectedDepartment("all")
+      setIsDepartmentPinnedByUrl(true)
       hasAppliedProfileDepartmentRef.current = true
     } else if (urlDepartment && departmentOptions.includes(urlDepartment)) {
       setSelectedDepartment(urlDepartment)
+      setIsDepartmentPinnedByUrl(true)
       hasAppliedProfileDepartmentRef.current = true
     }
 
@@ -422,12 +430,13 @@ export function WeeklyWorkBoard({
       const profilePerson = profileDefaultPerson || user?.email?.split("@")[0] || ""
       const shouldIncludePersonalPerson =
         profilePerson &&
+        isActiveDepartmentOrgPersonName(profilePerson, departmentOrgSettings) &&
         profilePersonalTasks.some((task) => getPersonalTaskCreatedDate(task)) &&
         (selectedDepartment === "all" || selectedDepartment === profileDepartment)
       if (shouldIncludePersonalPerson) people.push(profilePerson)
       return Array.from(new Set(people)).sort((a, b) => a.localeCompare(b, "ko"))
     },
-    [departmentPersonSettings, profileDefaultPerson, profileDepartment, profilePersonalTasks, selectedDataSources, selectedDepartment, user?.email],
+    [departmentOrgSettings, departmentPersonSettings, profileDefaultPerson, profileDepartment, profilePersonalTasks, selectedDataSources, selectedDepartment, user?.email],
   )
 
   const getPreferredGroupForPerson = (person: string): DepartmentPersonGroup | undefined => {
@@ -486,18 +495,39 @@ export function WeeklyWorkBoard({
     [departmentOrgSettings, profileDefaultPerson, profileTaskAliases],
   )
 
+  const defaultPersonScope = useMemo(
+    () =>
+      teamScopePersons.length > 0
+        ? teamScopePersons
+        : profileDefaultPerson
+          ? [profileDefaultPerson]
+          : [],
+    [profileDefaultPerson, teamScopePersons],
+  )
+
+  const scopedPersons = useMemo(
+    () => {
+      const defaultScopedPersons = defaultPersonScope.filter((person) => allowedPersonSet.has(person))
+      const shouldUseDefaultScope =
+        selectedPerson === "all" &&
+        defaultScopedPersons.length > 0 &&
+        !hasUserSelectedPersonScope &&
+        !isDepartmentPinnedByUrl
+
+      if (shouldUseDefaultScope) return defaultScopedPersons
+      return selectedPerson === "all" ? allowedPersons : [selectedPerson]
+    },
+    [
+      allowedPersonSet,
+      allowedPersons,
+      defaultPersonScope,
+      hasUserSelectedPersonScope,
+      isDepartmentPinnedByUrl,
+      selectedPerson,
+    ],
+  )
+
   useEffect(() => {
-    const defaultScope = teamScopePersons.length > 0
-      ? teamScopePersons
-      : profileDefaultPerson
-        ? [profileDefaultPerson]
-        : []
-    const scopedPersons =
-      selectedPerson === "all" && defaultScope.length > 0 && !hasUserSelectedPersonScope
-        ? defaultScope
-        : selectedPerson === "all"
-          ? allowedPersons
-          : [selectedPerson]
     const queryPersons = scopedPersons.filter((person) => person && person !== "all")
     const allowedSourceIds = new Set(selectedDataSources.map((source) => source.id))
 
@@ -520,13 +550,15 @@ export function WeeklyWorkBoard({
           }, { dateRange: weeklyDateRange }),
     )
     return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
-  }, [allowedPersons, hasUserSelectedPersonScope, profileDefaultPerson, selectedDataSources, selectedPerson, teamScopePersons, weeklyDateRange])
+  }, [scopedPersons, selectedDataSources, weeklyDateRange])
 
   const weeklyTasks = useMemo<WeeklyTaskItem[]>(() => {
     const profilePerson = profileDefaultPerson || user?.email?.split("@")[0] || "개인"
     const personalTeam = getOrgTeamForPerson(profilePerson, profileDepartment || undefined, departmentOrgSettings)
     const shouldIncludePersonalTasks =
-      (selectedDepartment === "all" || selectedDepartment === profileDepartment) && allowedPersonSet.has(profilePerson)
+      (selectedDepartment === "all" || selectedDepartment === profileDepartment) &&
+      allowedPersonSet.has(profilePerson) &&
+      isActiveDepartmentOrgPersonName(profilePerson, departmentOrgSettings)
     const personalWeeklyTasks: WeeklyTaskItem[] = shouldIncludePersonalTasks
       ? profilePersonalTasks
           .map((task) => ({ task, createdDate: getPersonalTaskCreatedDate(task) }))
@@ -623,11 +655,15 @@ export function WeeklyWorkBoard({
 
   useEffect(() => {
     if (hasAppliedProfileDefaultRef.current) return
+    if (isDepartmentPinnedByUrl) {
+      hasAppliedProfileDefaultRef.current = true
+      return
+    }
     if (!profileDefaultPerson) return
     if (!personOptions.includes(profileDefaultPerson)) return
     setSelectedPerson(profileDefaultPerson)
     hasAppliedProfileDefaultRef.current = true
-  }, [personOptions, profileDefaultPerson])
+  }, [isDepartmentPinnedByUrl, personOptions, profileDefaultPerson])
 
   useEffect(() => {
     if (selectedPerson === "all") return
@@ -641,8 +677,11 @@ export function WeeklyWorkBoard({
   )
 
   const visiblePersons = useMemo(
-    () => (selectedPerson === "all" ? personOptions : personOptions.filter((person) => person === selectedPerson)),
-    [personOptions, selectedPerson],
+    () =>
+      selectedPerson === "all"
+        ? scopedPersons.filter((person) => personOptions.includes(person))
+        : personOptions.filter((person) => person === selectedPerson),
+    [personOptions, scopedPersons, selectedPerson],
   )
 
   const groupedTasksByTeamPersonProject = useMemo(() => {

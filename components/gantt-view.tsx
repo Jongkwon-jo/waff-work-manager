@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils"
 import { calculateManDaysBetweenDates } from "@/lib/man-days"
 import { ko } from "date-fns/locale"
 import type { GlobalSchedule } from "@/lib/firestore-service"
+import { toast } from "sonner"
 
 interface GanttViewProps {
   projects: Project[]
@@ -54,6 +55,7 @@ interface GanttViewProps {
   defaultTaskDepartment?: string
   defaultTaskPerson?: string
   pmOptions?: ProjectPmOption[]
+  inactiveOwnerOptions?: string[]
   searchQuery: string
   hiddenProjectOptions?: Project[]
   selectedHiddenProjectIds?: string[]
@@ -400,6 +402,7 @@ export function GanttView({
   defaultTaskDepartment = "전략",
   defaultTaskPerson = "",
   pmOptions = [],
+  inactiveOwnerOptions = [],
   searchQuery,
   hiddenProjectOptions = [],
   selectedHiddenProjectIds = [],
@@ -3109,6 +3112,7 @@ export function GanttView({
                                         <OwnerMultiSelect
                                           value={task.person || ""}
                                           options={ownerValues}
+                                          inactiveOptions={inactiveOwnerOptions}
                                           onDeleteOption={handleDeleteOwnerOption}
                                           onChange={(value) => updateTaskInline(task, { person: value })}
                                         />
@@ -4089,6 +4093,10 @@ function joinOwners(values: string[]): string {
   return joinListValue(values)
 }
 
+function normalizeOwnerName(value: string): string {
+  return value.trim().toLowerCase()
+}
+
 function parseDepartments(value: string): string[] {
   return parseListValue(value)
 }
@@ -4187,19 +4195,29 @@ function DepartmentMultiSelect({
 function OwnerMultiSelect({
   value,
   options,
+  inactiveOptions = [],
   onDeleteOption,
   onChange,
 }: {
   value: string
   options: string[]
+  inactiveOptions?: string[]
   onDeleteOption: (owner: string) => void
   onChange: (value: string) => void
 }) {
   const [newOwner, setNewOwner] = useState("")
   const [selected, setSelected] = useState<string[]>(() => parseOwners(value))
+  const inactiveOwnerSet = useMemo(
+    () => new Set(inactiveOptions.map(normalizeOwnerName).filter(Boolean)),
+    [inactiveOptions],
+  )
+  const selectableOptions = useMemo(
+    () => options.filter((owner) => !inactiveOwnerSet.has(normalizeOwnerName(owner))),
+    [inactiveOwnerSet, options],
+  )
   const allOptions = useMemo(
-    () => Array.from(new Set([...options, ...selected])).filter(Boolean),
-    [options, selected],
+    () => Array.from(new Set([...selectableOptions, ...selected])).filter(Boolean),
+    [selectableOptions, selected],
   )
 
   useEffect(() => {
@@ -4215,7 +4233,10 @@ function OwnerMultiSelect({
   const toggleOwner = (owner: string) => {
     const selectedSet = new Set(selected)
     if (selectedSet.has(owner)) selectedSet.delete(owner)
-    else selectedSet.add(owner)
+    else if (inactiveOwnerSet.has(normalizeOwnerName(owner))) {
+      toast.warning("퇴사자는 새 담당자로 추가할 수 없습니다.")
+      return
+    } else selectedSet.add(owner)
     commitSelectedOwners(Array.from(selectedSet))
   }
 
@@ -4228,6 +4249,11 @@ function OwnerMultiSelect({
   const addCustomOwner = () => {
     const trimmed = newOwner.trim()
     if (!trimmed) return
+    if (inactiveOwnerSet.has(normalizeOwnerName(trimmed))) {
+      toast.warning("퇴사자는 새 담당자로 추가할 수 없습니다.")
+      setNewOwner("")
+      return
+    }
     commitSelectedOwners([...selected, trimmed])
     setNewOwner("")
   }
@@ -4278,6 +4304,7 @@ function OwnerMultiSelect({
         <div className="max-h-44 space-y-1 overflow-auto pr-1">
           {allOptions.map((owner) => {
             const checked = selected.includes(owner)
+            const inactive = inactiveOwnerSet.has(normalizeOwnerName(owner))
             return (
               <div key={owner} className="flex items-center gap-1">
                 <button
@@ -4287,19 +4314,22 @@ function OwnerMultiSelect({
                 >
                   <input type="checkbox" readOnly checked={checked} className="h-3.5 w-3.5" />
                   <span className="truncate">{owner}</span>
+                  {inactive && <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">퇴사</span>}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (checked) removeOwner(owner)
-                    onDeleteOption(owner)
-                  }}
-                  className="h-7 shrink-0 rounded-md border border-border px-2 text-[10px] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                  title={`${owner} 옵션 삭제`}
-                  aria-label={`${owner} 옵션 삭제`}
-                >
-                  삭제
-                </button>
+                {!inactive && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (checked) removeOwner(owner)
+                      onDeleteOption(owner)
+                    }}
+                    className="h-7 shrink-0 rounded-md border border-border px-2 text-[10px] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                    title={`${owner} 옵션 삭제`}
+                    aria-label={`${owner} 옵션 삭제`}
+                  >
+                    삭제
+                  </button>
+                )}
               </div>
             )
           })}

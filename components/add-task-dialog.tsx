@@ -76,14 +76,22 @@ export function AddTaskDialog({
     return departmentPersonSettings[group] || []
   }, [department, departmentPersonSettings])
 
+  const getAssignableDefaultPersons = (value: string, options: string[]) => {
+    const optionSet = new Set(options)
+    return parseListValue(value).filter((person) => optionSet.has(person))
+  }
+
   useEffect(() => {
     if (!open) return
-    const fromDefault = parseListValue(defaultPerson)
+    const fromDefault = getAssignableDefaultPersons(defaultPerson, personOptions)
     if (fromDefault.length > 0) {
       setPersonList(fromDefault)
       return
     }
-    setPersonList((prev) => (prev.length > 0 ? prev : personOptions.slice(0, 1)))
+    setPersonList((prev) => {
+      const activePrev = prev.filter((person) => personOptions.includes(person))
+      return activePrev.length > 0 ? activePrev : personOptions.slice(0, 1)
+    })
   }, [defaultPerson, open, personOptions])
 
   useEffect(() => {
@@ -141,13 +149,14 @@ export function AddTaskDialog({
     setTaskName("")
     setCategory("일반")
     setDepartment(defaultDepartment)
-    const resetDefaultPersons = parseListValue(defaultPerson)
     const defaultGroup = resolveDepartmentPersonGroup(defaultDepartment)
+    const defaultGroupOptions = departmentPersonSettings[defaultGroup] || []
+    const resetDefaultPersons = getAssignableDefaultPersons(defaultPerson, defaultGroupOptions)
     setPersonList(
       resetDefaultPersons.length > 0
         ? resetDefaultPersons
-        : departmentPersonSettings[defaultGroup]?.[0]
-          ? [departmentPersonSettings[defaultGroup][0]]
+        : defaultGroupOptions[0]
+          ? [defaultGroupOptions[0]]
           : [],
     )
     setStatus("예정")
