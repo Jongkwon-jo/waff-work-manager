@@ -1396,8 +1396,9 @@ export function GanttView({
 
     const dayHeader = allDays
       .map((day) => {
-        const bg = day.isToday ? "#fef08a" : day.isWeekend ? "#f8fafc" : "#ffffff"
-        return `<th style="background:${bg};border:1px solid #cbd5e1;padding:4px 2px;font-size:10px;min-width:24px;">${day.label}<br/>${day.dow}</th>`
+        const bg = day.isToday ? "#a7f3d0" : day.isWeekend ? "#f8fafc" : "#ffffff"
+        const color = day.isToday ? "#065f46" : "#334155"
+        return `<th style="background:${bg};color:${color};border:1px solid #cbd5e1;padding:4px 2px;font-size:10px;min-width:24px;">${day.label}<br/>${day.dow}</th>`
       })
       .join("")
 
@@ -2466,14 +2467,21 @@ export function GanttView({
                           const dayKey = `${d.year}-${String(d.month + 1).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`
                           return globalSchedulesByDay.has(dayKey)
                         })() && "bg-rose-100/70",
-                        d.isToday && "bg-yellow-100",
+                        d.isToday && "bg-emerald-200/90",
                       )}
                     >
-                      <div className="text-[10px] leading-tight font-medium text-muted-foreground">{d.label}</div>
+                      <div
+                        className={cn(
+                          "text-[10px] leading-tight font-medium",
+                          d.isToday ? "text-emerald-900" : "text-muted-foreground",
+                        )}
+                      >
+                        {d.label}
+                      </div>
                       <div
                         className={cn(
                           "text-[8px] leading-tight font-bold",
-                          d.isToday ? "text-yellow-700" : d.isWeekend ? "text-rose-400" : "text-muted-foreground/60",
+                          d.isToday ? "text-teal-700" : d.isWeekend ? "text-rose-400" : "text-muted-foreground/60",
                         )}
                       >
                         {d.dow}
@@ -3192,7 +3200,7 @@ export function GanttView({
                                       return globalSchedulesByDay.has(dayKey)
                                     })() && <div className="absolute inset-0 bg-rose-100/55" />}
                                     {d.isToday && (
-                                      <div className="absolute inset-0 bg-yellow-400/10 ring-1 ring-yellow-400/30 z-10" />
+                                      <div className="absolute inset-0 z-10 bg-emerald-500/20" />
                                     )}
                                   </div>
                                 ))}
@@ -3546,14 +3554,14 @@ function MobileGanttView({
         )}
         {todayPct !== null && (
           <div
-            className="absolute bottom-0 top-0 z-10 w-0.5 bg-yellow-400"
+            className="absolute bottom-0 top-0 z-10 w-0.5 bg-emerald-500"
             style={{ left: `${todayPct}%` }}
           />
         )}
       </div>
       <div className="mt-0.5 flex select-none justify-between text-[9px] text-muted-foreground/50">
         <span>{firstDay ? `${firstDay.month + 1}월` : ""}</span>
-        {todayPct !== null && <span className="font-semibold text-yellow-500">오늘</span>}
+        {todayPct !== null && <span className="font-semibold text-emerald-600">오늘</span>}
         <span>{lastDay ? `${lastDay.month + 1}월` : ""}</span>
       </div>
     </div>
@@ -3705,7 +3713,7 @@ function MobileGanttView({
                     className={cn(
                       "border-b border-border/25 px-3 py-2",
                       depthRowBgClass,
-                      containsToday && "ring-1 ring-inset ring-yellow-300/50",
+                      containsToday && "bg-emerald-100/70",
                       highlightedTaskId === task.id && "ring-2 ring-inset ring-yellow-400/80 bg-yellow-100/40",
                     )}
                   >
@@ -3841,7 +3849,7 @@ function MobileGanttView({
                       <div className="relative mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border/20">
                         {todayPct !== null && (
                           <div
-                            className="absolute bottom-0 top-0 z-10 w-px bg-yellow-400/80"
+                            className="absolute bottom-0 top-0 z-10 w-px bg-emerald-500/85"
                             style={{ left: `${todayPct}%` }}
                           />
                         )}
@@ -3957,7 +3965,7 @@ function MobileGanttView({
                         <div className="relative mt-2 h-2 w-full overflow-hidden rounded-full bg-border/20">
                           {todayPct !== null && (
                             <div
-                              className="absolute bottom-0 top-0 z-10 w-px bg-yellow-400/80"
+                              className="absolute bottom-0 top-0 z-10 w-px bg-emerald-500/85"
                               style={{ left: `${todayPct}%` }}
                             />
                           )}

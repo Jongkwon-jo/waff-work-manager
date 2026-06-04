@@ -1169,13 +1169,17 @@ export function WeeklyWorkBoard({
                 <div
                   key={day.date.toISOString()}
                   className={`border-l border-slate-200/80 px-2 py-3 text-center ${tone.dayHeader} ${
-                    weeklyGlobalScheduleDayKeys.has(toDayKey(day.date)) ? "bg-rose-100/60" : ""
+                    day.isToday
+                      ? "bg-emerald-200/90"
+                      : weeklyGlobalScheduleDayKeys.has(toDayKey(day.date))
+                        ? "bg-rose-100/60"
+                        : ""
                   }`}
                 >
                   <div
                     className={`mt-0.5 text-[11px] font-bold ${
                       day.isToday
-                        ? "text-yellow-700"
+                        ? "text-emerald-900"
                         : day.dayOfWeek === 6
                           ? "text-blue-700"
                           : day.dayOfWeek === 0
@@ -1189,8 +1193,8 @@ export function WeeklyWorkBoard({
                     className={`mt-0.5 text-[11px] font-semibold ${
                       (() => {
                         const daySchedules = weeklyGlobalSchedulesByDay.get(toDayKey(day.date)) || []
+                        if (day.isToday) return "text-teal-700"
                         if (daySchedules.length > 0) return "text-rose-700"
-                        if (day.isToday) return "text-yellow-700"
                         if (day.dayOfWeek === 6) return "text-blue-600"
                         if (day.dayOfWeek === 0) return "text-red-600"
                         return "text-slate-500"
@@ -1262,10 +1266,10 @@ export function WeeklyWorkBoard({
                               <div
                                 key={`${personGroup.person}-empty-${day.date.toISOString()}`}
                                 className={`min-h-[44px] border-l border-slate-200/80 ${
-                                  weeklyGlobalScheduleDayKeys.has(toDayKey(day.date))
-                                    ? "bg-rose-100/55"
-                                    : day.isToday
-                                      ? "bg-yellow-50/80"
+                                  day.isToday
+                                    ? "bg-emerald-100/90"
+                                    : weeklyGlobalScheduleDayKeys.has(toDayKey(day.date))
+                                      ? "bg-rose-100/55"
                                       : day.dayOfWeek === 6
                                         ? "bg-blue-50/60"
                                         : day.dayOfWeek === 0
@@ -1327,10 +1331,10 @@ export function WeeklyWorkBoard({
                                 <div
                                   key={`${personGroup.person}-${project.projectId}-${day.date.toISOString()}`}
                                   className={`relative border-l border-slate-200/80 ${
-                                    weeklyGlobalScheduleDayKeys.has(toDayKey(day.date))
-                                      ? "bg-rose-100/55"
-                                      : day.isToday
-                                        ? "bg-yellow-50/80"
+                                    day.isToday
+                                      ? "bg-emerald-100/90"
+                                      : weeklyGlobalScheduleDayKeys.has(toDayKey(day.date))
+                                        ? "bg-rose-100/55"
                                         : day.dayOfWeek === 6
                                           ? "bg-blue-50/60"
                                           : day.dayOfWeek === 0
