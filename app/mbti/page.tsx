@@ -8,7 +8,16 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
-import { MBTI_TYPES, subscribeUserProfiles, type MbtiType, type UserProfile } from "@/lib/firestore-service"
+import {
+  DEFAULT_DEPARTMENT_ORG_SETTINGS,
+  MBTI_TYPES,
+  subscribeDepartmentOrgSettings,
+  subscribeUserProfiles,
+  type DepartmentOrgSettings,
+  type MbtiType,
+  type UserProfile,
+} from "@/lib/firestore-service"
+import { isUserProfileActiveForOrg } from "@/lib/department-org"
 
 const MBTI_COLORS: Record<MbtiType, { card: string; border: string; badge: string }> = {
   INTJ: { card: "from-violet-50 to-purple-50/60", border: "border-violet-200/60", badge: "bg-violet-100 text-violet-700" },
@@ -74,26 +83,39 @@ function getDisplayName(profile: UserProfile): string {
 export default function MbtiPage() {
   const { isAdmin } = useAuth()
   const [profiles, setProfiles] = useState<UserProfile[]>([])
+  const [departmentOrgSettings, setDepartmentOrgSettings] = useState<DepartmentOrgSettings>(
+    DEFAULT_DEPARTMENT_ORG_SETTINGS,
+  )
 
   useEffect(() => {
     const unsubscribe = subscribeUserProfiles(setProfiles)
     return () => unsubscribe()
   }, [])
 
+  useEffect(() => {
+    const unsubscribe = subscribeDepartmentOrgSettings(setDepartmentOrgSettings)
+    return () => unsubscribe()
+  }, [])
+
+  const activeProfiles = useMemo(
+    () => profiles.filter((profile) => isUserProfileActiveForOrg(profile, departmentOrgSettings)),
+    [departmentOrgSettings, profiles],
+  )
+
   const mbtiCards = useMemo(() => {
     const grouped = Object.fromEntries(
       MBTI_TYPES.map((type) => [type, [] as UserProfile[]]),
     ) as Record<MbtiType, UserProfile[]>
 
-    for (const profile of profiles) {
+    for (const profile of activeProfiles) {
       if (profile.mbti) grouped[profile.mbti].push(profile)
     }
 
-    const classifiedCount = profiles.filter((p) => p.mbti).length
+    const classifiedCount = activeProfiles.filter((p) => p.mbti).length
     const cards = MBTI_TYPES.map((type) => ({ type, members: grouped[type], count: grouped[type].length }))
     cards.sort((a, b) => (b.count !== a.count ? b.count - a.count : a.type.localeCompare(b.type)))
     return { cards, classifiedCount }
-  }, [profiles])
+  }, [activeProfiles])
 
   const departmentMbti = useMemo(() => {
     type DepartmentStats = {
@@ -106,7 +128,7 @@ export default function MbtiPage() {
 
     const grouped = new Map<string, Array<{ name: string; mbti: MbtiType }>>()
 
-    for (const profile of profiles) {
+    for (const profile of activeProfiles) {
       if (!profile.mbti) continue
       const department = profile.department || "미지정"
       if (!grouped.has(department)) grouped.set(department, [])
@@ -140,7 +162,7 @@ export default function MbtiPage() {
 
     rows.sort((a, b) => (b.total !== a.total ? b.total - a.total : a.department.localeCompare(b.department)))
     return rows
-  }, [profiles])
+  }, [activeProfiles])
 
   return (
     <main className="min-h-screen bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(14,165,233,0.10),transparent),linear-gradient(180deg,#f0f6ff_0%,#f5f7fb_40%,#ffffff_100%)] px-4 py-10 lg:px-10">
@@ -159,7 +181,7 @@ export default function MbtiPage() {
             <p className="text-sm font-medium text-primary">직원 성향 분석</p>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900">MBTI 분포</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              직원 {profiles.length}명 중 <span className="font-medium text-slate-700">{mbtiCards.classifiedCount}명</span>이 분류되었습니다.
+              직원 {activeProfiles.length}명 중 <span className="font-medium text-slate-700">{mbtiCards.classifiedCount}명</span>이 분류되었습니다.
               {isAdmin && (
                 <span className="ml-2 text-slate-500">관리자 페이지에서 각 직원의 MBTI를 지정할 수 있습니다.</span>
               )}

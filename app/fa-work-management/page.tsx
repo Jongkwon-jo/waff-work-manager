@@ -64,6 +64,7 @@ import {
   hasChangeNotificationScope,
   isTaskChangeNotificationEntry,
 } from "@/lib/recent-change-visibility"
+import { getInactiveDepartmentOrgPersonNamesFromSettings, isUserProfileActiveForOrg } from "@/lib/department-org"
 
 export default function FaWorkManagementPage() {
   const { user, loading: authLoading, isAdmin, pagePermissions } = useAuth()
@@ -696,11 +697,18 @@ export default function FaWorkManagementPage() {
 
   const pmOptions = useMemo<ProjectPmOption[]>(
     () =>
-      userProfiles.map((profile) => ({
-        email: profile.email,
-        label: profile.taskAliases?.[0] || profile.email,
-      })),
-    [userProfiles],
+      userProfiles
+        .filter((profile) => isUserProfileActiveForOrg(profile, departmentOrgSettings))
+        .map((profile) => ({
+          email: profile.email,
+          label: profile.taskAliases?.[0] || profile.email,
+        })),
+    [departmentOrgSettings, userProfiles],
+  )
+
+  const inactiveOwnerOptions = useMemo(
+    () => getInactiveDepartmentOrgPersonNamesFromSettings(departmentOrgSettings),
+    [departmentOrgSettings],
   )
 
   const currentUserEmail = (user?.email || "").trim().toLowerCase()
@@ -2064,6 +2072,7 @@ export default function FaWorkManagementPage() {
                 defaultTaskDepartment="FA"
                 defaultTaskPerson={defaultTaskPerson}
                 pmOptions={pmOptions}
+                inactiveOwnerOptions={inactiveOwnerOptions}
                 searchQuery={deferredSearchQuery}
                 hiddenProjectOptions={hiddenProjectOptions}
                 selectedHiddenProjectIds={selectedHiddenProjectIds}

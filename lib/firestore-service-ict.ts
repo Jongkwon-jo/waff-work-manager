@@ -41,7 +41,7 @@ import {
   buildPersonKeys,
   type HistoryNotificationFilter,
 } from "./history-notification"
-import { buildTaskPersonKeys, buildTaskPersonKeysFromValues } from "./task-person-keys"
+import { buildTaskPersonKeys, buildTaskPersonKeysFromValues, normalizeTaskPersonKey } from "./task-person-keys"
 
 const PROJECTS_COLLECTION = "ict_projects"
 const TASKS_COLLECTION = "ict_tasks"
@@ -729,6 +729,36 @@ function taskOverlapsQueryDateRange(task: any, range?: QueryDateRange) {
   return startDate <= rangeEnd || endDate >= rangeStart
 }
 
+function getTaskPersonKeyValues(task: any): string[] {
+  const raw = task?.personKeys
+  if (Array.isArray(raw)) return raw.filter((value): value is string => typeof value === "string")
+  if (typeof raw === "string") return [raw]
+  return []
+}
+
+function taskMatchesPersonScope(task: any, personNames: string[], queryKeys: string[]) {
+  const normalizedQueryKeys = new Set(queryKeys.map(normalizeTaskPersonKey).filter(Boolean))
+  if (
+    getTaskPersonKeyValues(task).some((key) => {
+      const normalized = normalizeTaskPersonKey(key)
+      return normalized && normalizedQueryKeys.has(normalized)
+    })
+  ) {
+    return true
+  }
+
+  const normalizedNames = personNames.map(normalizeTaskPersonKey).filter(Boolean)
+  if (normalizedNames.length === 0) return false
+
+  return toStringOrEmpty(task?.person)
+    .split(",")
+    .map(normalizeTaskPersonKey)
+    .filter(Boolean)
+    .some((token) =>
+      normalizedNames.some((name) => token === name || token.includes(name) || name.includes(token)),
+    )
+}
+
 type ProjectTaskSubscriptionPoolOptions = {
   collectionName: string
   groupPrefix: string
@@ -846,6 +876,7 @@ export function subscribeProjectsWithTasksByPersonKeys(
 ) {
   const includeHidden = options.includeHidden === true
   const dateRange = normalizeQueryDateRange(options.dateRange)
+  const queryPersons = uniqueTrimmedStrings(personKeys)
   const queryKeys = buildTaskPersonKeysFromValues(personKeys).slice(0, 300)
   if (queryKeys.length === 0) {
     callback([])
@@ -853,8 +884,8 @@ export function subscribeProjectsWithTasksByPersonKeys(
   }
 
   const chunks = chunkValues(queryKeys, 30)
-  const ictTaskGroups = new Map<number, any[]>()
-  const strategyTaskGroups = new Map<number, any[]>()
+  const ictTaskGroups = new Map<string | number, any[]>()
+  const strategyTaskGroups = new Map<string | number, any[]>()
   let hiddenLinkedStrategyProjectIds: string[] = []
   let disposed = false
 
@@ -933,6 +964,48 @@ export function subscribeProjectsWithTasksByPersonKeys(
       ),
     )
   })
+
+  if (dateRange) {
+    const mapFallbackIctTasks = (snapshot: any) =>
+      snapshot.docs
+        .map((docSnap: any) => ({
+          ...docSnap.data(),
+          id: `${ICT_SOURCE_PREFIX}${docSnap.id}`,
+          parentId: toOptionalString(docSnap.data().parentId) ? `${ICT_SOURCE_PREFIX}${toStringOrEmpty(docSnap.data().parentId)}` : undefined,
+          projectId: `${ICT_SOURCE_PREFIX}${toStringOrEmpty(docSnap.data().projectId)}`,
+          sourceSchedule: "ict",
+          originalTaskId: docSnap.id,
+          originalProjectId: toStringOrEmpty(docSnap.data().projectId),
+        }))
+        .filter((task: any) => taskOverlapsQueryDateRange(task, dateRange))
+        .filter((task: any) => taskMatchesPersonScope(task, queryPersons, queryKeys))
+
+    unsubscribes.push(
+      onSnapshot(
+        query(collection(db, TASKS_COLLECTION), where("endDate", ">=", dateRange.startDate)),
+        (snapshot) => {
+          ictTaskGroups.set("fallback:date-person", mapFallbackIctTasks(snapshot))
+          void notify().catch((error) => console.error("Scoped ICT fallback data snapshot error:", error))
+        },
+        (error) => console.error("Scoped ICT fallback tasks snapshot error:", error),
+      ),
+      onSnapshot(
+        query(collection(db, STRATEGY_TASKS_COLLECTION), where("endDate", ">=", dateRange.startDate)),
+        (snapshot) => {
+          strategyTaskGroups.set(
+            "fallback:date-person",
+            snapshot.docs
+              .filter((docSnap) => isIctTask(docSnap.data()))
+              .map(mapStrategyTaskDoc)
+              .filter((task) => taskOverlapsQueryDateRange(task, dateRange))
+              .filter((task) => taskMatchesPersonScope(task, queryPersons, queryKeys)),
+          )
+          void notify().catch((error) => console.error("Scoped linked strategy fallback data snapshot error:", error))
+        },
+        (error) => console.error("Scoped linked strategy fallback tasks snapshot error:", error),
+      ),
+    )
+  }
 
   return () => {
     disposed = true

@@ -3,6 +3,7 @@ export type OrgDepartmentGroup = "ICT" | "FA" | "전략기획" | "기타"
 export type DepartmentOrgMember = {
   name: string
   title?: string
+  active?: boolean
 }
 
 export type DepartmentOrgTeam = {
@@ -88,13 +89,21 @@ export const DEPARTMENT_ORG_CHART: Record<OrgDepartmentGroup, DepartmentOrg> = {
 export const formatOrgMember = (member: DepartmentOrgMember) =>
   member.title ? `${member.name} ${member.title}` : member.name
 
+export function isActiveDepartmentOrgMember(member?: DepartmentOrgMember): boolean {
+  return member?.active !== false
+}
+
+function getDepartmentOrgMembersFromOrg(org: DepartmentOrg): DepartmentOrgMember[] {
+  return [
+    org.leader,
+    ...(org.advisors || []),
+    ...org.teams.flatMap((team) => team.members),
+  ].filter((member): member is DepartmentOrgMember => Boolean(member?.name?.trim()))
+}
+
 export function getDepartmentOrgPersonNames(group: OrgDepartmentGroup): string[] {
   const org = DEPARTMENT_ORG_CHART[group]
-  const names = [
-    org.leader?.name,
-    ...(org.advisors || []).map((member) => member.name),
-    ...org.teams.flatMap((team) => team.members.map((member) => member.name)),
-  ].filter((name): name is string => Boolean(name))
+  const names = getDepartmentOrgMembersFromOrg(org).map((member) => member.name)
 
   return Array.from(new Set(names))
 }
@@ -123,14 +132,40 @@ export function cloneDepartmentOrgChart(): Record<OrgDepartmentGroup, Department
   ) as Record<OrgDepartmentGroup, DepartmentOrg>
 }
 
-export function getDepartmentOrgPersonNamesFromOrg(org: DepartmentOrg): string[] {
-  const names = [
-    org.leader?.name,
-    ...(org.advisors || []).map((member) => member.name),
-    ...org.teams.flatMap((team) => team.members.map((member) => member.name)),
-  ].filter((name): name is string => Boolean(name?.trim()))
+export function getDepartmentOrgPersonNamesFromOrg(
+  org: DepartmentOrg,
+  options: { activeOnly?: boolean } = {},
+): string[] {
+  const names = getDepartmentOrgMembersFromOrg(org)
+    .filter((member) => !options.activeOnly || isActiveDepartmentOrgMember(member))
+    .map((member) => member.name)
 
   return Array.from(new Set(names.map((name) => name.trim())))
+}
+
+export function getActiveDepartmentOrgPersonNamesFromOrg(org: DepartmentOrg): string[] {
+  return getDepartmentOrgPersonNamesFromOrg(org, { activeOnly: true })
+}
+
+export function getInactiveDepartmentOrgPersonNamesFromOrg(org: DepartmentOrg): string[] {
+  const names = getDepartmentOrgMembersFromOrg(org)
+    .filter((member) => !isActiveDepartmentOrgMember(member))
+    .map((member) => member.name)
+
+  return Array.from(new Set(names.map((name) => name.trim()).filter(Boolean)))
+}
+
+export function getInactiveDepartmentOrgPersonNamesFromSettings(
+  orgChart: Record<OrgDepartmentGroup, DepartmentOrg>,
+): string[] {
+  return Array.from(
+    new Set(
+      (Object.values(orgChart) as DepartmentOrg[])
+        .flatMap((org) => getInactiveDepartmentOrgPersonNamesFromOrg(org))
+        .map((name) => name.trim())
+        .filter(Boolean),
+    ),
+  )
 }
 
 function normalizeOrgName(value: string): string {
@@ -145,6 +180,63 @@ function aliasesMatchOrgName(name: string | undefined, aliases: string[]): boole
     if (!alias) return false
     return normalizedName === alias || normalizedName.includes(alias) || alias.includes(normalizedName)
   })
+}
+
+function getProfileOrgAliases(profile: { email?: string; taskAliases?: string[] }): string[] {
+  const email = (profile.email || "").trim()
+  return Array.from(
+    new Set(
+      [
+        ...(profile.taskAliases || []),
+        email,
+        email.includes("@") ? email.split("@")[0] : "",
+      ]
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  )
+}
+
+function getOrgActiveMatchStatus(
+  aliases: string[],
+  orgChart: Record<OrgDepartmentGroup, DepartmentOrg>,
+): { hasActiveMatch: boolean; hasInactiveMatch: boolean } {
+  let hasActiveMatch = false
+  let hasInactiveMatch = false
+
+  ;(Object.values(orgChart) as DepartmentOrg[]).forEach((org) => {
+    getDepartmentOrgMembersFromOrg(org).forEach((member) => {
+      if (!aliasesMatchOrgName(member.name, aliases)) return
+      if (isActiveDepartmentOrgMember(member)) hasActiveMatch = true
+      else hasInactiveMatch = true
+    })
+  })
+
+  return { hasActiveMatch, hasInactiveMatch }
+}
+
+export function isActiveDepartmentOrgPersonName(
+  person: string,
+  orgChart: Record<OrgDepartmentGroup, DepartmentOrg>,
+): boolean {
+  const aliases = [person.trim()].filter(Boolean)
+  if (aliases.length === 0) return true
+  const { hasActiveMatch, hasInactiveMatch } = getOrgActiveMatchStatus(aliases, orgChart)
+  if (hasActiveMatch) return true
+  if (hasInactiveMatch) return false
+  return true
+}
+
+export function isUserProfileActiveForOrg(
+  profile: { email?: string; taskAliases?: string[] },
+  orgChart: Record<OrgDepartmentGroup, DepartmentOrg>,
+): boolean {
+  const aliases = getProfileOrgAliases(profile)
+  if (aliases.length === 0) return true
+  const { hasActiveMatch, hasInactiveMatch } = getOrgActiveMatchStatus(aliases, orgChart)
+  if (hasActiveMatch) return true
+  if (hasInactiveMatch) return false
+  return true
 }
 
 /**
@@ -163,17 +255,20 @@ export function getTeamScopePersonsForAliases(
   const persons = new Set<string>()
 
   ;(Object.values(orgChart) as DepartmentOrg[]).forEach((org) => {
-    if (aliasesMatchOrgName(org.leader?.name, cleanedAliases)) {
-      getDepartmentOrgPersonNamesFromOrg(org).forEach((name) => persons.add(name))
+    if (isActiveDepartmentOrgMember(org.leader) && aliasesMatchOrgName(org.leader?.name, cleanedAliases)) {
+      getActiveDepartmentOrgPersonNamesFromOrg(org).forEach((name) => persons.add(name))
       return
     }
     org.teams.forEach((team) => {
       const isTeamLead = team.members.some(
-        (member) => member.title === "팀장" && aliasesMatchOrgName(member.name, cleanedAliases),
+        (member) =>
+          isActiveDepartmentOrgMember(member) &&
+          member.title === "팀장" &&
+          aliasesMatchOrgName(member.name, cleanedAliases),
       )
       if (isTeamLead) {
         team.members.forEach((member) => {
-          if (member.name?.trim()) persons.add(member.name.trim())
+          if (isActiveDepartmentOrgMember(member) && member.name?.trim()) persons.add(member.name.trim())
         })
       }
     })

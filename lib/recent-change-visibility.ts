@@ -6,6 +6,7 @@ import {
   type DepartmentPersonGroup,
   type UserProfile,
 } from "./firestore-service"
+import { isActiveDepartmentOrgMember } from "./department-org"
 
 export type RecentChangeVisibilityEntry = {
   id: string
@@ -67,8 +68,8 @@ export function getLedDepartmentGroupsForAliases(
   const groups = new Set<DepartmentPersonGroup>()
 
   ;(Object.keys(departmentOrgSettings) as DepartmentPersonGroup[]).forEach((group) => {
-    const leaderName = departmentOrgSettings[group]?.leader?.name
-    if (aliasMatchesName(leaderName, aliases)) groups.add(group)
+    const leader = departmentOrgSettings[group]?.leader
+    if (isActiveDepartmentOrgMember(leader) && aliasMatchesName(leader?.name, aliases)) groups.add(group)
   })
 
   return groups
