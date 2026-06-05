@@ -1038,7 +1038,7 @@ export default function MyPage() {
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.12),_transparent_35%),linear-gradient(180deg,#f8fbff_0%,#f5f7fb_55%,#ffffff_100%)] px-3 py-6 lg:px-6">
-      <div className="mx-auto w-full max-w-none space-y-4">
+      <div className="mx-auto w-full max-w-none space-y-2">
         <header className="flex flex-col gap-3 rounded-[24px] border border-white/70 bg-white/85 p-4 shadow-[0_20px_80px_rgba(15,23,42,0.08)] backdrop-blur lg:flex-row lg:items-center">
           <div>
             <p className="text-xl font-extrabold uppercase tracking-[0.12em] text-sky-600">WORKHUB</p>
