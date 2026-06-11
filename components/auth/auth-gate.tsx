@@ -7,11 +7,12 @@ import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { LoginForm } from "@/components/auth/login-form"
 import { useAuth } from "@/components/auth/auth-provider"
-import { resolvePathToPermissionKey } from "@/lib/page-access"
+import { canAccessMyPageTest, resolvePathToPermissionKey } from "@/lib/page-access"
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const { user, loading, permissionLoading, isAdmin, pagePermissions } = useAuth()
+  const isMyPageTestPath = pathname === "/my-page-test" || pathname.startsWith("/my-page-test/")
 
   if (loading || (user && permissionLoading)) {
     return (
@@ -28,6 +29,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (pathname.startsWith("/admin") && !isAdmin) {
     return <AccessDenied message="관리자 계정만 관리자 페이지에 접근할 수 있습니다." />
+  }
+
+  if (isMyPageTestPath && !canAccessMyPageTest(user.email)) {
+    return <AccessDenied message="마이워크 테스트 페이지에 접근할 수 있는 권한이 없습니다." />
   }
 
   const permissionKey = resolvePathToPermissionKey(pathname)

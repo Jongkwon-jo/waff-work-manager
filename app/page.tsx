@@ -19,6 +19,7 @@ import { auth } from "@/lib/firebase"
 import { useAuth } from "@/components/auth/auth-provider"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { canAccessMyPageTest } from "@/lib/page-access"
 import { toast } from "sonner"
 
 export default function HomePage() {
@@ -42,6 +43,16 @@ export default function HomePage() {
       visible: isAdmin || pagePermissions.myPage,
       tone: "from-rose-50 via-pink-50/60 to-white",
       iconColor: "text-rose-500",
+      iconBg: "bg-white/60",
+    },
+    {
+      href: "/my-page-test",
+      title: "마이워크 테스트",
+      description: "마이 워크 새 스타일을 준비하는 테스트 페이지입니다.",
+      icon: UserRoundSearch,
+      visible: canAccessMyPageTest(user?.email),
+      tone: "from-sky-50 via-blue-50/60 to-white",
+      iconColor: "text-sky-500",
       iconBg: "bg-white/60",
     },
     {
