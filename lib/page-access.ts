@@ -1,4 +1,5 @@
 export const ADMIN_EMAIL = "admin@waff.co.kr"
+export const MY_PAGE_TEST_ALLOWED_EMAILS = [ADMIN_EMAIL, "jongkwon.jo@waff.co.kr"] as const
 
 export const PAGE_PERMISSIONS = [
   { key: "myPage", label: "마이 워크", path: "/my-page" },
@@ -92,20 +93,29 @@ export function normalizePermissions(raw?: Partial<Record<string, unknown>>): Us
   }
 }
 
+function matchesRoute(pathname: string, route: string) {
+  return pathname === route || pathname.startsWith(`${route}/`)
+}
+
 export function resolvePathToPermissionKey(pathname: string): PagePermissionKey | null {
-  if (pathname.startsWith("/my-page")) return "myPage"
-  if (pathname.startsWith("/work-management/weekly")) return "strategyWeeklyWork"
-  if (pathname.startsWith("/work-management")) return "strategyWorkManagement"
-  if (pathname.startsWith("/ict-work-management/weekly")) return "ictWeeklyWork"
-  if (pathname.startsWith("/ict-work-management")) return "ictWorkManagement"
-  if (pathname.startsWith("/fa-work-management/weekly")) return "faWeeklyWork"
-  if (pathname.startsWith("/fa-work-management")) return "faWorkManagement"
-  if (pathname.startsWith("/gpt-test")) return "gptTest"
-  if (pathname.startsWith("/mbti")) return "mbtiPage"
-  if (pathname.startsWith("/daily-report")) return "dailyReport"
+  if (matchesRoute(pathname, "/my-page")) return "myPage"
+  if (matchesRoute(pathname, "/work-management/weekly")) return "strategyWeeklyWork"
+  if (matchesRoute(pathname, "/work-management")) return "strategyWorkManagement"
+  if (matchesRoute(pathname, "/ict-work-management/weekly")) return "ictWeeklyWork"
+  if (matchesRoute(pathname, "/ict-work-management")) return "ictWorkManagement"
+  if (matchesRoute(pathname, "/fa-work-management/weekly")) return "faWeeklyWork"
+  if (matchesRoute(pathname, "/fa-work-management")) return "faWorkManagement"
+  if (matchesRoute(pathname, "/gpt-test")) return "gptTest"
+  if (matchesRoute(pathname, "/mbti")) return "mbtiPage"
+  if (matchesRoute(pathname, "/daily-report")) return "dailyReport"
   return null
 }
 
 export function isAdminEmail(email?: string | null) {
   return normalizeEmail(email || "") === ADMIN_EMAIL
+}
+
+export function canAccessMyPageTest(email?: string | null) {
+  const normalized = normalizeEmail(email || "")
+  return MY_PAGE_TEST_ALLOWED_EMAILS.includes(normalized as (typeof MY_PAGE_TEST_ALLOWED_EMAILS)[number])
 }
