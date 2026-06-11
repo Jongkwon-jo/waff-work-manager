@@ -1865,31 +1865,29 @@ export async function fetchProjectsWithTasks(
   const tasksQuery = includeHidden
     ? query(collection(db, TASKS_COLLECTION))
     : query(collection(db, TASKS_COLLECTION), where("isHidden", "==", false))
-  const strategyProjectsQuery = includeHidden
-    ? query(collection(db, STRATEGY_PROJECTS_COLLECTION))
-    : query(collection(db, STRATEGY_PROJECTS_COLLECTION), where("isHidden", "==", false))
   // 위 subscribeToData 와 동일하게 isIct 필터에 ICT 담당자 보조 조회를 합친다.
-  const strategyTasksQuery = includeHidden
+  const strategyIctTasksQuery = includeHidden
     ? query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true))
     : query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true), where("isHidden", "==", false))
-  const linkedStrategyPersonTasksQuery =
-    LINKED_STRATEGY_PERSON_KEYS.length > 0
-      ? query(collection(db, STRATEGY_TASKS_COLLECTION), where("personKeys", "array-contains-any", LINKED_STRATEGY_PERSON_KEYS))
-      : null
+  const strategyDepartmentTasksQuery = query(collection(db, STRATEGY_TASKS_COLLECTION), where("department", "==", "ICT"))
+  const departmentPersonSettings = await fetchDepartmentPersonSettings()
+  const linkedStrategyPersonTasksQueries = buildLinkedStrategyPersonKeyChunks(departmentPersonSettings.ICT).map((chunk) =>
+    query(collection(db, STRATEGY_TASKS_COLLECTION), where("personKeys", "array-contains-any", chunk)),
+  )
 
   const [
     projectsSnapshot,
     tasksSnapshot,
-    strategyProjectsSnapshot,
-    strategyTasksSnapshot,
-    linkedStrategyPersonTasksSnapshot,
+    strategyIctTasksSnapshot,
+    strategyDepartmentTasksSnapshot,
+    linkedStrategyPersonTasksSnapshots,
     linkedStrategyVisibilitySnapshot,
   ] = await Promise.all([
     getDocs(projectsQuery),
     getDocs(tasksQuery),
-    getDocs(strategyProjectsQuery),
-    getDocs(strategyTasksQuery),
-    linkedStrategyPersonTasksQuery ? getDocs(linkedStrategyPersonTasksQuery) : Promise.resolve(undefined),
+    getDocs(strategyIctTasksQuery),
+    getDocs(strategyDepartmentTasksQuery),
+    Promise.all(linkedStrategyPersonTasksQueries.map((personTasksQuery) => getDocs(personTasksQuery))),
     getDoc(doc(db, SETTINGS_COLLECTION, LINKED_STRATEGY_PROJECT_VISIBILITY_DOC)),
   ])
 
@@ -1911,23 +1909,25 @@ export async function fetchProjectsWithTasks(
       sourceSchedule: "ict",
     }
   })
-  const strategyProjectsData = strategyProjectsSnapshot.docs.map((docSnap) => ({
-    ...docSnap.data(),
-    id: docSnap.id,
-    originalProjectId: docSnap.id,
-    sourceSchedule: "strategy",
-  }))
-  const linkedStrategyPersonTasksData = linkedStrategyPersonTasksSnapshot
-    ? linkedStrategyPersonTasksSnapshot.docs.filter((docSnap) => isIctTask(docSnap.data())).map(mapStrategyTaskDoc)
-    : []
-  const strategyTasksData = mergeStrategyTaskSources(
-    strategyTasksSnapshot.docs.map(mapStrategyTaskDoc),
-    linkedStrategyPersonTasksData,
-  ).filter((task) => includeHidden || !toBooleanOr(task.isHidden ?? task.is_hidden, false))
-
   const hiddenLinkedStrategyProjectIds = normalizeHiddenLinkedStrategyProjectIds(
     linkedStrategyVisibilitySnapshot.data()?.[HIDDEN_LINKED_STRATEGY_PROJECT_IDS_FIELD],
   )
+  const strategyTasksData = await collectLinkedStrategyTasksWithParents(
+    [
+      ...strategyIctTasksSnapshot.docs.map(mapStrategyTaskDoc),
+      ...strategyDepartmentTasksSnapshot.docs.map(mapStrategyTaskDoc),
+      ...linkedStrategyPersonTasksSnapshots.flatMap((snapshot) => snapshot.docs.map(mapStrategyTaskDoc)),
+    ],
+    departmentPersonSettings.ICT,
+    includeHidden,
+    hiddenLinkedStrategyProjectIds,
+  )
+  const strategyProjectsData = (
+    await fetchProjectsForTaskIds(
+      strategyTasksData.map((task) => toStringOrEmpty(task.projectId)),
+      STRATEGY_PROJECTS_COLLECTION,
+    )
+  ).filter((project) => isVisibleTask(project, includeHidden))
 
   return buildIctScheduleProjectTree(
     projectsData,
