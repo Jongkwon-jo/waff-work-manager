@@ -49,6 +49,8 @@ export interface Task {
   createdByEmail?: string
   createdByName?: string
   isSubTask?: boolean
+  /** Runtime-only leaf verification metadata; never persisted to Firestore. */
+  isLeafInStore?: boolean
   subTasks?: Task[]
 }
 

@@ -16,7 +16,8 @@ const ALL_WEEKLY_DATA_SOURCES: WeeklyWorkDataSource[] = [
     managementHref: "/work-management",
     permissionKey: "strategyWeeklyWork",
     subscribeToData: subscribeStrategyData,
-    subscribeScopedToData: subscribeStrategyScopedData,
+    subscribeScopedToData: (personKeys, callback, options) =>
+      subscribeStrategyScopedData(personKeys, callback, { ...options, resolveLeafStateOnce: true }),
   },
   {
     id: "fa",
@@ -25,7 +26,8 @@ const ALL_WEEKLY_DATA_SOURCES: WeeklyWorkDataSource[] = [
     managementHref: "/fa-work-management",
     permissionKey: "faWeeklyWork",
     subscribeToData: subscribeFaData,
-    subscribeScopedToData: subscribeFaScopedData,
+    subscribeScopedToData: (personKeys, callback, options) =>
+      subscribeFaScopedData(personKeys, callback, { ...options, resolveLeafStateOnce: true }),
   },
   {
     id: "ict",
@@ -34,7 +36,8 @@ const ALL_WEEKLY_DATA_SOURCES: WeeklyWorkDataSource[] = [
     managementHref: "/ict-work-management",
     permissionKey: "ictWeeklyWork",
     subscribeToData: subscribeIctData,
-    subscribeScopedToData: subscribeIctScopedData,
+    subscribeScopedToData: (personKeys, callback, options) =>
+      subscribeIctScopedData(personKeys, callback, { ...options, resolveLeafStateOnce: true }),
   },
 ]
 

@@ -44,6 +44,7 @@ import {
   type HistoryNotificationFilter,
 } from "./history-notification"
 import { buildTaskPersonKeys, buildTaskPersonKeysFromValues, normalizeTaskPersonKey } from "./task-person-keys"
+import { resolveTaskChildPresenceOnce } from "./task-child-presence"
 
 const PROJECTS_COLLECTION = "ict_projects"
 const TASKS_COLLECTION = "ict_tasks"
@@ -257,6 +258,7 @@ function normalizeTask(raw: any): Task {
     sourceSchedule: raw?.sourceSchedule === "strategy" ? "strategy" : raw?.sourceSchedule === "ict" ? "ict" : undefined,
     originalTaskId: toOptionalString(raw?.originalTaskId),
     originalProjectId: toOptionalString(raw?.originalProjectId),
+    ...(typeof raw?.isLeafInStore === "boolean" ? { isLeafInStore: raw.isLeafInStore } : {}),
     subTasks: [],
   }
 }
@@ -739,6 +741,8 @@ export type SubscribeOptions = {
     startDate: string
     endDate: string
   }
+  /** Resolve actual leaf state once per browser session for partial task trees. */
+  resolveLeafStateOnce?: boolean
 }
 
 type QueryDateRange = {
@@ -1055,13 +1059,33 @@ export function subscribeProjectsWithTasksByPersonKeys(
     ictTaskGroups.forEach((tasks) => tasks.forEach((task) => ictTasksById.set(task.id, task)))
     await fetchParentTaskChain(ictTasksById, TASKS_COLLECTION, ICT_SOURCE_PREFIX)
 
-    const ictTasks = Array.from(ictTasksById.values())
-    const strategyTasks = await collectLinkedStrategyTasksWithParents(
+    let ictTasks = Array.from(ictTasksById.values())
+    let strategyTasks = await collectLinkedStrategyTasksWithParents(
       Array.from(strategyTaskGroups.values()).flat(),
       ictPersonNames,
       includeHidden,
       hiddenLinkedStrategyProjectIds,
     )
+    if (options.resolveLeafStateOnce) {
+      const [ictChildPresence, strategyChildPresence] = await Promise.all([
+        resolveTaskChildPresenceOnce(
+          TASKS_COLLECTION,
+          ictTasks.map((task) => stripSourceId(toStringOrEmpty(task.id)) || ""),
+        ),
+        resolveTaskChildPresenceOnce(
+          STRATEGY_TASKS_COLLECTION,
+          strategyTasks.map((task) => stripSourceId(toStringOrEmpty(task.id)) || ""),
+        ),
+      ])
+      ictTasks = ictTasks.map((task) => ({
+        ...task,
+        isLeafInStore: ictChildPresence.get(stripSourceId(toStringOrEmpty(task.id)) || "") === "leaf",
+      }))
+      strategyTasks = strategyTasks.map((task) => ({
+        ...task,
+        isLeafInStore: strategyChildPresence.get(stripSourceId(toStringOrEmpty(task.id)) || "") === "leaf",
+      }))
+    }
     const taskProjectIds = [...ictTasks, ...strategyTasks].map((task) => toStringOrEmpty(task.projectId))
     const ictProjects = await fetchProjectsForTaskIds(taskProjectIds, PROJECTS_COLLECTION, ICT_SOURCE_PREFIX)
     const strategyProjects = await fetchProjectsForTaskIds(taskProjectIds, STRATEGY_PROJECTS_COLLECTION)

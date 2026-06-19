@@ -1,25 +1,14 @@
 #!/usr/bin/env python3
 """
-Backfill `isIct` boolean field for strategy `tasks` (and optionally fa_tasks/ict_tasks).
+Backfill `isIct` boolean field for strategy task documents.
 
-ICT 스케줄 페이지가 strategy task 중 department 에 "ICT" 가 포함된 것만 server-side
-필터로 가져오도록, 모든 strategy task 문서에 isIct boolean 을 백필.
+The app uses `isIct` as a fast lookup marker, but final visibility is based on
+the current ICT rule:
 
-규칙 (lib/firestore-service-ict.ts 의 isIctTask 와 동일):
-  isIct = isinstance(department, str) and "ICT" in department.upper()
+  department contains "ICT" OR assignee matches an ICT person
 
-Usage:
-  # Dry run
-  python scripts/backfill_strategy_task_isict.py \
-    --service-account ./serviceAccountKey.json --dry-run
-
-  # Apply
-  python scripts/backfill_strategy_task_isict.py \
-    --service-account ./serviceAccountKey.json
-
-Notes:
-  - 기본 컬렉션은 strategy `tasks` 만. ICT 페이지 server-side 필터에 필요한 부분.
-  - 이미 isIct 값이 정확하면 건너뜀 → 멱등 (몇 번 돌려도 안전).
+By default this script reads ICT people from
+settings/department_person_settings.ICT and updates strategy `tasks`.
 """
 
 from __future__ import annotations
@@ -34,12 +23,33 @@ from firebase_admin import credentials, firestore
 
 
 DEFAULT_COLLECTIONS = ["tasks"]
+SETTINGS_COLLECTION = "settings"
+DEPARTMENT_PERSON_SETTINGS_DOC = "department_person_settings"
 
 
-def compute_is_ict(department) -> bool:
-    if not isinstance(department, str):
-        return False
-    return "ICT" in department.upper()
+def split_people(person) -> List[str]:
+    return [
+        value.strip().lower()
+        for value in str(person or "").split(",")
+        if value and value.strip()
+    ]
+
+
+def has_matching_person(person, ict_person_names: List[str]) -> bool:
+    tokens = split_people(person)
+    names = [value.strip().lower() for value in ict_person_names if value and value.strip()]
+    return any(
+        token == name or token in name or name in token
+        for token in tokens
+        for name in names
+    )
+
+
+def compute_is_ict(department, person, ict_person_names: List[str]) -> bool:
+    return (
+        isinstance(department, str)
+        and "ICT" in department.upper()
+    ) or has_matching_person(person, ict_person_names)
 
 
 def init_firestore(service_account_path: pathlib.Path):
@@ -48,18 +58,37 @@ def init_firestore(service_account_path: pathlib.Path):
     return firestore.client()
 
 
+def fetch_ict_person_names(db) -> List[str]:
+    snap = (
+        db.collection(SETTINGS_COLLECTION)
+        .document(DEPARTMENT_PERSON_SETTINGS_DOC)
+        .get()
+    )
+    data = snap.to_dict() or {}
+    raw_people = data.get("ICT")
+    if not isinstance(raw_people, list):
+        return []
+    return [value.strip() for value in raw_people if isinstance(value, str) and value.strip()]
+
+
 def chunks(values: List, size: int) -> Iterable[List]:
     for index in range(0, len(values), size):
         yield values[index : index + size]
 
 
-def backfill_collection(db, collection_name: str, dry_run: bool, batch_size: int) -> int:
+def backfill_collection(
+    db,
+    collection_name: str,
+    dry_run: bool,
+    batch_size: int,
+    ict_person_names: List[str],
+) -> int:
     docs = list(db.collection(collection_name).stream())
     pending = []
     set_true = 0
     for doc_snap in docs:
         data = doc_snap.to_dict() or {}
-        expected = compute_is_ict(data.get("department"))
+        expected = compute_is_ict(data.get("department"), data.get("person"), ict_person_names)
         current = data.get("isIct")
         if isinstance(current, bool) and current == expected:
             continue
@@ -69,10 +98,10 @@ def backfill_collection(db, collection_name: str, dry_run: bool, batch_size: int
 
     print(
         f"{collection_name}: {len(pending)} document(s) need isIct backfill "
-        f"out of {len(docs)} total  (will set true={set_true}, false={len(pending) - set_true})"
+        f"out of {len(docs)} total (will set true={set_true}, false={len(pending) - set_true})"
     )
     for ref, expected in pending[:5]:
-        print(f"  sample: {ref.path}  →  isIct={expected}")
+        print(f"  sample: {ref.path} -> isIct={expected}")
 
     if dry_run or not pending:
         return len(pending)
@@ -87,9 +116,7 @@ def backfill_collection(db, collection_name: str, dry_run: bool, batch_size: int
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Backfill isIct boolean for strategy task docs"
-    )
+    parser = argparse.ArgumentParser(description="Backfill isIct boolean for strategy task docs")
     parser.add_argument(
         "--service-account",
         required=True,
@@ -100,6 +127,12 @@ def main() -> int:
         nargs="*",
         default=DEFAULT_COLLECTIONS,
         help=f"Collections to backfill (default: {' '.join(DEFAULT_COLLECTIONS)})",
+    )
+    parser.add_argument(
+        "--ict-person",
+        action="append",
+        default=[],
+        help="ICT person name override. Can be passed multiple times. Defaults to Firestore settings.",
     )
     parser.add_argument(
         "--batch-size",
@@ -123,10 +156,19 @@ def main() -> int:
         return 1
 
     db = init_firestore(service_account)
+    ict_person_names = [value.strip() for value in args.ict_person if value.strip()]
+    if not ict_person_names:
+        ict_person_names = fetch_ict_person_names(db)
+    print(f"Loaded {len(ict_person_names)} ICT person name(s)")
+
     total = 0
     for collection_name in args.collections:
         total += backfill_collection(
-            db, collection_name, args.dry_run, args.batch_size
+            db,
+            collection_name,
+            args.dry_run,
+            args.batch_size,
+            ict_person_names,
         )
 
     action = "would update" if args.dry_run else "updated"

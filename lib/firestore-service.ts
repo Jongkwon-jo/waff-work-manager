@@ -40,6 +40,7 @@ import {
   type HistoryNotificationFilter,
 } from "./history-notification"
 import { buildTaskPersonKeys, buildTaskPersonKeysFromValues } from "./task-person-keys"
+import { resolveTaskChildPresenceOnce } from "./task-child-presence"
 
 const PROJECTS_COLLECTION = "projects"
 const TASKS_COLLECTION = "tasks"
@@ -548,6 +549,7 @@ function normalizeTask(raw: any): Task {
     isSubTask: Boolean(raw?.isSubTask ?? raw?.is_sub_task ?? parentId),
     isHidden: toBooleanOr(raw?.isHidden ?? raw?.is_hidden, false),
     displayOrder: toNumberOr(raw?.displayOrder, Number.MAX_SAFE_INTEGER),
+    ...(typeof raw?.isLeafInStore === "boolean" ? { isLeafInStore: raw.isLeafInStore } : {}),
     subTasks: [],
   }
 }
@@ -718,6 +720,8 @@ export type SubscribeOptions = {
     startDate: string
     endDate: string
   }
+  /** Resolve actual leaf state once per browser session for partial task trees. */
+  resolveLeafStateOnce?: boolean
 }
 
 type QueryDateRange = {
@@ -889,7 +893,17 @@ export function subscribeProjectsWithTasksByPersonKeys(
     })
 
     await fetchParentTaskChain(tasksById)
-    const allTasks = Array.from(tasksById.values())
+    let allTasks = Array.from(tasksById.values())
+    if (options.resolveLeafStateOnce) {
+      const childPresence = await resolveTaskChildPresenceOnce(
+        TASKS_COLLECTION,
+        allTasks.map((task) => toStringOrEmpty(task.id)),
+      )
+      allTasks = allTasks.map((task) => ({
+        ...task,
+        isLeafInStore: childPresence.get(toStringOrEmpty(task.id)) === "leaf",
+      }))
+    }
     const projectsData = await fetchProjectsForTasks(allTasks)
     if (!disposed) callback(buildProjectTree(projectsData, allTasks))
   }

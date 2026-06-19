@@ -134,7 +134,7 @@ function getWeeklyStatusBarClass(status: Task["status"]) {
 function flattenLeafTasksWithAncestors(tasks: Task[], ancestors: Task[] = []): Array<{ task: Task; ancestors: Task[] }> {
   return tasks.flatMap((task) => {
     const children = task.subTasks || []
-    if (children.length === 0) return [{ task, ancestors }]
+    if (children.length === 0) return task.isLeafInStore === true ? [{ task, ancestors }] : []
     return flattenLeafTasksWithAncestors(children, [...ancestors, task])
   })
 }
