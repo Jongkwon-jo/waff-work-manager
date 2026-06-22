@@ -636,15 +636,25 @@ export default function MyPage() {
     void savePersonal(next.map((task, i) => ({ ...task, order: i, updatedAt: Date.now() })))
   }
 
+  const resetPersonalEdit = () => {
+    setEditingId(null)
+    setEditingTitle("")
+    setEditingMemo("")
+  }
+
+  const startPersonalEdit = (task: MyPagePersonalTask) => {
+    setEditingId(task.id)
+    setEditingTitle(task.title)
+    setEditingMemo(task.memo || "")
+  }
+
   const submitEdit = () => {
     if (!editingId || !editingTitle.trim()) return
     updatePersonal(editingId, {
       title: editingTitle.trim(),
       memo: editingMemo.trim() || undefined,
     })
-    setEditingId(null)
-    setEditingTitle("")
-    setEditingMemo("")
+    resetPersonalEdit()
   }
 
   const logout = async () => {
@@ -896,6 +906,7 @@ export default function MyPage() {
   const renderPersonalTaskCard = (task: MyPagePersonalTask) => {
 	    const hasMemo = Boolean(task.memo)
 	    const isMemoExpanded = expandedPersonalMemoIds.includes(task.id)
+	    const isEditing = editingId === task.id
 
     return (
     <div
@@ -973,8 +984,19 @@ export default function MyPage() {
         >
           <CheckCircle2 className="h-4 w-4" />
         </button>
-	        <p className={cn("flex-1 font-semibold", task.checked && "line-through")}>{task.title}</p>
-	        {hasMemo ? (
+	        {isEditing ? (
+          <Input
+            value={editingTitle}
+            onChange={(e) => setEditingTitle(e.target.value)}
+            placeholder="업무 제목"
+            aria-label="개인 업무 제목 수정"
+            className="h-8 min-w-48 flex-1 bg-white"
+            autoFocus
+          />
+        ) : (
+          <p className={cn("flex-1 font-semibold", task.checked && "line-through")}>{task.title}</p>
+        )}
+	        {!isEditing && hasMemo ? (
           <button
             type="button"
             onClick={() => togglePersonalMemo(task.id)}
@@ -992,7 +1014,16 @@ export default function MyPage() {
           </button>
         ) : null}
       </div>
-      {hasMemo && isMemoExpanded ? (
+      {isEditing ? (
+        <Textarea
+          value={editingMemo}
+          onChange={(e) => setEditingMemo(e.target.value)}
+          placeholder="메모 (선택)"
+          aria-label="개인 업무 메모 수정"
+          rows={3}
+          className="mt-2 resize-y bg-white"
+        />
+      ) : hasMemo && isMemoExpanded ? (
         <div className="mt-2 whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
           {task.memo}
         </div>
@@ -1006,32 +1037,22 @@ export default function MyPage() {
         <button type="button" onClick={() => updatePersonal(task.id, { important: !task.important })} className={cn("inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs", task.important ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-500")}>
           <Star className={cn("h-3.5 w-3.5", task.important && "fill-current")} />중요
         </button>
-	        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setEditingId(task.id)
-            setEditingTitle(task.title)
-            setEditingMemo(task.memo || "")
-          }}
-        >
-	          <Pencil className="h-3.5 w-3.5" />수정
-	        </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => removePersonal(task.id)}>
-          <Trash2 className="h-3.5 w-3.5" />삭제
-        </Button>
+        {isEditing ? (
+          <>
+            <Button type="button" variant="outline" size="sm" onClick={resetPersonalEdit}>취소</Button>
+            <Button type="button" size="sm" onClick={submitEdit} disabled={!editingTitle.trim()}>저장</Button>
+          </>
+        ) : (
+          <>
+	          <Button type="button" variant="outline" size="sm" onClick={() => startPersonalEdit(task)}>
+	            <Pencil className="h-3.5 w-3.5" />수정
+	          </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => removePersonal(task.id)}>
+              <Trash2 className="h-3.5 w-3.5" />삭제
+            </Button>
+          </>
+        )}
       </div>
-      {editingId === task.id ? (
-	        <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
-	          <Input value={editingTitle} onChange={(e) => setEditingTitle(e.target.value)} />
-	          <Textarea value={editingMemo} onChange={(e) => setEditingMemo(e.target.value)} rows={3} />
-	          <div className="flex justify-end gap-2">
-	            <Button type="button" variant="outline" size="sm" onClick={() => setEditingId(null)}>취소</Button>
-	            <Button type="button" size="sm" onClick={submitEdit}>저장</Button>
-	          </div>
-        </div>
-      ) : null}
     </div>
     )
   }
