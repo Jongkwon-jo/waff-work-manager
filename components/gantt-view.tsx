@@ -37,7 +37,13 @@ import {
 import { cn } from "@/lib/utils"
 import { calculateManDaysBetweenDates } from "@/lib/man-days"
 import { ko } from "date-fns/locale"
-import type { GlobalSchedule } from "@/lib/firestore-service"
+import {
+  DEFAULT_DEPARTMENT_PERSON_SETTINGS,
+  resolveDepartmentPersonGroup,
+  subscribeDepartmentPersonSettings,
+  type DepartmentPersonSettings,
+  type GlobalSchedule,
+} from "@/lib/firestore-service"
 import { toast } from "sonner"
 
 interface GanttViewProps {
@@ -483,6 +489,9 @@ export function GanttView({
   const [dragOverProjectHeaderId, setDragOverProjectHeaderId] = useState<string | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set())
   const [removedOwnerOptions, setRemovedOwnerOptions] = useState<Set<string>>(new Set())
+  const [departmentPersonSettings, setDepartmentPersonSettings] = useState<DepartmentPersonSettings>(
+    DEFAULT_DEPARTMENT_PERSON_SETTINGS,
+  )
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window === "undefined" ? 1280 : window.innerWidth,
   )
@@ -499,6 +508,11 @@ export function GanttView({
   const effectiveViewportWidth = layoutFrozenViewportWidth ?? viewportWidth
   const isCompactViewport = effectiveViewportWidth < COMPACT_VIEWPORT_BREAKPOINT
   const isMobileViewport = effectiveViewportWidth < MOBILE_VIEWPORT_BREAKPOINT
+
+  useEffect(() => {
+    const unsubscribe = subscribeDepartmentPersonSettings(setDepartmentPersonSettings)
+    return () => unsubscribe()
+  }, [])
 
   useEffect(() => {
     if (typeof persistedLeftPanelWidth !== "number" || !Number.isFinite(persistedLeftPanelWidth)) {
@@ -671,7 +685,51 @@ export function GanttView({
     [ownerOptions, removedOwnerOptions],
   )
 
+  const officialOwnerOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          Object.values(departmentPersonSettings)
+            .flat()
+            .map((owner) => owner.trim())
+            .filter(Boolean),
+        ),
+      ),
+    [departmentPersonSettings],
+  )
+
+  const officialOwnerSet = useMemo(
+    () => new Set(officialOwnerOptions.map(normalizeOwnerName).filter(Boolean)),
+    [officialOwnerOptions],
+  )
+
+  const legacyOwnerOptions = useMemo(
+    () => visibleOwnerOptions.filter((owner) => !officialOwnerSet.has(normalizeOwnerName(owner))),
+    [officialOwnerSet, visibleOwnerOptions],
+  )
+
+  const getOwnerOptionsForTask = useCallback(
+    (task: Task) => {
+      const departments = parseListValue(task.department || "")
+      const targetDepartments = departments.length > 0 ? departments : [defaultTaskDepartment]
+      const departmentGroups = Array.from(
+        new Set(targetDepartments.map((department) => resolveDepartmentPersonGroup(department))),
+      )
+      const departmentOwners = departmentGroups.flatMap((group) => departmentPersonSettings[group] || [])
+
+      return Array.from(
+        new Set(
+          [...departmentOwners, ...legacyOwnerOptions, ...parseOwners(task.person || "")]
+            .map((owner) => owner.trim())
+            .filter(Boolean),
+        ),
+      )
+    },
+    [defaultTaskDepartment, departmentPersonSettings, legacyOwnerOptions],
+  )
+
   const handleDeleteOwnerOption = (owner: string) => {
+    if (officialOwnerSet.has(normalizeOwnerName(owner))) return
     if (removedOwnerOptions.has(owner)) return
 
     const next = new Set(removedOwnerOptions)
@@ -2721,7 +2779,7 @@ export function GanttView({
                         : depthRowBgClass
                       const timelineCellBgClass = isHighlightedTask ? "bg-yellow-50/95" : depthRowBgClass
 
-                      const ownerValues = visibleOwnerOptions
+                      const ownerValues = getOwnerOptionsForTask(task)
                       const currentDepartments = parseDepartments(task.department || "")
                       const departmentValues = Array.from(new Set([...departmentOptions, ...currentDepartments])).filter(Boolean)
 
@@ -3120,6 +3178,7 @@ export function GanttView({
                                         <OwnerMultiSelect
                                           value={task.person || ""}
                                           options={ownerValues}
+                                          deletableOptions={legacyOwnerOptions}
                                           inactiveOptions={inactiveOwnerOptions}
                                           onDeleteOption={handleDeleteOwnerOption}
                                           onChange={(value) => updateTaskInline(task, { person: value })}
@@ -4203,12 +4262,14 @@ function DepartmentMultiSelect({
 function OwnerMultiSelect({
   value,
   options,
+  deletableOptions = [],
   inactiveOptions = [],
   onDeleteOption,
   onChange,
 }: {
   value: string
   options: string[]
+  deletableOptions?: string[]
   inactiveOptions?: string[]
   onDeleteOption: (owner: string) => void
   onChange: (value: string) => void
@@ -4222,6 +4283,10 @@ function OwnerMultiSelect({
   const selectableOptions = useMemo(
     () => options.filter((owner) => !inactiveOwnerSet.has(normalizeOwnerName(owner))),
     [inactiveOwnerSet, options],
+  )
+  const deletableOwnerSet = useMemo(
+    () => new Set(deletableOptions.map(normalizeOwnerName).filter(Boolean)),
+    [deletableOptions],
   )
   const allOptions = useMemo(
     () => Array.from(new Set([...selectableOptions, ...selected])).filter(Boolean),
@@ -4313,6 +4378,7 @@ function OwnerMultiSelect({
           {allOptions.map((owner) => {
             const checked = selected.includes(owner)
             const inactive = inactiveOwnerSet.has(normalizeOwnerName(owner))
+            const deletable = deletableOwnerSet.has(normalizeOwnerName(owner))
             return (
               <div key={owner} className="flex items-center gap-1">
                 <button
@@ -4324,7 +4390,7 @@ function OwnerMultiSelect({
                   <span className="truncate">{owner}</span>
                   {inactive && <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">퇴사</span>}
                 </button>
-                {!inactive && (
+                {!inactive && deletable && (
                   <button
                     type="button"
                     onClick={() => {
