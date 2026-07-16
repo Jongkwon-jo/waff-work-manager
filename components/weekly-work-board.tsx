@@ -2,12 +2,13 @@
 
 import Image from "next/image"
 import Link from "next/link"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { signOut } from "firebase/auth"
 import { addDays, differenceInCalendarDays, endOfWeek, format, isWithinInterval, startOfWeek } from "date-fns"
 import { ko } from "date-fns/locale"
 import { auth } from "@/lib/firebase"
 import { useAuth } from "@/components/auth/auth-provider"
+import { EditTaskDialog } from "@/components/edit-task-dialog"
 import {
   DEFAULT_DEPARTMENT_PERSON_SETTINGS,
   DEFAULT_DEPARTMENT_ORG_SETTINGS,
@@ -35,11 +36,13 @@ import {
   getTeamScopePersonsForAliases,
   isActiveDepartmentOrgPersonName,
 } from "@/lib/department-org"
+import { calculateManDaysBetweenDates } from "@/lib/man-days"
 import { cn, keepIfShallowEqual } from "@/lib/utils"
 import { toast } from "sonner"
 import { CalendarDays, ChevronLeft, ChevronRight, Home, LogOut, Users } from "lucide-react"
 
 type WeeklyTaskItem = {
+  sourceId: string
   projectId: string
   projectName: string
   subProjectName: string
@@ -52,6 +55,32 @@ type WeeklyTaskItem = {
   person: string
   task: Task
   startTime: number
+}
+
+type WeeklyHistorySource = "work-management" | "fa-work-management" | "ict-work-management"
+
+type WeeklyTaskHistoryEntry = {
+  entityType: "task"
+  action: "update"
+  actorEmail?: string
+  actorName?: string
+  entityId: string
+  projectId?: string
+  before?: Record<string, unknown>
+  after?: Record<string, unknown>
+  source: WeeklyHistorySource
+}
+
+type WeeklyTaskUpdates = Omit<Partial<Task>, "parentId"> & { parentId?: string | null }
+
+type WeeklyTaskDragType = "move" | "resize-left" | "resize-right"
+
+type WeeklyTaskDragInfo = {
+  taskKey: string
+  item: WeeklyTaskItem
+  type: WeeklyTaskDragType
+  initialX: number
+  dayWidth: number
 }
 
 type WeeklyBoardTone = {
@@ -92,6 +121,14 @@ export type WeeklyWorkDataSource = {
   departmentGroup: DepartmentPersonGroup
   managementHref: string
   permissionKey?: keyof Pick<UserPagePermissions, "strategyWeeklyWork" | "faWeeklyWork" | "ictWeeklyWork">
+  editPermissionKey?: keyof Pick<
+    UserPagePermissions,
+    "strategyWorkManagementEdit" | "faWorkManagementEdit" | "ictWorkManagementEdit"
+  >
+  defaultTaskDepartment: string
+  historySource: WeeklyHistorySource
+  updateTask: (taskId: string, updates: WeeklyTaskUpdates) => Promise<void>
+  addHistoryEntry: (entry: WeeklyTaskHistoryEntry) => Promise<string>
   subscribeToData: (
     callback: (projects: Project[]) => void,
     options?: { dateRange?: { startDate: string; endDate: string } },
@@ -164,6 +201,54 @@ function toTaskDateKey(date: Date) {
   return format(date, "MM월 dd일", { locale: ko })
 }
 
+function getWeeklyTaskKey(item: Pick<WeeklyTaskItem, "sourceId" | "task">) {
+  return `${item.sourceId}:${item.task.id}`
+}
+
+function compactRecord<T extends Record<string, unknown>>(record: T): T {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as T
+}
+
+function serializeTaskData(task: Task): Record<string, unknown> {
+  return compactRecord({
+    projectId: task.projectId,
+    parentId: task.parentId,
+    task: task.task,
+    memo: task.memo,
+    category: task.category,
+    department: task.department,
+    person: task.person,
+    personKeys: task.personKeys,
+    startDate: task.startDate,
+    endDate: task.endDate,
+    status: task.status,
+    manDays: task.manDays,
+    createdByEmail: task.createdByEmail,
+    createdByName: task.createdByName,
+    isSubTask: task.isSubTask,
+    isHidden: task.isHidden,
+    depth: task.depth,
+    displayOrder: task.displayOrder,
+  })
+}
+
+function replaceTaskInTree(tasks: Task[], taskId: string, updatedTask: Task): Task[] {
+  return tasks.map((task) => {
+    if (task.id === taskId) {
+      return {
+        ...task,
+        ...updatedTask,
+        subTasks: task.subTasks,
+      }
+    }
+    if (!task.subTasks?.length) return task
+    return {
+      ...task,
+      subTasks: replaceTaskInTree(task.subTasks, taskId, updatedTask),
+    }
+  })
+}
+
 function getPersonalTaskCreatedDate(task: MyPagePersonalTask) {
   const timestamp = typeof task.createdAt === "number" ? task.createdAt : undefined
   if (!timestamp || !Number.isFinite(timestamp)) return undefined
@@ -204,12 +289,41 @@ function getTaskBarSpan(task: Task, weekStart: Date, weekEnd: Date) {
   const clampedStart = start < weekStart ? weekStart : start
   const clampedEnd = end > weekEnd ? weekEnd : end
 
-  const startOffset = Math.max(0, differenceInCalendarDays(clampedStart, weekStart))
-  const endOffset = Math.max(startOffset, differenceInCalendarDays(clampedEnd, weekStart))
+  const startOffset = Math.min(6, Math.max(0, differenceInCalendarDays(clampedStart, weekStart)))
+  const endOffset = Math.min(6, Math.max(startOffset, differenceInCalendarDays(clampedEnd, weekStart)))
 
   return {
     startOffset,
     span: endOffset - startOffset + 1,
+    isStartVisible: start >= weekStart && start <= weekEnd,
+    isEndVisible: end >= weekStart && end <= weekEnd,
+  }
+}
+
+function buildTaskWithDraggedDates(task: Task, type: WeeklyTaskDragType, daysDelta: number): Task {
+  const start = parseTaskDate(task.startDate)
+  const end = parseTaskDate(task.endDate)
+  if (!start || !end || daysDelta === 0) return task
+
+  let nextStart = start
+  let nextEnd = end
+
+  if (type === "move") {
+    nextStart = addDays(start, daysDelta)
+    nextEnd = addDays(end, daysDelta)
+  } else if (type === "resize-left") {
+    const candidate = addDays(start, daysDelta)
+    nextStart = candidate > end ? end : candidate
+  } else {
+    const candidate = addDays(end, daysDelta)
+    nextEnd = candidate < start ? start : candidate
+  }
+
+  return {
+    ...task,
+    startDate: toTaskDateKey(nextStart),
+    endDate: toTaskDateKey(nextEnd),
+    manDays: calculateManDaysBetweenDates(nextStart, nextEnd, false),
   }
 }
 
@@ -283,9 +397,12 @@ export function WeeklyWorkBoard({
   const [profilePersonalTasks, setProfilePersonalTasks] = useState<MyPagePersonalTask[]>([])
   const [isProfileLoaded, setIsProfileLoaded] = useState(false)
   const [selectedTaskItem, setSelectedTaskItem] = useState<WeeklyTaskItem | null>(null)
+  const [editingTaskItem, setEditingTaskItem] = useState<WeeklyTaskItem | null>(null)
   const [selectedProjectMemo, setSelectedProjectMemo] = useState<ProjectMemoDialogPayload | null>(null)
   const [currentWeekAnchor, setCurrentWeekAnchor] = useState(() => new Date())
   const [globalSchedules, setGlobalSchedules] = useState<GlobalSchedule[]>([])
+  const [taskDragInfo, setTaskDragInfo] = useState<WeeklyTaskDragInfo | null>(null)
+  const [taskDragDaysDelta, setTaskDragDaysDelta] = useState(0)
   const [departmentPersonSettings, setDepartmentPersonSettings] = useState<DepartmentPersonSettings>(
     DEFAULT_DEPARTMENT_PERSON_SETTINGS,
   )
@@ -294,6 +411,22 @@ export function WeeklyWorkBoard({
   )
   const hasAppliedProfileDepartmentRef = useRef(false)
   const hasAppliedProfileDefaultRef = useRef(false)
+  const savingTaskKeysRef = useRef(new Set<string>())
+  const suppressedTaskClickKeyRef = useRef<string | null>(null)
+
+  const dataSourceById = useMemo(
+    () => new Map(dataSources.map((source) => [source.id, source])),
+    [dataSources],
+  )
+
+  const canEditTaskItem = useCallback(
+    (item: WeeklyTaskItem) => {
+      const source = dataSourceById.get(item.sourceId)
+      if (!source?.editPermissionKey) return false
+      return isAdmin || pagePermissions[source.editPermissionKey]
+    },
+    [dataSourceById, isAdmin, pagePermissions],
+  )
 
   useEffect(() => {
     const unsubscribe = subscribeDepartmentPersonSettings(setDepartmentPersonSettings)
@@ -569,6 +702,7 @@ export function WeeklyWorkBoard({
           .map(({ task, createdDate }) => {
             const dateKey = toTaskDateKey(createdDate)
             return {
+              sourceId: "personal",
               projectId: `personal-${task.id}`,
               projectName: "개인 업무",
               subProjectName: "",
@@ -619,6 +753,7 @@ export function WeeklyWorkBoard({
                   .map((person) => {
                     const orgTeam = getOrgTeamForPerson(person, source.departmentGroup, departmentOrgSettings)
                     return {
+                      sourceId: source.id,
                       projectId: `${source.id}-${project.id}`,
                       projectName: project.name,
                       subProjectName: ancestors[0]?.task || "",
@@ -675,6 +810,169 @@ export function WeeklyWorkBoard({
     () => (selectedPerson === "all" ? weeklyTasks : weeklyTasks.filter((item) => item.person === selectedPerson)),
     [selectedPerson, weeklyTasks],
   )
+
+  const handleTaskUpdate = useCallback(
+    async (item: WeeklyTaskItem, updatedTask: Task) => {
+      const source = dataSourceById.get(item.sourceId)
+      if (!source || !canEditTaskItem(item)) {
+        toast.error("이 업무를 수정할 권한이 없습니다.")
+        return
+      }
+
+      const taskKey = getWeeklyTaskKey(item)
+      if (savingTaskKeysRef.current.has(taskKey)) return
+      savingTaskKeysRef.current.add(taskKey)
+
+      const beforeTask =
+        weeklyTasks.find(
+          (candidate) =>
+            candidate.sourceId === item.sourceId &&
+            candidate.task.id === item.task.id,
+        )?.task || item.task
+
+      try {
+        const { id } = updatedTask
+        const rawUpdates = { ...updatedTask } as Record<string, unknown>
+        delete rawUpdates.id
+        delete rawUpdates.subTasks
+        const updates = compactRecord(rawUpdates) as WeeklyTaskUpdates
+        await source.updateTask(id, updates)
+
+        setProjectsBySource((prev) => {
+          const sourceProjects = prev[item.sourceId]
+          if (!sourceProjects) return prev
+          return {
+            ...prev,
+            [item.sourceId]: sourceProjects.map((project) => ({
+              ...project,
+              tasks: replaceTaskInTree(project.tasks, id, updatedTask),
+            })),
+          }
+        })
+
+        try {
+          await source.addHistoryEntry({
+            entityType: "task",
+            action: "update",
+            actorEmail: user?.email || undefined,
+            actorName: profileDefaultPerson || undefined,
+            entityId: id,
+            projectId: updatedTask.projectId,
+            before: serializeTaskData(beforeTask),
+            after: serializeTaskData(updatedTask),
+            source: source.historySource,
+          })
+        } catch (historyError) {
+          console.error("Weekly task history write failed:", historyError)
+        }
+
+        toast.success("업무가 수정되었습니다.")
+      } catch (error) {
+        console.error("Weekly task update failed:", error)
+        toast.error("업무 수정 실패")
+      } finally {
+        savingTaskKeysRef.current.delete(taskKey)
+      }
+    },
+    [canEditTaskItem, dataSourceById, profileDefaultPerson, user?.email, weeklyTasks],
+  )
+
+  const handleTaskClick = useCallback(
+    (item: WeeklyTaskItem) => {
+      const taskKey = getWeeklyTaskKey(item)
+      if (suppressedTaskClickKeyRef.current === taskKey) {
+        suppressedTaskClickKeyRef.current = null
+        return
+      }
+
+      if (canEditTaskItem(item)) {
+        setSelectedTaskItem(null)
+        setEditingTaskItem(item)
+        return
+      }
+
+      setEditingTaskItem(null)
+      setSelectedTaskItem(item)
+    },
+    [canEditTaskItem],
+  )
+
+  const handleTaskDragStart = useCallback(
+    (
+      event: React.MouseEvent<HTMLElement>,
+      item: WeeklyTaskItem,
+      type: WeeklyTaskDragType,
+    ) => {
+      if (!canEditTaskItem(item)) return
+
+      const timeline = event.currentTarget.closest<HTMLElement>("[data-weekly-timeline]")
+      const timelineWidth = timeline?.getBoundingClientRect().width || 0
+      if (timelineWidth <= 0) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      setTaskDragDaysDelta(0)
+      setTaskDragInfo({
+        taskKey: getWeeklyTaskKey(item),
+        item,
+        type,
+        initialX: event.clientX,
+        dayWidth: timelineWidth / 7,
+      })
+    },
+    [canEditTaskItem],
+  )
+
+  useEffect(() => {
+    if (!taskDragInfo) return
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const deltaX = event.clientX - taskDragInfo.initialX
+      setTaskDragDaysDelta(Math.round(deltaX / taskDragInfo.dayWidth))
+    }
+
+    const cleanup = () => {
+      window.removeEventListener("mousemove", handleMouseMove)
+      window.removeEventListener("mouseup", handleMouseUp)
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
+    }
+
+    const handleMouseUp = (event: MouseEvent) => {
+      const deltaX = event.clientX - taskDragInfo.initialX
+      const daysDelta = Math.round(deltaX / taskDragInfo.dayWidth)
+      const didDrag = Math.abs(deltaX) >= 4
+
+      if (didDrag) {
+        suppressedTaskClickKeyRef.current = taskDragInfo.taskKey
+        window.setTimeout(() => {
+          if (suppressedTaskClickKeyRef.current === taskDragInfo.taskKey) {
+            suppressedTaskClickKeyRef.current = null
+          }
+        }, 0)
+
+        if (daysDelta !== 0) {
+          const updatedTask = buildTaskWithDraggedDates(
+            taskDragInfo.item.task,
+            taskDragInfo.type,
+            daysDelta,
+          )
+          void handleTaskUpdate(taskDragInfo.item, updatedTask)
+        }
+      }
+
+      setTaskDragInfo(null)
+      setTaskDragDaysDelta(0)
+      cleanup()
+    }
+
+    document.body.style.cursor = taskDragInfo.type === "move" ? "grabbing" : "ew-resize"
+    document.body.style.userSelect = "none"
+    window.addEventListener("mousemove", handleMouseMove)
+    window.addEventListener("mouseup", handleMouseUp)
+
+    return cleanup
+  }, [handleTaskUpdate, taskDragInfo])
 
   const visiblePersons = useMemo(
     () =>
@@ -1097,7 +1395,7 @@ export function WeeklyWorkBoard({
                                         key={`mobile-task-${project.projectId}-${item.task.id}`}
                                         type="button"
                                         className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-left"
-                                        onClick={() => setSelectedTaskItem(item)}
+                                        onClick={() => handleTaskClick(item)}
                                       >
                                         <div className="mb-1 flex items-center gap-1.5">
                                           <StatusBadge status={item.task.status} />
@@ -1326,7 +1624,11 @@ export function WeeklyWorkBoard({
                               </div>
                             </div>
 
-                            <div className="relative col-span-7 my-1 grid grid-cols-7 overflow-hidden rounded-lg border border-slate-200/70" style={{ minHeight: `${rowHeight}px` }}>
+                            <div
+                              data-weekly-timeline
+                              className="relative col-span-7 my-1 grid grid-cols-7 overflow-hidden rounded-lg border border-slate-200/70"
+                              style={{ minHeight: `${rowHeight}px` }}
+                            >
                               {weekDays.map((day) => (
                                 <div
                                   key={`${personGroup.person}-${project.projectId}-${day.date.toISOString()}`}
@@ -1345,7 +1647,13 @@ export function WeeklyWorkBoard({
                               ))}
 
                               {project.items.map((item, index) => {
-                                const bar = getTaskBarSpan(item.task, weekStart, weekEnd)
+                                const taskKey = getWeeklyTaskKey(item)
+                                const isDragging = taskDragInfo?.taskKey === taskKey
+                                const displayTask = taskDragInfo?.taskKey === taskKey
+                                  ? buildTaskWithDraggedDates(item.task, taskDragInfo.type, taskDragDaysDelta)
+                                  : item.task
+                                const bar = getTaskBarSpan(displayTask, weekStart, weekEnd)
+                                const canEditItem = canEditTaskItem(item)
                                 return (
                                   <div
                                     key={`${personGroup.person}-${project.projectId}-${item.task.id}`}
@@ -1361,11 +1669,36 @@ export function WeeklyWorkBoard({
                                     >
                                       <button
                                         type="button"
-                                        className={`pointer-events-auto h-5 w-full rounded-md px-2 text-left text-[10px] font-semibold shadow-sm ${getWeeklyStatusBarClass(item.task.status)}`}
-                                        onClick={() => setSelectedTaskItem(item)}
-                                        title={`${item.task.task} (${item.task.startDate} ~ ${item.task.endDate})`}
+                                        data-weekly-task-key={taskKey}
+                                        className={cn(
+                                          "pointer-events-auto relative h-5 w-full select-none rounded-md px-2 text-left text-[10px] font-semibold shadow-sm transition-[box-shadow,opacity]",
+                                          getWeeklyStatusBarClass(item.task.status),
+                                          canEditItem ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+                                          isDragging && "z-10 opacity-100 ring-2 ring-white/80",
+                                        )}
+                                        onMouseDown={
+                                          canEditItem
+                                            ? (event) => handleTaskDragStart(event, item, "move")
+                                            : undefined
+                                        }
+                                        onClick={() => handleTaskClick(item)}
+                                        title={`${displayTask.task} (${displayTask.startDate} ~ ${displayTask.endDate})`}
                                       >
-                                        <span className="block truncate">{item.task.task}</span>
+                                        {canEditItem && bar.isStartVisible && (
+                                          <span
+                                            className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-w-resize rounded-l-md hover:bg-black/15"
+                                            onMouseDown={(event) => handleTaskDragStart(event, item, "resize-left")}
+                                            aria-hidden="true"
+                                          />
+                                        )}
+                                        <span className="pointer-events-none block truncate">{item.task.task}</span>
+                                        {canEditItem && bar.isEndVisible && (
+                                          <span
+                                            className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-e-resize rounded-r-md hover:bg-black/15"
+                                            onMouseDown={(event) => handleTaskDragStart(event, item, "resize-right")}
+                                            aria-hidden="true"
+                                          />
+                                        )}
                                       </button>
                                     </div>
                                   </div>
@@ -1415,6 +1748,24 @@ export function WeeklyWorkBoard({
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {editingTaskItem ? (
+        <EditTaskDialog
+          task={editingTaskItem.task}
+          open
+          defaultDepartment={
+            dataSourceById.get(editingTaskItem.sourceId)?.defaultTaskDepartment ||
+            editingTaskItem.task.department ||
+            "전략"
+          }
+          onOpenChange={(open) => {
+            if (!open) setEditingTaskItem(null)
+          }}
+          onEditTask={(updatedTask) => {
+            void handleTaskUpdate(editingTaskItem, updatedTask)
+          }}
+        />
+      ) : null}
 
       <Dialog open={!!selectedTaskItem} onOpenChange={(open) => !open && setSelectedTaskItem(null)}>
         <DialogContent className="sm:max-w-[560px]">

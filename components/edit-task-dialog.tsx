@@ -33,6 +33,7 @@ interface EditTaskDialogProps {
   task: Task
   onEditTask: (task: Task) => void
   defaultDepartment?: string
+  open?: boolean
   openOnDoubleClick?: boolean
   trigger?: React.ReactNode
   onOpenChange?: (open: boolean) => void
@@ -56,12 +57,6 @@ function parseKoreanDate(value: string): Date | undefined {
 
   const currentYear = new Date().getFullYear()
 
-  // MM월 dd일, MM/DD, MM-DD
-  const md = text.match(/(\d{1,2})\D+(\d{1,2})/)
-  if (md) {
-    return new Date(currentYear, Number.parseInt(md[1], 10) - 1, Number.parseInt(md[2], 10))
-  }
-
   // YYYY.MM.DD, YYYY-MM-DD, YYYY/MM/DD
   const ymd = text.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/)
   if (ymd) {
@@ -72,6 +67,12 @@ function parseKoreanDate(value: string): Date | undefined {
     )
   }
 
+  // MM월 dd일, MM/DD, MM-DD
+  const md = text.match(/(\d{1,2})\D+(\d{1,2})/)
+  if (md) {
+    return new Date(currentYear, Number.parseInt(md[1], 10) - 1, Number.parseInt(md[2], 10))
+  }
+
   return undefined
 }
 
@@ -79,6 +80,7 @@ export function EditTaskDialog({
   task,
   onEditTask,
   defaultDepartment = "전략",
+  open: controlledOpen,
   openOnDoubleClick = false,
   trigger,
   onOpenChange,
@@ -101,7 +103,8 @@ export function EditTaskDialog({
   const joinListValue = (values: string[]): string =>
     Array.from(new Set(values.map((v) => v.trim()).filter(Boolean))).join(", ")
 
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen ?? internalOpen
   const [taskName, setTaskName] = useState(task.task)
   const [category, setCategory] = useState<TaskCategory>(task.category)
   const [memo, setMemo] = useState(task.memo || "")
@@ -116,7 +119,9 @@ export function EditTaskDialog({
   const initializedForCurrentOpenRef = useRef(false)
 
   const handleDialogOpenChange = (nextOpen: boolean) => {
-    setOpen(nextOpen)
+    if (controlledOpen === undefined) {
+      setInternalOpen(nextOpen)
+    }
     onOpenChange?.(nextOpen)
   }
 
@@ -186,7 +191,7 @@ export function EditTaskDialog({
     }
 
     onEditTask(updatedTask)
-    setOpen(false)
+    handleDialogOpenChange(false)
   }
 
   const handleAutoCalculateManDays = () => {
@@ -211,24 +216,32 @@ export function EditTaskDialog({
     })
   }
 
-  const triggerNode = trigger || (
-    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary">
-      <Pencil className="h-3.5 w-3.5" />
-      <span className="sr-only">수정</span>
-    </Button>
-  )
+  const shouldRenderTrigger = controlledOpen === undefined || trigger !== undefined
+  const triggerNode =
+    trigger === undefined ? (
+      <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary">
+        <Pencil className="h-3.5 w-3.5" />
+        <span className="sr-only">수정</span>
+      </Button>
+    ) : (
+      trigger
+    )
 
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-      {openOnDoubleClick ? (
-        <div onDoubleClick={() => setOpen(true)}>
-          {triggerNode}
-        </div>
-      ) : (
-        <DialogTrigger asChild>
-          {triggerNode}
-        </DialogTrigger>
-      )}
+      {shouldRenderTrigger
+        ? openOnDoubleClick
+          ? (
+              <div onDoubleClick={() => handleDialogOpenChange(true)}>
+                {triggerNode}
+              </div>
+            )
+          : (
+              <DialogTrigger asChild>
+                {triggerNode}
+              </DialogTrigger>
+            )
+        : null}
       <DialogContent className="sm:max-w-[500px]">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
@@ -466,7 +479,7 @@ export function EditTaskDialog({
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)}>
               취소
             </Button>
             <Button type="submit">저장</Button>

@@ -1,12 +1,24 @@
 "use client"
 
 import { WeeklyWorkBoard, type WeeklyWorkDataSource } from "@/components/weekly-work-board"
-import { subscribeToData as subscribeStrategyData } from "@/lib/firestore-service"
-import { subscribeProjectsWithTasksByPersonKeys as subscribeStrategyScopedData } from "@/lib/firestore-service"
-import { subscribeToData as subscribeFaData } from "@/lib/firestore-service-fa"
-import { subscribeProjectsWithTasksByPersonKeys as subscribeFaScopedData } from "@/lib/firestore-service-fa"
-import { subscribeToData as subscribeIctData } from "@/lib/firestore-service-ict"
-import { subscribeProjectsWithTasksByPersonKeys as subscribeIctScopedData } from "@/lib/firestore-service-ict"
+import {
+  addHistoryEntry as addStrategyHistoryEntry,
+  subscribeProjectsWithTasksByPersonKeys as subscribeStrategyScopedData,
+  subscribeToData as subscribeStrategyData,
+  updateTaskInDB as updateStrategyTask,
+} from "@/lib/firestore-service"
+import {
+  addHistoryEntry as addFaHistoryEntry,
+  subscribeProjectsWithTasksByPersonKeys as subscribeFaScopedData,
+  subscribeToData as subscribeFaData,
+  updateTaskInDB as updateFaTask,
+} from "@/lib/firestore-service-fa"
+import {
+  addHistoryEntry as addIctHistoryEntry,
+  subscribeProjectsWithTasksByPersonKeys as subscribeIctScopedData,
+  subscribeToData as subscribeIctData,
+  updateTaskInDB as updateIctTask,
+} from "@/lib/firestore-service-ict"
 
 const ALL_WEEKLY_DATA_SOURCES: WeeklyWorkDataSource[] = [
   {
@@ -15,6 +27,11 @@ const ALL_WEEKLY_DATA_SOURCES: WeeklyWorkDataSource[] = [
     departmentGroup: "전략기획",
     managementHref: "/work-management",
     permissionKey: "strategyWeeklyWork",
+    editPermissionKey: "strategyWorkManagementEdit",
+    defaultTaskDepartment: "전략",
+    historySource: "work-management",
+    updateTask: updateStrategyTask,
+    addHistoryEntry: (entry) => addStrategyHistoryEntry({ ...entry, source: "work-management" }),
     subscribeToData: subscribeStrategyData,
     subscribeScopedToData: (personKeys, callback, options) =>
       subscribeStrategyScopedData(personKeys, callback, { ...options, resolveLeafStateOnce: true }),
@@ -25,6 +42,11 @@ const ALL_WEEKLY_DATA_SOURCES: WeeklyWorkDataSource[] = [
     departmentGroup: "FA",
     managementHref: "/fa-work-management",
     permissionKey: "faWeeklyWork",
+    editPermissionKey: "faWorkManagementEdit",
+    defaultTaskDepartment: "FA",
+    historySource: "fa-work-management",
+    updateTask: updateFaTask,
+    addHistoryEntry: (entry) => addFaHistoryEntry({ ...entry, source: "fa-work-management" }),
     subscribeToData: subscribeFaData,
     subscribeScopedToData: (personKeys, callback, options) =>
       subscribeFaScopedData(personKeys, callback, { ...options, resolveLeafStateOnce: true }),
@@ -35,6 +57,11 @@ const ALL_WEEKLY_DATA_SOURCES: WeeklyWorkDataSource[] = [
     departmentGroup: "ICT",
     managementHref: "/ict-work-management",
     permissionKey: "ictWeeklyWork",
+    editPermissionKey: "ictWorkManagementEdit",
+    defaultTaskDepartment: "ICT",
+    historySource: "ict-work-management",
+    updateTask: updateIctTask,
+    addHistoryEntry: (entry) => addIctHistoryEntry({ ...entry, source: "ict-work-management" }),
     subscribeToData: subscribeIctData,
     subscribeScopedToData: (personKeys, callback, options) =>
       subscribeIctScopedData(personKeys, callback, { ...options, resolveLeafStateOnce: true }),
