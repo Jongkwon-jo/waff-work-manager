@@ -830,25 +830,28 @@ export function WeeklyWorkBoard({
             candidate.task.id === item.task.id,
         )?.task || item.task
 
-      try {
-        const { id } = updatedTask
-        const rawUpdates = { ...updatedTask } as Record<string, unknown>
-        delete rawUpdates.id
-        delete rawUpdates.subTasks
-        const updates = compactRecord(rawUpdates) as WeeklyTaskUpdates
-        await source.updateTask(id, updates)
+      const { id } = updatedTask
+      const rawUpdates = { ...updatedTask } as Record<string, unknown>
+      delete rawUpdates.id
+      delete rawUpdates.subTasks
+      const updates = compactRecord(rawUpdates) as WeeklyTaskUpdates
 
-        setProjectsBySource((prev) => {
-          const sourceProjects = prev[item.sourceId]
-          if (!sourceProjects) return prev
-          return {
-            ...prev,
-            [item.sourceId]: sourceProjects.map((project) => ({
-              ...project,
-              tasks: replaceTaskInTree(project.tasks, id, updatedTask),
-            })),
-          }
-        })
+      // Reflect the edit immediately. The live Firestore subscription will
+      // subsequently reconcile this optimistic value with the persisted task.
+      setProjectsBySource((prev) => {
+        const sourceProjects = prev[item.sourceId]
+        if (!sourceProjects) return prev
+        return {
+          ...prev,
+          [item.sourceId]: sourceProjects.map((project) => ({
+            ...project,
+            tasks: replaceTaskInTree(project.tasks, id, updatedTask),
+          })),
+        }
+      })
+
+      try {
+        await source.updateTask(id, updates)
 
         try {
           await source.addHistoryEntry({
@@ -869,6 +872,17 @@ export function WeeklyWorkBoard({
         toast.success("업무가 수정되었습니다.")
       } catch (error) {
         console.error("Weekly task update failed:", error)
+        setProjectsBySource((prev) => {
+          const sourceProjects = prev[item.sourceId]
+          if (!sourceProjects) return prev
+          return {
+            ...prev,
+            [item.sourceId]: sourceProjects.map((project) => ({
+              ...project,
+              tasks: replaceTaskInTree(project.tasks, id, beforeTask),
+            })),
+          }
+        })
         toast.error("업무 수정 실패")
       } finally {
         savingTaskKeysRef.current.delete(taskKey)

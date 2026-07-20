@@ -886,8 +886,10 @@ export function subscribeProjectsWithTasksByPersonKeys(
   const chunks = chunkValues(queryKeys, 30)
   const taskGroups = new Map<number, any[]>()
   let disposed = false
+  let notifyToken = 0
 
   const notify = async () => {
+    const currentToken = ++notifyToken
     const tasksById = new Map<string, any>()
     taskGroups.forEach((tasks) => {
       tasks.forEach((task) => tasksById.set(task.id, task))
@@ -906,7 +908,7 @@ export function subscribeProjectsWithTasksByPersonKeys(
       }))
     }
     const projectsData = await fetchProjectsForTasks(allTasks)
-    if (!disposed) callback(buildProjectTree(projectsData, allTasks))
+    if (!disposed && currentToken === notifyToken) callback(buildProjectTree(projectsData, allTasks))
   }
 
   const unsubscribes = chunks.map((chunk, index) => {
