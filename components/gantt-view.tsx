@@ -2669,14 +2669,14 @@ export function GanttView({
                               type="button"
                               onClick={() => toggleProjectHidden(project.id)}
                               className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[11px] leading-none text-white hover:bg-white/15"
-                              title={expandedHiddenProjectIds.has(project.id) ? "숨긴 항목 숨기기" : "숨김 항목 보기"}
+                              title={expandedHiddenProjectIds.has(project.id) ? "숨기기" : "숨김 항목 보기"}
                             >
                               {expandedHiddenProjectIds.has(project.id) ? "-" : "+"}
                             </button>
                             <span className="shrink-0 text-[10px] text-white/90">
                               {isHiddenProjectLoading
                                 ? "숨김 항목 불러오는 중"
-                                : expandedHiddenProjectIds.has(project.id) ? "숨긴 항목 숨기기" : "숨긴 항목"}
+                                : expandedHiddenProjectIds.has(project.id) ? "숨기기" : "숨긴 항목"}
                             </span>
                           </>
                         )}
@@ -2909,14 +2909,14 @@ export function GanttView({
                                           type="button"
                                           onClick={() => toggleHiddenChildren(task)}
                                           className="order-last ml-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[11px] leading-none text-muted-foreground hover:bg-accent"
-                                          title={isParentHiddenExpanded ? "숨긴 항목 숨기기" : "숨김 항목 보기"}
+                                          title={isParentHiddenExpanded ? "숨기기" : "숨김 항목 보기"}
                                         >
                                           {isParentHiddenExpanded ? "-" : "+"}
                                         </button>
                                         <span className="order-last mr-1 text-[10px] text-muted-foreground">
                                           {loadingHiddenTaskProjectIdSet.has(task.projectId)
                                             ? "숨김 항목 불러오는 중"
-                                            : isParentHiddenExpanded ? "숨긴 항목 숨기기" : "숨긴 항목"}
+                                            : isParentHiddenExpanded ? "숨기기" : "숨긴 항목"}
                                         </span>
                                       </>
                                     )}
