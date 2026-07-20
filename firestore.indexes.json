@@ -1,0 +1,160 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "isHiddenRoot", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "personKeys", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "personKeys", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" },
+        { "fieldPath": "endDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdByEmail", "order": "ASCENDING" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isHidden", "order": "ASCENDING" },
+        { "fieldPath": "endDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isIct", "order": "ASCENDING" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "department", "order": "ASCENDING" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fa_tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fa_tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "isHiddenRoot", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fa_tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "personKeys", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fa_tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "personKeys", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" },
+        { "fieldPath": "endDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "fa_tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdByEmail", "order": "ASCENDING" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ict_tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ict_tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "projectId", "order": "ASCENDING" },
+        { "fieldPath": "isHiddenRoot", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ict_tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "personKeys", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ict_tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "personKeys", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" },
+        { "fieldPath": "endDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ict_tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdByEmail", "order": "ASCENDING" },
+        { "fieldPath": "isHidden", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ict_tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isHidden", "order": "ASCENDING" },
+        { "fieldPath": "endDate", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

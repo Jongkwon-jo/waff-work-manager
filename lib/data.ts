@@ -33,6 +33,8 @@ export interface Task {
   displayOrder?: number
   depth?: number
   isHidden?: boolean
+  /** Persisted marker for the top task of a hidden subtree. */
+  isHiddenRoot?: boolean
   projectId: string
   parentId?: string
   task: string
@@ -108,8 +110,48 @@ export function areProjectPmEmailsEqual(
 
 export const projects: Project[] = []
 
-function flattenTasks(tasks: Task[]): Task[] {
+export function flattenTasks(tasks: Task[]): Task[] {
   return tasks.reduce((acc, task) => [...acc, task, ...flattenTasks(task.subTasks || [])], [] as Task[])
+}
+
+function rebuildTaskTree(tasks: Task[]): Task[] {
+  const taskMap = new Map<string, Task>()
+  tasks.forEach((task) => taskMap.set(task.id, { ...task, subTasks: [] }))
+
+  const ordered = Array.from(taskMap.values()).sort((a, b) => {
+    const orderA = typeof a.displayOrder === "number" ? a.displayOrder : Number.MAX_SAFE_INTEGER
+    const orderB = typeof b.displayOrder === "number" ? b.displayOrder : Number.MAX_SAFE_INTEGER
+    if (orderA !== orderB) return orderA - orderB
+    const byName = (a.task || "").localeCompare(b.task || "", "ko")
+    return byName !== 0 ? byName : a.id.localeCompare(b.id)
+  })
+
+  const roots: Task[] = []
+  ordered.forEach((task) => {
+    const parent = task.parentId ? taskMap.get(task.parentId) : undefined
+    if (parent) parent.subTasks?.push(task)
+    else roots.push(task)
+  })
+  return roots
+}
+
+/** Merge lazily loaded task documents into the currently visible project trees. */
+export function mergeProjectTaskDetails(projects: Project[], detailTasks: Task[]): Project[] {
+  if (detailTasks.length === 0) return projects
+  const detailsByProject = new Map<string, Task[]>()
+  detailTasks.forEach((task) => {
+    const current = detailsByProject.get(task.projectId) || []
+    current.push(task)
+    detailsByProject.set(task.projectId, current)
+  })
+
+  return projects.map((project) => {
+    const details = detailsByProject.get(project.id)
+    if (!details?.length) return project
+    const taskById = new Map(flattenTasks(project.tasks).map((task) => [task.id, task]))
+    details.forEach((task) => taskById.set(task.id, task))
+    return { ...project, tasks: rebuildTaskTree(Array.from(taskById.values())) }
+  })
 }
 
 export function getAllTasks(): Task[] {

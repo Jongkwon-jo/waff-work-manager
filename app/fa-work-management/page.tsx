@@ -4,12 +4,14 @@ import Image from "next/image"
 import Link from "next/link"
 import { useState, useMemo, useEffect, useDeferredValue, useRef } from "react"
 import { signOut } from "firebase/auth"
-import { makeProjectPmFields, normalizeProjectPmEmails } from "@/lib/data"
+import { makeProjectPmFields, mergeProjectTaskDetails, normalizeProjectPmEmails } from "@/lib/data"
 import type { Project, ProjectPmOption, Task, TaskStatus } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import {
   subscribeProjectsWithTasksByScheduleScope,
   subscribeHiddenProjectSummaries,
+  subscribeHiddenTaskRootsByAccessScope,
+  subscribeHiddenTasksByAccessScope,
   subscribeProjectsWithTasksByProjectIds,
   addProjectToDB,
   updateProjectInDB,
@@ -74,9 +76,14 @@ export default function FaWorkManagementPage() {
   const [projectList, setProjectList] = useState<Project[]>([])
   const visibleProjectListRef = useRef<Project[]>([])
   const selectedHiddenProjectListRef = useRef<Project[]>([])
+  const hiddenTaskDetailsRef = useRef<Task[]>([])
+  const hiddenTaskSessionUserRef = useRef("")
   const hasLoadedProjectListRef = useRef(false)
   const [hiddenProjectOptions, setHiddenProjectOptions] = useState<Project[]>([])
   const [selectedHiddenProjectIds, setSelectedHiddenProjectIds] = useState<string[]>([])
+  const [hiddenTaskRoots, setHiddenTaskRoots] = useState<Task[]>([])
+  const [requestedHiddenTaskProjectIds, setRequestedHiddenTaskProjectIds] = useState<string[]>([])
+  const [loadingHiddenTaskProjectIds, setLoadingHiddenTaskProjectIds] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all")
@@ -252,7 +259,21 @@ export default function FaWorkManagementPage() {
 
   const mergeProjectLists = (visibleProjects: Project[], selectedHiddenProjects: Project[]) => {
     const visibleIds = new Set(visibleProjects.map((project) => project.id))
-    return [...visibleProjects, ...selectedHiddenProjects.filter((project) => !visibleIds.has(project.id))]
+    return mergeProjectTaskDetails(
+      [...visibleProjects, ...selectedHiddenProjects.filter((project) => !visibleIds.has(project.id))],
+      hiddenTaskDetailsRef.current,
+    )
+  }
+
+  const hiddenTaskScopeSignature = useMemo(
+    () => Array.from(new Set(projectList.map((project) => project.id))).sort().join("\u0000"),
+    [projectList],
+  )
+
+  const requestHiddenTasks = (projectId: string) => {
+    if (requestedHiddenTaskProjectIds.includes(projectId)) return
+    setRequestedHiddenTaskProjectIds((prev) => (prev.includes(projectId) ? prev : [...prev, projectId]))
+    setLoadingHiddenTaskProjectIds((prev) => (prev.includes(projectId) ? prev : [...prev, projectId]))
   }
 
   const serializeTaskData = (task: Task) =>
@@ -273,6 +294,7 @@ export default function FaWorkManagementPage() {
       createdByName: task.createdByName,
       isSubTask: task.isSubTask,
       isHidden: task.isHidden,
+      isHiddenRoot: task.isHiddenRoot,
       depth: task.depth,
       displayOrder: task.displayOrder,
     })
@@ -407,11 +429,12 @@ export default function FaWorkManagementPage() {
       }))
   }
 
-  const setTaskHiddenInTree = (tasks: Task[], taskIds: Set<string>, isHidden: boolean): Task[] => {
+  const setTaskHiddenInTree = (tasks: Task[], taskIds: Set<string>, isHidden: boolean, hiddenRootTaskId: string): Task[] => {
     return tasks.map((task) => ({
       ...task,
       isHidden: taskIds.has(task.id) ? isHidden : task.isHidden,
-      subTasks: task.subTasks ? setTaskHiddenInTree(task.subTasks, taskIds, isHidden) : task.subTasks,
+      isHiddenRoot: taskIds.has(task.id) ? isHidden && task.id === hiddenRootTaskId : task.isHiddenRoot,
+      subTasks: task.subTasks ? setTaskHiddenInTree(task.subTasks, taskIds, isHidden, hiddenRootTaskId) : task.subTasks,
     }))
   }
 
@@ -605,6 +628,9 @@ export default function FaWorkManagementPage() {
       if ((prevTask.displayOrder ?? -1) !== (nextTask.displayOrder ?? -1)) itemUpdates.displayOrder = nextTask.displayOrder
       if (Boolean(prevTask.isSubTask) !== Boolean(nextTask.isSubTask)) itemUpdates.isSubTask = nextTask.isSubTask
       if ((prevTask.projectId || "") !== (nextTask.projectId || "")) itemUpdates.projectId = nextTask.projectId
+      const nextParent = nextTask.parentId ? nextMap.get(nextTask.parentId) : undefined
+      const nextIsHiddenRoot = Boolean(nextTask.isHidden) && !nextParent?.isHidden
+      if (Boolean(prevTask.isHiddenRoot) !== nextIsHiddenRoot) itemUpdates.isHiddenRoot = nextIsHiddenRoot
 
       if (Object.keys(itemUpdates).length > 0) {
         updates.push({ id, updates: itemUpdates })
@@ -747,6 +773,20 @@ export default function FaWorkManagementPage() {
     [departmentOrgSettings, scheduleScopeAliases],
   )
   const canViewFullSchedule = isAdmin || ledScheduleDepartmentGroups.has("FA")
+  const hiddenTaskFullAccessScopeSignature = useMemo(
+    () =>
+      projectList
+        .filter(
+          (project) =>
+            canViewFullSchedule ||
+            normalizeProjectPmEmails(project).includes(currentUserEmail) ||
+            project.createdByEmail?.trim().toLowerCase() === currentUserEmail,
+        )
+        .map((project) => project.id)
+        .sort()
+        .join("\u0000"),
+    [canViewFullSchedule, currentUserEmail, projectList],
+  )
   const canCopySelectedTasks = canEdit || canViewFullSchedule
   const emptyStateTitle = canViewFullSchedule ? "표시할 데이터가 없습니다" : "조회 가능한 업무가 없습니다"
   const emptyStateDescription = canViewFullSchedule
@@ -842,6 +882,52 @@ export default function FaWorkManagementPage() {
       setProjectList(mergeProjectLists(visibleProjectListRef.current, data))
     })
   }, [currentUserEmail, selectedHiddenProjectIds, isScheduleListenerActive])
+
+  useEffect(() => {
+    if (hiddenTaskSessionUserRef.current === currentUserEmail) return
+    hiddenTaskSessionUserRef.current = currentUserEmail
+    hiddenTaskDetailsRef.current = []
+    setHiddenTaskRoots([])
+    setRequestedHiddenTaskProjectIds([])
+    setLoadingHiddenTaskProjectIds([])
+  }, [currentUserEmail])
+
+  useEffect(() => {
+    const projectIds = hiddenTaskScopeSignature ? hiddenTaskScopeSignature.split("\u0000") : []
+    const fullProjectIds = hiddenTaskFullAccessScopeSignature ? hiddenTaskFullAccessScopeSignature.split("\u0000") : []
+    if (!currentUserEmail || !isScheduleListenerActive || projectIds.length === 0) {
+      setHiddenTaskRoots([])
+      return
+    }
+    return subscribeHiddenTaskRootsByAccessScope(
+      { projectIds, fullProjectIds, personKeys: scheduleScopeAliases, creatorEmail: currentUserEmail },
+      setHiddenTaskRoots,
+    )
+  }, [currentUserEmail, hiddenTaskFullAccessScopeSignature, hiddenTaskScopeSignature, isScheduleListenerActive, scheduleScopeAliases])
+
+  useEffect(() => {
+    if (!currentUserEmail || requestedHiddenTaskProjectIds.length === 0) {
+      hiddenTaskDetailsRef.current = []
+      setLoadingHiddenTaskProjectIds([])
+      setProjectList(mergeProjectLists(visibleProjectListRef.current, selectedHiddenProjectListRef.current))
+      return
+    }
+    if (!isScheduleListenerActive) return
+
+    const fullProjectIdSet = new Set(
+      hiddenTaskFullAccessScopeSignature ? hiddenTaskFullAccessScopeSignature.split("\u0000") : [],
+    )
+    return subscribeHiddenTasksByAccessScope({
+      projectIds: requestedHiddenTaskProjectIds,
+      fullProjectIds: requestedHiddenTaskProjectIds.filter((projectId) => fullProjectIdSet.has(projectId)),
+      personKeys: scheduleScopeAliases,
+      creatorEmail: currentUserEmail,
+    }, (tasks) => {
+      hiddenTaskDetailsRef.current = tasks
+      setLoadingHiddenTaskProjectIds([])
+      setProjectList(mergeProjectLists(visibleProjectListRef.current, selectedHiddenProjectListRef.current))
+    })
+  }, [currentUserEmail, hiddenTaskFullAccessScopeSignature, requestedHiddenTaskProjectIds, isScheduleListenerActive, scheduleScopeAliases])
 
   const canViewAllRecentChanges = isAdmin || pagePermissions.recentChangesWidget
   const canRollbackRecentChanges = isAdmin
@@ -1137,27 +1223,33 @@ export default function FaWorkManagementPage() {
 
     const beforeProjectList = projectList
     const beforeTaskMap = new Map(allTasksFlat.map((task) => [task.id, task]))
+    const parentTask = rootTask.parentId ? allTasksFlat.find((task) => task.id === rootTask.parentId) : undefined
+    const hiddenRootTaskId = isHidden && !parentTask?.isHidden ? rootTask.id : ""
 
     setProjectList((prev) =>
       prev.map((project) =>
         project.id === rootTask.projectId
           ? {
               ...project,
-              tasks: setTaskHiddenInTree(project.tasks, affectedTaskIds, isHidden),
+              tasks: setTaskHiddenInTree(project.tasks, affectedTaskIds, isHidden, hiddenRootTaskId),
             }
           : project,
       ),
     )
 
     try {
-      await Promise.all(Array.from(affectedTaskIds).map((taskId) => updateTaskInDB(taskId, { isHidden })))
+      await Promise.all(
+        Array.from(affectedTaskIds).map((taskId) =>
+          updateTaskInDB(taskId, { isHidden, isHiddenRoot: isHidden && taskId === hiddenRootTaskId }),
+        ),
+      )
       await recordHistory({
         entityType: "batch",
         action: "batch_update",
         projectId: rootTask.projectId,
         batch: affectedTasks.map((task) => {
           const beforeTask = beforeTaskMap.get(task.id) || task
-          const afterTask = { ...beforeTask, isHidden }
+          const afterTask = { ...beforeTask, isHidden, isHiddenRoot: isHidden && task.id === hiddenRootTaskId }
           return {
             entityType: "task" as const,
             entityId: task.id,
@@ -2076,6 +2168,8 @@ export default function FaWorkManagementPage() {
                 searchQuery={deferredSearchQuery}
                 hiddenProjectOptions={hiddenProjectOptions}
                 selectedHiddenProjectIds={selectedHiddenProjectIds}
+                hiddenTaskRoots={hiddenTaskRoots}
+                loadingHiddenTaskProjectIds={loadingHiddenTaskProjectIds}
                 canEdit={canEdit}
                 canCopyTasks={canCopySelectedTasks}
                 canDeleteTask={isTaskCreatedByCurrentUser}
@@ -2093,6 +2187,7 @@ export default function FaWorkManagementPage() {
                 onMoveTask={handleMoveTask}
                 onMoveTaskToProjectTop={handleMoveTaskToProjectTop}
                 onSelectedHiddenProjectIdsChange={setSelectedHiddenProjectIds}
+                onRequestHiddenTasks={requestHiddenTasks}
                 onReorderTask={handleReorderTask}
                 persistedCollapsedProjectIds={ganttCollapsedProjectIds}
                 persistedCollapsedTaskIds={ganttCollapsedTaskIds}

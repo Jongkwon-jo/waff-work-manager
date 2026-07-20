@@ -254,6 +254,7 @@ function normalizeTask(raw: any): Task {
     createdByName: toOptionalString(raw?.createdByName ?? raw?.created_by_name),
     isSubTask: Boolean(raw?.isSubTask ?? raw?.is_sub_task ?? parentId),
     isHidden: toBooleanOr(raw?.isHidden ?? raw?.is_hidden, false),
+    isHiddenRoot: toBooleanOr(raw?.isHiddenRoot ?? raw?.is_hidden_root, false),
     displayOrder: toNumberOr(raw?.displayOrder, Number.MAX_SAFE_INTEGER),
     sourceSchedule: raw?.sourceSchedule === "strategy" ? "strategy" : raw?.sourceSchedule === "ict" ? "ict" : undefined,
     originalTaskId: toOptionalString(raw?.originalTaskId),
@@ -732,9 +733,9 @@ async function fetchProjectsForTaskIds(projectIds: string[], collectionName: str
 
 export type SubscribeOptions = {
   /**
-   * When false (default), hidden projects are excluded from the initial
-   * schedule stream. Tasks in visible projects are still streamed so the
-   * Gantt view can show and restore hidden task rows.
+   * When false (default), hidden projects and hidden tasks are excluded from
+   * the initial schedule stream. Hidden task roots/details use separate lazy
+   * subscriptions.
    */
   includeHidden?: boolean
   dateRange?: {
@@ -961,7 +962,9 @@ function createLinkedStrategyTaskCandidateSubscription({
   subscribeStaticGroup(`${groupPrefix}:isIct`, isIctConstraints, () => {
     isIctReady = true
   })
-  subscribeStaticGroup(`${groupPrefix}:department`, [where("department", "==", "ICT")], () => {
+  const departmentConstraints: any[] = [where("department", "==", "ICT")]
+  if (!includeHidden) departmentConstraints.push(where("isHidden", "==", false))
+  subscribeStaticGroup(`${groupPrefix}:department`, departmentConstraints, () => {
     departmentReady = true
   })
 
@@ -991,9 +994,11 @@ function createLinkedStrategyTaskCandidateSubscription({
       personReady = false
       const readyChunks = new Set<number>()
       keyChunks.forEach((chunk, index) => {
+        const personConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
+        if (!includeHidden) personConstraints.push(where("isHidden", "==", false))
         personUnsubscribes.push(
           onSnapshot(
-            query(collection(db, STRATEGY_TASKS_COLLECTION), where("personKeys", "array-contains-any", chunk)),
+            query(collection(db, STRATEGY_TASKS_COLLECTION), ...personConstraints),
             (snapshot) => {
               taskGroups.set(`${groupPrefix}:person:${index}`, snapshot.docs.map(mapStrategyTaskDoc))
               readyChunks.add(index)
@@ -1103,7 +1108,7 @@ export function subscribeProjectsWithTasksByPersonKeys(
     }),
     onSnapshot(
       doc(db, SETTINGS_COLLECTION, LINKED_STRATEGY_PROJECT_VISIBILITY_DOC),
-      (snapshot) => {
+      (snapshot: any) => {
         hiddenLinkedStrategyProjectIds = normalizeHiddenLinkedStrategyProjectIds(
           snapshot.data()?.[HIDDEN_LINKED_STRATEGY_PROJECT_IDS_FIELD],
         )
@@ -1115,8 +1120,10 @@ export function subscribeProjectsWithTasksByPersonKeys(
 
   chunks.forEach((chunk, index) => {
     const ictConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
+    if (!includeHidden) ictConstraints.push(where("isHidden", "==", false))
     if (dateRange) ictConstraints.push(where("endDate", ">=", dateRange.startDate))
     const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
+    if (!includeHidden) strategyConstraints.push(where("isHidden", "==", false))
     unsubscribes.push(
       onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...ictConstraints),
@@ -1172,7 +1179,11 @@ export function subscribeProjectsWithTasksByPersonKeys(
 
     unsubscribes.push(
       onSnapshot(
-        query(collection(db, TASKS_COLLECTION), where("endDate", ">=", dateRange.startDate)),
+        query(
+          collection(db, TASKS_COLLECTION),
+          where("endDate", ">=", dateRange.startDate),
+          ...(includeHidden ? [] : [where("isHidden", "==", false)]),
+        ),
         (snapshot) => {
           ictTaskGroups.set("fallback:date-person", mapFallbackIctTasks(snapshot))
           void notify().catch((error) => console.error("Scoped ICT fallback data snapshot error:", error))
@@ -1180,7 +1191,11 @@ export function subscribeProjectsWithTasksByPersonKeys(
         (error) => console.error("Scoped ICT fallback tasks snapshot error:", error),
       ),
       onSnapshot(
-        query(collection(db, STRATEGY_TASKS_COLLECTION), where("endDate", ">=", dateRange.startDate)),
+        query(
+          collection(db, STRATEGY_TASKS_COLLECTION),
+          where("endDate", ">=", dateRange.startDate),
+          ...(includeHidden ? [] : [where("isHidden", "==", false)]),
+        ),
         (snapshot) => {
           strategyTaskGroups.set(
             "fallback:date-person",
@@ -1320,6 +1335,10 @@ export function subscribeProjectsWithTasksByScheduleScope(
     onError: (error) => {
       console.error("Schedule PM ICT tasks snapshot error:", error)
     },
+    buildConstraints: (projectIds) => [
+      where("projectId", "in", projectIds),
+      ...(includeHidden ? [] : [where("isHidden", "==", false)]),
+    ],
   })
 
   strategyPmTaskPool = createProjectTaskSubscriptionPool({
@@ -1331,6 +1350,10 @@ export function subscribeProjectsWithTasksByScheduleScope(
     onError: (error) => {
       console.error("Schedule PM linked strategy tasks snapshot error:", error)
     },
+    buildConstraints: (projectIds) => [
+      where("projectId", "in", projectIds),
+      ...(includeHidden ? [] : [where("isHidden", "==", false)]),
+    ],
   })
 
   const resetIctScopedProjectTasks = () => {
@@ -1388,6 +1411,10 @@ export function subscribeProjectsWithTasksByScheduleScope(
   chunkValues(queryKeys, 30).forEach((chunk, index) => {
     const ictConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
     const strategyConstraints: any[] = [where("personKeys", "array-contains-any", chunk)]
+    if (!includeHidden) {
+      ictConstraints.push(where("isHidden", "==", false))
+      strategyConstraints.push(where("isHidden", "==", false))
+    }
     unsubscribes.push(
       onSnapshot(
         query(collection(db, TASKS_COLLECTION), ...ictConstraints),
@@ -1418,7 +1445,11 @@ export function subscribeProjectsWithTasksByScheduleScope(
   if (normalizedCreatorEmail) {
     unsubscribes.push(
       onSnapshot(
-        query(collection(db, TASKS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail)),
+        query(
+          collection(db, TASKS_COLLECTION),
+          where("createdByEmail", "==", normalizedCreatorEmail),
+          ...(includeHidden ? [] : [where("isHidden", "==", false)]),
+        ),
         (snapshot) => {
           ictTaskGroups.set(
             "creator",
@@ -1431,7 +1462,11 @@ export function subscribeProjectsWithTasksByScheduleScope(
         },
       ),
       onSnapshot(
-        query(collection(db, STRATEGY_TASKS_COLLECTION), where("createdByEmail", "==", normalizedCreatorEmail)),
+        query(
+          collection(db, STRATEGY_TASKS_COLLECTION),
+          where("createdByEmail", "==", normalizedCreatorEmail),
+          ...(includeHidden ? [] : [where("isHidden", "==", false)]),
+        ),
         (snapshot) => {
           strategyTaskGroups.set(
             "creator",
@@ -1644,6 +1679,158 @@ export function subscribeHiddenProjectSummaries(callback: (projects: Project[]) 
   }
 }
 
+function mapHiddenIctTaskDoc(docSnap: any): Task {
+  return normalizeTask(mapIctTaskDoc(docSnap))
+}
+
+function mapHiddenStrategyTaskDoc(docSnap: any): Task {
+  const raw = docSnap.data()
+  return normalizeTask({
+    ...raw,
+    id: `${STRATEGY_SOURCE_PREFIX}${docSnap.id}`,
+    projectId: `${STRATEGY_SOURCE_PREFIX}${toStringOrEmpty(raw.projectId)}`,
+    parentId: toOptionalString(raw.parentId) ? `${STRATEGY_SOURCE_PREFIX}${toStringOrEmpty(raw.parentId)}` : undefined,
+    originalTaskId: docSnap.id,
+    originalProjectId: toStringOrEmpty(raw.projectId),
+    sourceSchedule: "strategy",
+  })
+}
+
+export type HiddenTaskAccessScope = {
+  projectIds: string[]
+  fullProjectIds?: string[]
+  personKeys?: string[]
+  creatorEmail?: string
+}
+
+function subscribeHiddenTaskDocumentsByAccessScope(
+  scope: HiddenTaskAccessScope,
+  rootsOnly: boolean,
+  callback: (tasks: Task[]) => void,
+) {
+  const ids = uniqueTrimmedStrings(scope.projectIds)
+  if (ids.length === 0) {
+    callback([])
+    return () => {}
+  }
+
+  const idSet = new Set(ids)
+  const fullIds = uniqueTrimmedStrings(scope.fullProjectIds || []).filter((id) => idSet.has(id))
+  const fullIdSet = new Set(fullIds)
+  const limitedIds = ids.filter((id) => !fullIdSet.has(id))
+  const personKeyChunks = chunkValues(buildTaskPersonKeysFromValues(scope.personKeys || []).slice(0, 300), 30)
+  const creatorEmail = normalizeEmail(scope.creatorEmail || "")
+  const sources = [
+    {
+      key: "ict",
+      collectionName: TASKS_COLLECTION,
+      fullIds: fullIds.filter((id) => !isStrategyId(id)),
+      limitedIds: limitedIds.filter((id) => !isStrategyId(id)),
+      stripProjectId: (id: string) => stripIctId(id) || id,
+      mapDoc: mapHiddenIctTaskDoc,
+    },
+    {
+      key: "strategy",
+      collectionName: STRATEGY_TASKS_COLLECTION,
+      fullIds: fullIds.filter((id) => isStrategyId(id)),
+      limitedIds: limitedIds.filter((id) => isStrategyId(id)),
+      stripProjectId: (id: string) => stripStrategyId(id) || id,
+      mapDoc: mapHiddenStrategyTaskDoc,
+    },
+  ]
+
+  const queryGroups: Array<{
+    groupKey: string
+    taskQuery: any
+    mapDoc: (docSnap: any) => Task
+    allowedProjectIds?: Set<string>
+  }> = []
+  sources.forEach((source) => {
+    chunkValues(source.fullIds.map(source.stripProjectId), 30).forEach((chunk, index) => {
+      queryGroups.push({
+        groupKey: `${source.key}:full:${index}`,
+        taskQuery: query(
+          collection(db, source.collectionName),
+          where("projectId", "in", chunk),
+          where(rootsOnly ? "isHiddenRoot" : "isHidden", "==", true),
+        ),
+        mapDoc: source.mapDoc,
+      })
+    })
+
+    if (source.limitedIds.length === 0) return
+    const allowedProjectIds = new Set(source.limitedIds)
+    personKeyChunks.forEach((chunk, index) => {
+      queryGroups.push({
+        groupKey: `${source.key}:person:${index}`,
+        taskQuery: query(
+          collection(db, source.collectionName),
+          where("personKeys", "array-contains-any", chunk),
+          where("isHidden", "==", true),
+        ),
+        mapDoc: source.mapDoc,
+        allowedProjectIds,
+      })
+    })
+    if (creatorEmail) {
+      queryGroups.push({
+        groupKey: `${source.key}:creator`,
+        taskQuery: query(
+          collection(db, source.collectionName),
+          where("createdByEmail", "==", creatorEmail),
+          where("isHidden", "==", true),
+        ),
+        mapDoc: source.mapDoc,
+        allowedProjectIds,
+      })
+    }
+  })
+
+  if (queryGroups.length === 0) {
+    callback([])
+    return () => {}
+  }
+
+  const groups = new Map<string, Task[]>()
+  const ready = new Set<string>()
+  const notify = () => {
+    if (ready.size !== queryGroups.length) return
+    const tasksById = new Map<string, Task>()
+    groups.forEach((tasks) => tasks.forEach((task) => tasksById.set(task.id, task)))
+    callback(Array.from(tasksById.values()))
+  }
+  const unsubscribes = queryGroups.map((group) =>
+    onSnapshot(
+      group.taskQuery,
+      (snapshot: any) => {
+        groups.set(
+          group.groupKey,
+          snapshot.docs
+            .map(group.mapDoc)
+            .filter((task: Task) => !group.allowedProjectIds || group.allowedProjectIds.has(task.projectId)),
+        )
+        ready.add(group.groupKey)
+        notify()
+      },
+      (error: unknown) => {
+        console.error("Hidden ICT task snapshot error:", error)
+        groups.set(group.groupKey, [])
+        ready.add(group.groupKey)
+        notify()
+      },
+    ),
+  )
+  return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
+}
+
+export function subscribeHiddenTaskRootsByAccessScope(scope: HiddenTaskAccessScope, callback: (tasks: Task[]) => void) {
+  return subscribeHiddenTaskDocumentsByAccessScope(scope, true, callback)
+}
+
+export function subscribeHiddenTasksByAccessScope(scope: HiddenTaskAccessScope, callback: (tasks: Task[]) => void) {
+  return subscribeHiddenTaskDocumentsByAccessScope(scope, false, callback)
+}
+
 export function subscribeProjectsWithTasksByProjectIds(
   projectIds: string[],
   callback: (projects: Project[]) => void,
@@ -1816,6 +2003,7 @@ export function subscribeToData(
     onError: (error) => {
       console.error("Visible ICT project tasks snapshot error:", error)
     },
+    buildConstraints: (projectIds) => [where("projectId", "in", projectIds), where("isHidden", "==", false)],
   })
 
   linkedStrategyTaskSubscription = createLinkedStrategyTaskCandidateSubscription({
@@ -1893,10 +2081,18 @@ export async function fetchProjectsWithTasks(
   const strategyIctTasksQuery = includeHidden
     ? query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true))
     : query(collection(db, STRATEGY_TASKS_COLLECTION), where("isIct", "==", true), where("isHidden", "==", false))
-  const strategyDepartmentTasksQuery = query(collection(db, STRATEGY_TASKS_COLLECTION), where("department", "==", "ICT"))
+  const strategyDepartmentTasksQuery = query(
+    collection(db, STRATEGY_TASKS_COLLECTION),
+    where("department", "==", "ICT"),
+    ...(includeHidden ? [] : [where("isHidden", "==", false)]),
+  )
   const departmentPersonSettings = await fetchDepartmentPersonSettings()
   const linkedStrategyPersonTasksQueries = buildLinkedStrategyPersonKeyChunks(departmentPersonSettings.ICT).map((chunk) =>
-    query(collection(db, STRATEGY_TASKS_COLLECTION), where("personKeys", "array-contains-any", chunk)),
+    query(
+      collection(db, STRATEGY_TASKS_COLLECTION),
+      where("personKeys", "array-contains-any", chunk),
+      ...(includeHidden ? [] : [where("isHidden", "==", false)]),
+    ),
   )
 
   const [
@@ -2047,6 +2243,7 @@ export async function addTaskToDB(task: Omit<Task, "id">): Promise<string> {
     ...cleanTask,
     personKeys: buildTaskPersonKeys(task.person || ""),
     isHidden: typeof task.isHidden === "boolean" ? task.isHidden : false,
+    isHiddenRoot: typeof task.isHiddenRoot === "boolean" ? task.isHiddenRoot : false,
     ...(isIctValue !== undefined ? { isIct: isIctValue } : {}),
     displayOrder: typeof task.displayOrder === "number" ? task.displayOrder : Date.now(),
   })
@@ -2058,10 +2255,14 @@ export async function updateTaskInDB(taskId: string, updates: Omit<Partial<Task>
   const taskRef = doc(db, isStrategyTask ? STRATEGY_TASKS_COLLECTION : TASKS_COLLECTION, stripSourceId(taskId) || taskId)
   const cleanUpdates = stripSourcePrefixFromRecord(updates as Record<string, unknown>)
   const shouldUpdateIctMarker = isStrategyTask && (typeof updates.department === "string" || typeof updates.person === "string")
+  const hasParentUpdate = Object.prototype.hasOwnProperty.call(cleanUpdates, "parentId")
+  const hasProjectUpdate = Object.prototype.hasOwnProperty.call(cleanUpdates, "projectId")
+  const shouldCheckMove = hasParentUpdate || hasProjectUpdate
+  const shouldValidateHiddenRoot = cleanUpdates.isHiddenRoot === true
+  const currentSnap = shouldUpdateIctMarker || shouldCheckMove || shouldValidateHiddenRoot ? await getDoc(taskRef) : null
+  const current = currentSnap?.data() || {}
   let isIctUpdate: { isIct?: boolean } = {}
   if (shouldUpdateIctMarker) {
-    const currentSnap = await getDoc(taskRef)
-    const current = currentSnap.data() || {}
     isIctUpdate = {
       isIct: await computeIsIctFromTaskFieldsWithSettings(
         typeof cleanUpdates.department === "string" ? cleanUpdates.department : current.department,
@@ -2069,16 +2270,51 @@ export async function updateTaskInDB(taskId: string, updates: Omit<Partial<Task>
       ),
     }
   }
+  const currentParentId = typeof current.parentId === "string" ? current.parentId : null
+  const nextParentId = hasParentUpdate
+    ? typeof cleanUpdates.parentId === "string" ? cleanUpdates.parentId : null
+    : currentParentId
+  const currentProjectId = typeof current.projectId === "string" ? current.projectId : ""
+  const nextProjectId = hasProjectUpdate && typeof cleanUpdates.projectId === "string" ? cleanUpdates.projectId : currentProjectId
+  const moved = shouldCheckMove && (currentParentId !== nextParentId || currentProjectId !== nextProjectId)
+  const nextIsHidden = typeof cleanUpdates.isHidden === "boolean" ? cleanUpdates.isHidden : current.isHidden === true
+  const shouldRecomputeHiddenRoot = moved || shouldValidateHiddenRoot
+  const requestedParentId = typeof updates.parentId === "string" ? updates.parentId : ""
+  const nextParentCollection = requestedParentId.startsWith(STRATEGY_SOURCE_PREFIX)
+    ? STRATEGY_TASKS_COLLECTION
+    : requestedParentId.startsWith(ICT_SOURCE_PREFIX) ? TASKS_COLLECTION : isStrategyTask ? STRATEGY_TASKS_COLLECTION : TASKS_COLLECTION
+  const nextParentIsHidden = shouldRecomputeHiddenRoot && nextIsHidden && nextParentId
+    ? (await getDoc(doc(db, nextParentCollection, nextParentId))).data()?.isHidden === true
+    : false
   const payload = {
     ...cleanUpdates,
     ...(typeof updates.person === "string" ? { personKeys: buildTaskPersonKeys(updates.person) } : {}),
     ...isIctUpdate,
+    ...(shouldRecomputeHiddenRoot ? { isHiddenRoot: nextIsHidden && !nextParentIsHidden } : {}),
   }
   await updateDoc(taskRef, payload as any)
 }
 
 export async function deleteTaskFromDB(taskId: string): Promise<void> {
-  const taskRef = doc(db, isStrategyId(taskId) ? STRATEGY_TASKS_COLLECTION : TASKS_COLLECTION, stripSourceId(taskId) || taskId)
+  const targetCollection = isStrategyId(taskId) ? STRATEGY_TASKS_COLLECTION : TASKS_COLLECTION
+  const rawTaskId = stripSourceId(taskId) || taskId
+  const taskRef = doc(db, targetCollection, rawTaskId)
+  const taskSnap = await getDoc(taskRef)
+  if (taskSnap.data()?.isHiddenRoot !== true) {
+    await deleteDoc(taskRef)
+    return
+  }
+
+  const childSnapshot = await getDocs(query(collection(db, targetCollection), where("parentId", "==", rawTaskId)))
+  const hiddenChildren = childSnapshot.docs.filter((child) => child.data().isHidden === true)
+  for (let offset = 0; offset < hiddenChildren.length; offset += 450) {
+    const promotionBatch = writeBatch(db)
+    hiddenChildren.slice(offset, offset + 450).forEach((child) => {
+      promotionBatch.update(child.ref, { isHiddenRoot: true })
+    })
+    await promotionBatch.commit()
+  }
+
   await deleteDoc(taskRef)
 }
 
