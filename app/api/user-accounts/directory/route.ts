@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server"
-import { getFirebaseAdminAuth } from "@/lib/firebase-admin"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -16,6 +15,7 @@ export async function GET(request: Request) {
   }
 
   try {
+    const { getFirebaseAdminAuth } = await import("@/lib/firebase-admin")
     const adminAuth = getFirebaseAdminAuth()
     const decodedToken = await adminAuth.verifyIdToken(token)
     if (!decodedToken.email) {
@@ -50,6 +50,11 @@ export async function GET(request: Request) {
     )
   } catch (error) {
     console.error("Firebase Auth account directory error:", error)
-    return NextResponse.json({ error: "인증 계정 목록을 확인할 수 없습니다." }, { status: 503 })
+    return NextResponse.json(
+      {
+        error: "Firebase 인증 계정 목록을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+      },
+      { status: 503 },
+    )
   }
 }

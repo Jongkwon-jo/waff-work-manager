@@ -909,7 +909,7 @@ export default function AdminPage() {
               <p className="text-sm text-muted-foreground">Firebase 인증 계정 목록을 확인하는 중입니다.</p>
             ) : accountDirectoryError ? (
               <p className="text-sm text-destructive">
-                {accountDirectoryError} 서버의 Firebase Admin 인증 설정을 확인해 주세요.
+                계정 목록을 불러오지 못했습니다: {accountDirectoryError}
               </p>
             ) : rows.length === 0 ? (
               <p className="text-sm text-muted-foreground">아직 관리할 사용자가 없습니다.</p>
