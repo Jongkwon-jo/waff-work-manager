@@ -3,9 +3,9 @@ import { NextResponse } from "next/server"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-type AccountDirectoryOperation = "initialize" | "verify-token" | "list-users"
+type AccountDirectoryOperation = "load-module" | "initialize" | "verify-token" | "list-users"
 
-const ACCOUNT_DIRECTORY_API_VERSION = "2"
+const ACCOUNT_DIRECTORY_API_VERSION = "3"
 
 function getBearerToken(request: Request): string {
   const authorization = request.headers.get("authorization") || ""
@@ -29,6 +29,9 @@ function getAccountDirectoryErrorMessage(error: unknown, operation: AccountDirec
     if (code === "incomplete-service-account") {
       return "FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON에 project_id, client_email 또는 private_key가 없습니다."
     }
+    if (code === "invalid-private-key") {
+      return "FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON의 private_key가 손상되었거나 올바른 PEM 키가 아닙니다. JSON 값을 다시 등록해 주세요."
+    }
   }
 
   const firebaseErrorCode = getSafeFirebaseErrorCode(error)
@@ -43,6 +46,9 @@ function getAccountDirectoryErrorMessage(error: unknown, operation: AccountDirec
   if (operation === "list-users") {
     return `Firebase Auth 계정 목록 조회가 거부되었습니다. 서비스 계정의 프로젝트와 권한을 확인해 주세요.${errorCodeSuffix}`
   }
+  if (operation === "load-module") {
+    return `배포 서버에서 Firebase Admin 모듈을 불러오지 못했습니다.${errorCodeSuffix}`
+  }
 
   return `Firebase Admin 초기화에 실패했습니다.${errorCodeSuffix}`
 }
@@ -53,10 +59,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "인증 정보가 없습니다." }, { status: 401 })
   }
 
-  let operation: AccountDirectoryOperation = "initialize"
+  let operation: AccountDirectoryOperation = "load-module"
 
   try {
     const { getFirebaseAdminAuth } = await import("@/lib/firebase-admin")
+    operation = "initialize"
     const adminAuth = getFirebaseAdminAuth()
     operation = "verify-token"
     const decodedToken = await adminAuth.verifyIdToken(token)

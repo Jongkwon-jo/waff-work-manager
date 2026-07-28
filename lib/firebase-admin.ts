@@ -13,6 +13,7 @@ export type FirebaseAdminConfigurationErrorCode =
   | "missing-service-account"
   | "invalid-service-account-json"
   | "incomplete-service-account"
+  | "invalid-private-key"
 
 export class FirebaseAdminConfigurationError extends Error {
   constructor(
@@ -69,11 +70,26 @@ function getFirebaseAdminCredential() {
     )
   }
 
-  return cert({
-    projectId: serviceAccount.project_id,
-    clientEmail: serviceAccount.client_email,
-    privateKey: serviceAccount.private_key.replace(/\\n/g, "\n"),
-  })
+  const privateKey = serviceAccount.private_key.replace(/\\n/g, "\n")
+  if (!privateKey.includes("-----BEGIN PRIVATE KEY-----") || !privateKey.includes("-----END PRIVATE KEY-----")) {
+    throw new FirebaseAdminConfigurationError(
+      "invalid-private-key",
+      "The Firebase service account private key is not a valid PEM key.",
+    )
+  }
+
+  try {
+    return cert({
+      projectId: serviceAccount.project_id,
+      clientEmail: serviceAccount.client_email,
+      privateKey,
+    })
+  } catch {
+    throw new FirebaseAdminConfigurationError(
+      "invalid-private-key",
+      "The Firebase service account private key could not be parsed.",
+    )
+  }
 }
 
 function getFirebaseAdminApp() {
