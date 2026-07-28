@@ -3,12 +3,21 @@ import { NextResponse } from "next/server"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
+type AccountDirectoryOperation = "initialize" | "verify-token" | "list-users"
+
+const ACCOUNT_DIRECTORY_API_VERSION = "2"
+
 function getBearerToken(request: Request): string {
   const authorization = request.headers.get("authorization") || ""
   return authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : ""
 }
 
-function getAccountDirectoryErrorMessage(error: unknown): string {
+function getSafeFirebaseErrorCode(error: unknown): string {
+  if (!error || typeof error !== "object" || !("code" in error) || typeof error.code !== "string") return ""
+  return /^[a-z0-9_/-]{1,80}$/i.test(error.code) ? error.code : ""
+}
+
+function getAccountDirectoryErrorMessage(error: unknown, operation: AccountDirectoryOperation): string {
   if (error && typeof error === "object" && "name" in error && error.name === "FirebaseAdminConfigurationError") {
     const code = "code" in error ? error.code : undefined
     if (code === "missing-service-account") {
@@ -22,13 +31,20 @@ function getAccountDirectoryErrorMessage(error: unknown): string {
     }
   }
 
-  const firebaseErrorCode =
-    error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : ""
+  const firebaseErrorCode = getSafeFirebaseErrorCode(error)
   if (firebaseErrorCode === "app/invalid-credential" || firebaseErrorCode === "auth/invalid-credential") {
     return "Vercel에 등록된 Firebase 서비스 계정 키가 유효하지 않거나 권한이 없습니다. JSON 값을 다시 등록해 주세요."
   }
 
-  return "Firebase 인증 계정 목록을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요."
+  const errorCodeSuffix = firebaseErrorCode ? ` (오류 코드: ${firebaseErrorCode})` : ""
+  if (operation === "verify-token") {
+    return `로그인 토큰의 Firebase 프로젝트와 서버에 등록된 서비스 계정 프로젝트가 일치하지 않습니다.${errorCodeSuffix}`
+  }
+  if (operation === "list-users") {
+    return `Firebase Auth 계정 목록 조회가 거부되었습니다. 서비스 계정의 프로젝트와 권한을 확인해 주세요.${errorCodeSuffix}`
+  }
+
+  return `Firebase Admin 초기화에 실패했습니다.${errorCodeSuffix}`
 }
 
 export async function GET(request: Request) {
@@ -37,14 +53,18 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "인증 정보가 없습니다." }, { status: 401 })
   }
 
+  let operation: AccountDirectoryOperation = "initialize"
+
   try {
     const { getFirebaseAdminAuth } = await import("@/lib/firebase-admin")
     const adminAuth = getFirebaseAdminAuth()
+    operation = "verify-token"
     const decodedToken = await adminAuth.verifyIdToken(token)
     if (!decodedToken.email) {
       return NextResponse.json({ error: "이메일 계정만 조회할 수 있습니다." }, { status: 403 })
     }
 
+    operation = "list-users"
     const accountEmails = new Set<string>()
     const activeAccountEmails = new Set<string>()
     let pageToken: string | undefined
@@ -68,6 +88,7 @@ export async function GET(request: Request) {
       {
         headers: {
           "Cache-Control": "private, no-store, max-age=0",
+          "X-Account-Directory-Version": ACCOUNT_DIRECTORY_API_VERSION,
         },
       },
     )
@@ -75,9 +96,14 @@ export async function GET(request: Request) {
     console.error("Firebase Auth account directory error:", error)
     return NextResponse.json(
       {
-        error: getAccountDirectoryErrorMessage(error),
+        error: getAccountDirectoryErrorMessage(error, operation),
       },
-      { status: 503 },
+      {
+        status: 503,
+        headers: {
+          "X-Account-Directory-Version": ACCOUNT_DIRECTORY_API_VERSION,
+        },
+      },
     )
   }
 }
