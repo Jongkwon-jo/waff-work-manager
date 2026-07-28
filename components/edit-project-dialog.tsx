@@ -54,12 +54,13 @@ export function EditProjectDialog({ project, onEditProject, trigger, pmOptions =
     e.preventDefault()
     if (!name) return
 
+    const selectablePmEmails = new Set(pmOptions.map((option) => option.email.trim().toLowerCase()))
     onEditProject({
       ...project,
       name,
       type,
       period,
-      ...makeProjectPmFields(pmEmails),
+      ...makeProjectPmFields(pmEmails.filter((email) => selectablePmEmails.has(email.trim().toLowerCase()))),
     })
     setOpen(false)
   }

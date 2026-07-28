@@ -4296,13 +4296,17 @@ function OwnerMultiSelect({
     () => options.filter((owner) => !inactiveOwnerSet.has(normalizeOwnerName(owner))),
     [inactiveOwnerSet, options],
   )
+  const selectableSelected = useMemo(
+    () => selected.filter((owner) => !inactiveOwnerSet.has(normalizeOwnerName(owner))),
+    [inactiveOwnerSet, selected],
+  )
   const deletableOwnerSet = useMemo(
     () => new Set(deletableOptions.map(normalizeOwnerName).filter(Boolean)),
     [deletableOptions],
   )
   const allOptions = useMemo(
-    () => Array.from(new Set([...selectableOptions, ...selected])).filter(Boolean),
-    [selectableOptions, selected],
+    () => Array.from(new Set([...selectableOptions, ...selectableSelected])).filter(Boolean),
+    [selectableOptions, selectableSelected],
   )
 
   useEffect(() => {
@@ -4316,7 +4320,7 @@ function OwnerMultiSelect({
   }
 
   const toggleOwner = (owner: string) => {
-    const selectedSet = new Set(selected)
+    const selectedSet = new Set(selectableSelected)
     if (selectedSet.has(owner)) selectedSet.delete(owner)
     else if (inactiveOwnerSet.has(normalizeOwnerName(owner))) {
       toast.warning("퇴사자는 새 담당자로 추가할 수 없습니다.")
@@ -4326,7 +4330,7 @@ function OwnerMultiSelect({
   }
 
   const removeOwner = (owner: string) => {
-    const selectedSet = new Set(selected)
+    const selectedSet = new Set(selectableSelected)
     selectedSet.delete(owner)
     commitSelectedOwners(Array.from(selectedSet))
   }
@@ -4339,7 +4343,7 @@ function OwnerMultiSelect({
       setNewOwner("")
       return
     }
-    commitSelectedOwners([...selected, trimmed])
+    commitSelectedOwners([...selectableSelected, trimmed])
     setNewOwner("")
   }
 
@@ -4350,9 +4354,9 @@ function OwnerMultiSelect({
           variant="outline"
           className="h-7 w-full justify-between px-2 text-[11px] font-normal"
         >
-          {selected.length > 0 ? (
+          {selectableSelected.length > 0 ? (
             <span className="flex min-w-0 items-center gap-1 overflow-hidden">
-              {selected.slice(0, 2).map((owner) => (
+              {selectableSelected.slice(0, 2).map((owner) => (
                 <span
                   key={owner}
                   className={cn("max-w-[58px] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold", getOwnerTokenColorClass(owner))}
@@ -4360,7 +4364,7 @@ function OwnerMultiSelect({
                   {owner}
                 </span>
               ))}
-              {selected.length > 2 && <span className="text-[10px] text-muted-foreground">+{selected.length - 2}</span>}
+              {selectableSelected.length > 2 && <span className="text-[10px] text-muted-foreground">+{selectableSelected.length - 2}</span>}
             </span>
           ) : (
             <span className="truncate">담당자 선택</span>
@@ -4388,8 +4392,7 @@ function OwnerMultiSelect({
         </div>
         <div className="max-h-44 space-y-1 overflow-auto pr-1">
           {allOptions.map((owner) => {
-            const checked = selected.includes(owner)
-            const inactive = inactiveOwnerSet.has(normalizeOwnerName(owner))
+            const checked = selectableSelected.includes(owner)
             const deletable = deletableOwnerSet.has(normalizeOwnerName(owner))
             return (
               <div key={owner} className="flex items-center gap-1">
@@ -4400,9 +4403,8 @@ function OwnerMultiSelect({
                 >
                   <input type="checkbox" readOnly checked={checked} className="h-3.5 w-3.5" />
                   <span className="truncate">{owner}</span>
-                  {inactive && <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">퇴사</span>}
                 </button>
-                {!inactive && deletable && (
+                {deletable && (
                   <button
                     type="button"
                     onClick={() => {

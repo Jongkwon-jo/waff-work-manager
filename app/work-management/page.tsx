@@ -56,6 +56,7 @@ import { cn, keepIfShallowEqual } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useScheduleListenerActive } from "@/hooks/use-schedule-listener-active"
+import { useUserAccountDirectory } from "@/hooks/use-user-account-directory"
 import { toast } from "sonner"
 import { RecentChangesWidget } from "@/components/recent-changes-widget"
 import {
@@ -69,6 +70,7 @@ import { getInactiveDepartmentOrgPersonNamesFromSettings, isUserProfileActiveFor
 
 export default function StrategyWorkManagementPage() {
   const { user, loading: authLoading, isAdmin, pagePermissions } = useAuth()
+  const { activeAccountEmails } = useUserAccountDirectory(user)
   const isMobile = useIsMobile()
   const isScheduleListenerActive = useScheduleListenerActive()
   const canEdit = isAdmin || pagePermissions.strategyWorkManagementEdit
@@ -730,12 +732,16 @@ export default function StrategyWorkManagementPage() {
   const pmOptions = useMemo<ProjectPmOption[]>(
     () =>
       userProfiles
-        .filter((profile) => isUserProfileActiveForOrg(profile, departmentOrgSettings))
+        .filter(
+          (profile) =>
+            activeAccountEmails?.has(profile.email) &&
+            isUserProfileActiveForOrg(profile, departmentOrgSettings),
+        )
         .map((profile) => ({
           email: profile.email,
           label: profile.taskAliases?.[0] || profile.email,
         })),
-    [departmentOrgSettings, userProfiles],
+    [activeAccountEmails, departmentOrgSettings, userProfiles],
   )
 
   const inactiveOwnerOptions = useMemo(

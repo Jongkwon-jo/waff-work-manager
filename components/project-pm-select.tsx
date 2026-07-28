@@ -32,18 +32,18 @@ export function ProjectPmSelect({
   const normalizedValue = Array.from(
     new Set(value.map((email) => email.trim().toLowerCase()).filter(Boolean)),
   )
-  const selectedSet = new Set(normalizedValue)
   const labelByEmail = new Map(options.map((option) => [option.email.trim().toLowerCase(), option.label]))
-  const inactiveSelectedEmails = normalizedValue.filter((email) => !labelByEmail.has(email))
-  const selectedLabels = normalizedValue.map((email) => labelByEmail.get(email) || `${email} (기존 PM/퇴사)`)
+  const selectableValue = normalizedValue.filter((email) => labelByEmail.has(email))
+  const selectedSet = new Set(selectableValue)
+  const selectedLabels = selectableValue.map((email) => labelByEmail.get(email) || email)
   const selectedLabel =
     selectedLabels.length > 0 ? selectedLabels.join(", ") : "PM 미지정"
 
   const toggleEmail = (email: string) => {
     const normalizedEmail = email.trim().toLowerCase()
     const next = selectedSet.has(normalizedEmail)
-      ? normalizedValue.filter((item) => item !== normalizedEmail)
-      : [...normalizedValue, normalizedEmail]
+      ? selectableValue.filter((item) => item !== normalizedEmail)
+      : [...selectableValue, normalizedEmail]
     onChange(next)
   }
 
@@ -68,19 +68,9 @@ export function ProjectPmSelect({
             <CommandEmpty>검색 결과가 없습니다.</CommandEmpty>
             <CommandGroup>
               <CommandItem value={unassignedValue} onSelect={() => onChange([])}>
-                <Check className={cn("h-4 w-4", normalizedValue.length === 0 ? "opacity-100" : "opacity-0")} />
+                <Check className={cn("h-4 w-4", selectableValue.length === 0 ? "opacity-100" : "opacity-0")} />
                 <span>PM 미지정</span>
               </CommandItem>
-              {inactiveSelectedEmails.map((email) => (
-                <CommandItem
-                  key={`inactive-${email}`}
-                  value={`기존 PM 퇴사 ${email}`}
-                  onSelect={() => toggleEmail(email)}
-                >
-                  <Check className="h-4 w-4 opacity-100" />
-                  <span className="min-w-0 flex-1 truncate">{email} (기존 PM/퇴사)</span>
-                </CommandItem>
-              ))}
               {options.map((option) => (
                 <CommandItem
                   key={option.email}

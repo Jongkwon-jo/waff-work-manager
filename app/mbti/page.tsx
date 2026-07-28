@@ -18,6 +18,7 @@ import {
   type UserProfile,
 } from "@/lib/firestore-service"
 import { isUserProfileActiveForOrg } from "@/lib/department-org"
+import { useUserAccountDirectory } from "@/hooks/use-user-account-directory"
 
 const MBTI_COLORS: Record<MbtiType, { card: string; border: string; badge: string }> = {
   INTJ: { card: "from-violet-50 to-purple-50/60", border: "border-violet-200/60", badge: "bg-violet-100 text-violet-700" },
@@ -81,7 +82,8 @@ function getDisplayName(profile: UserProfile): string {
 }
 
 export default function MbtiPage() {
-  const { isAdmin } = useAuth()
+  const { user, isAdmin } = useAuth()
+  const { activeAccountEmails } = useUserAccountDirectory(user)
   const [profiles, setProfiles] = useState<UserProfile[]>([])
   const [departmentOrgSettings, setDepartmentOrgSettings] = useState<DepartmentOrgSettings>(
     DEFAULT_DEPARTMENT_ORG_SETTINGS,
@@ -98,8 +100,13 @@ export default function MbtiPage() {
   }, [])
 
   const activeProfiles = useMemo(
-    () => profiles.filter((profile) => isUserProfileActiveForOrg(profile, departmentOrgSettings)),
-    [departmentOrgSettings, profiles],
+    () =>
+      profiles.filter(
+        (profile) =>
+          activeAccountEmails?.has(profile.email) &&
+          isUserProfileActiveForOrg(profile, departmentOrgSettings),
+      ),
+    [activeAccountEmails, departmentOrgSettings, profiles],
   )
 
   const mbtiCards = useMemo(() => {

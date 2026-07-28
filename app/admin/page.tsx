@@ -18,6 +18,7 @@ import {
   DEFAULT_DEPARTMENT_PERSON_SETTINGS,
   DEFAULT_MY_PAGE_EDITABLE_FIELDS,
   MBTI_TYPES,
+  ensurePendingUserProfile,
   saveDepartmentOrgSettings,
   saveGlobalSchedules,
   saveMyPageEditableFields,
@@ -55,6 +56,7 @@ import {
   type UserPagePermissions,
 } from "@/lib/page-access"
 import { cn } from "@/lib/utils"
+import { useUserAccountDirectory } from "@/hooks/use-user-account-directory"
 
 type DraftPermissionMap = Record<string, UserPagePermissions>
 type DraftAliasMap = Record<string, string>
@@ -323,7 +325,12 @@ function DepartmentOrgEditor({
 
 
 export default function AdminPage() {
-  const { isAdmin } = useAuth()
+  const { user, isAdmin } = useAuth()
+  const {
+    accountEmails,
+    loading: accountDirectoryLoading,
+    error: accountDirectoryError,
+  } = useUserAccountDirectory(user)
   const [profiles, setProfiles] = useState<UserProfile[]>([])
   const [permissionEntries, setPermissionEntries] = useState<UserPagePermissionEntry[]>([])
   const [departmentPersonSettings, setDepartmentPersonSettings] = useState<DepartmentPersonSettings>(
@@ -386,13 +393,19 @@ export default function AdminPage() {
 
   const rows = useMemo(() => {
     const emails = new Set<string>()
-    profiles.forEach((profile) => emails.add(profile.email))
-    permissionEntries.forEach((entry) => emails.add(entry.email))
+    profiles.forEach((profile) => {
+      if (accountEmails?.has(profile.email) || profile.accountStatus === "pending") {
+        emails.add(profile.email)
+      }
+    })
+    permissionEntries.forEach((entry) => {
+      if (accountEmails?.has(entry.email)) emails.add(entry.email)
+    })
 
     return Array.from(emails)
       .filter((email) => !isAdminEmail(email))
       .sort((a, b) => a.localeCompare(b))
-  }, [profiles, permissionEntries])
+  }, [accountEmails, profiles, permissionEntries])
 
   const filteredRows = useMemo(() => {
     const query = accountNameQuery.trim().toLowerCase()
@@ -555,6 +568,7 @@ export default function AdminPage() {
       [normalized]: prev[normalized] || "none",
     }))
     setDraftEmail("")
+    await ensurePendingUserProfile(normalized)
     await handleSaveUser(normalized)
   }
 
@@ -891,7 +905,13 @@ export default function AdminPage() {
             </div>
           </CardHeader>
           <CardContent className="overflow-x-auto">
-            {rows.length === 0 ? (
+            {accountDirectoryLoading ? (
+              <p className="text-sm text-muted-foreground">Firebase 인증 계정 목록을 확인하는 중입니다.</p>
+            ) : accountDirectoryError ? (
+              <p className="text-sm text-destructive">
+                {accountDirectoryError} 서버의 Firebase Admin 인증 설정을 확인해 주세요.
+              </p>
+            ) : rows.length === 0 ? (
               <p className="text-sm text-muted-foreground">아직 관리할 사용자가 없습니다.</p>
             ) : (
               <>

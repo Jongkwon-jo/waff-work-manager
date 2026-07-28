@@ -96,6 +96,7 @@ export type MyPagePersonalTask = {
 }
 export type UserProfile = {
   email: string
+  accountStatus?: "pending" | "active"
   lastLoginAt?: Date
   taskAliases?: string[]
   hiddenOwnerOptions?: string[]
@@ -2034,6 +2035,7 @@ export async function upsertUserProfile(email: string): Promise<void> {
     doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
     {
       email: normalizedEmail,
+      accountStatus: "active",
       lastLoginAt: serverTimestamp(),
     },
     { merge: true },
@@ -2043,6 +2045,7 @@ export async function upsertUserProfile(email: string): Promise<void> {
 function mapUserProfileDoc(docSnap: { data: () => any }): UserProfile | null {
   const raw = docSnap.data() as {
     email?: unknown
+    accountStatus?: unknown
     lastLoginAt?: { toDate?: () => Date }
     department?: unknown
     taskAliases?: unknown
@@ -2056,6 +2059,7 @@ function mapUserProfileDoc(docSnap: { data: () => any }): UserProfile | null {
   }
   const profile = {
     email: normalizeEmail(toStringOrEmpty(raw?.email)),
+    accountStatus: raw?.accountStatus === "pending" ? "pending" : raw?.accountStatus === "active" ? "active" : undefined,
     lastLoginAt: raw?.lastLoginAt?.toDate?.() || undefined,
     department: normalizeDepartmentGroup(raw?.department),
     taskAliases: Array.isArray(raw?.taskAliases)
@@ -2088,6 +2092,22 @@ function mapUserProfileDoc(docSnap: { data: () => any }): UserProfile | null {
   return profile.email ? profile : null
 }
 
+export async function ensurePendingUserProfile(email: string): Promise<void> {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return
+
+  const profileRef = doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail))
+  const snapshot = await getDoc(profileRef)
+  if (snapshot.exists()) return
+
+  await setDoc(profileRef, {
+    email: normalizedEmail,
+    accountStatus: "pending",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true })
+}
+
 export async function fetchUserProfiles(): Promise<UserProfile[]> {
   const snapshot = await getDocs(collection(db, USER_PROFILES_COLLECTION))
   return snapshot.docs
@@ -2116,6 +2136,7 @@ export function subscribeUserProfiles(callback: (profiles: UserProfile[]) => voi
 function parseUserProfileSnapshot(raw: Record<string, unknown> | undefined): UserProfile {
   return {
     email: normalizeEmail(toStringOrEmpty(raw?.email)),
+    accountStatus: raw?.accountStatus === "pending" ? "pending" : raw?.accountStatus === "active" ? "active" : undefined,
     lastLoginAt: (raw?.lastLoginAt as { toDate?: () => Date } | undefined)?.toDate?.() || undefined,
     department: normalizeDepartmentGroup(raw?.department),
     taskAliases: Array.isArray(raw?.taskAliases)
