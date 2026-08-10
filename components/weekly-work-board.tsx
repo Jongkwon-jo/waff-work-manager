@@ -161,7 +161,7 @@ function getWeeklyStatusBarClass(status: Task["status"]) {
       return "bg-blue-500 text-blue-50"
     case "예정":
       return "bg-gray-200 text-gray-700"
-    case "보류":
+    case "취소":
       return "bg-yellow-200 text-yellow-800"
     default:
       return "bg-rose-50 text-rose-600"

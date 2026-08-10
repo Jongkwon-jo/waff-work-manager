@@ -25,7 +25,7 @@ const statusOptions: { value: TaskStatus | "all"; label: string }[] = [
   { value: "all", label: "전체 상태" },
   { value: "진행", label: "진행" },
   { value: "예정", label: "예정" },
-  { value: "보류", label: "보류" },
+  { value: "취소", label: "취소" },
   { value: "미정", label: "미정" },
   { value: "완료", label: "완료" },
 ]

@@ -262,7 +262,7 @@ function getStatusBarStyle(status: string): { barClass: string; textClass: strin
   if (normalized === "예정" || normalized.includes("wait")) {
     return { barClass: "bg-gray-400", textClass: "text-gray-50" }
   }
-  if (normalized === "보류" || normalized.includes("hold")) {
+  if (normalized === "취소" || normalized.includes("cancel")) {
     return { barClass: "bg-yellow-100", textClass: "text-yellow-800" }
   }
   return { barClass: "bg-rose-100", textClass: "text-rose-700" }
@@ -3411,7 +3411,7 @@ interface MobileGanttViewProps {
   buildTaskWithAutoManDays: (task: Task, updates: Partial<Task>) => Task
 }
 
-const STATUS_ORDER = ["완료", "진행", "예정", "보류"] as const
+const STATUS_ORDER = ["완료", "진행", "예정", "취소"] as const
 
 function MobileGanttView({
   filteredProjects,
@@ -4139,7 +4139,7 @@ function StatusInlineSelect({
         ? "bg-blue-100 text-blue-700"
         : value === "예정"
           ? "bg-gray-100 text-gray-700"
-          : value === "보류"
+          : value === "취소"
             ? "bg-yellow-100 text-yellow-800"
             : "bg-rose-100 text-rose-700"
 
@@ -4156,7 +4156,7 @@ function StatusInlineSelect({
       <SelectContent>
         <SelectItem value="진행">진행</SelectItem>
         <SelectItem value="예정">예정</SelectItem>
-        <SelectItem value="보류">보류</SelectItem>
+        <SelectItem value="취소">취소</SelectItem>
         <SelectItem value="미정">미정</SelectItem>
         <SelectItem value="완료">완료</SelectItem>
       </SelectContent>

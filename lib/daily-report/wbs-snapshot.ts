@@ -79,7 +79,7 @@ const isRelevantTask = (
     // 전체 기간 조회일 때만 먼 미래 예정 업무를 제한한다.
     return !startDate || windowDays > 0 || startDate <= addDaysIso(todayIso, 60);
   }
-  // 진행 / 보류 / 미정 → 모두 유지
+  // 진행 / 취소 / 미정 → 모두 유지
   return true;
 };
 

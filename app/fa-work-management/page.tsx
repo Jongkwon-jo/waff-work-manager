@@ -1841,7 +1841,7 @@ export default function FaWorkManagementPage() {
       "완료": allTasksFlat.filter((t) => t.status === "완료").length,
       "진행": allTasksFlat.filter((t) => t.status === "진행").length,
       "예정": allTasksFlat.filter((t) => t.status === "예정").length,
-      "보류": allTasksFlat.filter((t) => t.status === "보류").length,
+      "취소": allTasksFlat.filter((t) => t.status === "취소").length,
       "미정": allTasksFlat.filter((t) => t.status === "미정").length,
     }
   }, [allTasksFlat])

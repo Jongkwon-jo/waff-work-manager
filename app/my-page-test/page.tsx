@@ -131,7 +131,7 @@ type CalendarBadgeKey = "project" | "category" | "status"
 
 const CALENDAR_DND_MIME = "application/x-workhub-calendar-item"
 const DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"]
-const PROJECT_STATUS_FILTERS: TaskStatus[] = ["진행", "예정", "보류", "미정", "완료"]
+const PROJECT_STATUS_FILTERS: TaskStatus[] = ["진행", "예정", "취소", "미정", "완료"]
 const CALENDAR_BADGE_OPTIONS: Array<{ key: CalendarBadgeKey; label: string }> = [
   { key: "project", label: "프로젝트" },
   { key: "category", label: "업무 분류" },
@@ -189,7 +189,7 @@ const priorityMeta: Record<MyPageTaskPreference["priority"], { label: string; cl
 const statusFilterMeta: Record<TaskStatus, string> = {
   진행: "border-blue-500 bg-blue-500 text-white",
   예정: "border-slate-500 bg-slate-500 text-white",
-  보류: "border-yellow-500 bg-yellow-500 text-white",
+  취소: "border-yellow-500 bg-yellow-500 text-white",
   미정: "border-rose-500 bg-rose-500 text-white",
   완료: "border-slate-800 bg-slate-800 text-white",
 }

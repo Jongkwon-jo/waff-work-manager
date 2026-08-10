@@ -1,4 +1,4 @@
-export const TASK_STATUS_VALUES = ["완료", "진행", "예정", "보류", "미정"] as const
+export const TASK_STATUS_VALUES = ["완료", "진행", "예정", "취소", "미정"] as const
 export type EmailAgentTaskStatus = (typeof TASK_STATUS_VALUES)[number]
 
 export const TASK_CATEGORY_VALUES = ["일반", "중요", "정기", "상시"] as const

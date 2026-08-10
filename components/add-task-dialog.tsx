@@ -336,7 +336,7 @@ export function AddTaskDialog({
                   <SelectItem value="예정">예정</SelectItem>
                   <SelectItem value="진행">진행</SelectItem>
                   <SelectItem value="완료">완료</SelectItem>
-                  <SelectItem value="보류">보류</SelectItem>
+                  <SelectItem value="취소">취소</SelectItem>
                   <SelectItem value="미정">미정</SelectItem>
                 </SelectContent>
               </Select>

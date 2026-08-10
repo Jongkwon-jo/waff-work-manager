@@ -86,7 +86,7 @@ export function ProjectList({
             
             // 상태 정렬을 위한 가중치 (선택 사항)
             if (taskSortField === "status") {
-              const weights = { "진행": 1, "예정": 2, "미정": 3, "보류": 4, "완료": 5 }
+              const weights = { "진행": 1, "예정": 2, "미정": 3, "취소": 4, "완료": 5 }
               valA = weights[a.status as keyof typeof weights] || 9
               valB = weights[b.status as keyof typeof weights] || 9
             }

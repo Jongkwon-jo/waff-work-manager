@@ -32,13 +32,13 @@ snapshot 의 모든 날짜 필드(todayIso, startDate, endDate)는 이미 ISO 86
 }
 각 부서 배열(strategy/fa/ict)의 원소는 SlimProject { id, name, type, pmEmail, tasks: SlimTask[] }.
 SlimTask: { id, title, department, person, status, category, startDate, endDate, manDays }
-status: "완료" | "진행" | "예정" | "보류" | "미정"
+status: "완료" | "진행" | "예정" | "취소" | "미정"
 category: "일반" | "중요" | "정기" | "상시"
 
 섹션 분류 — 위에서부터 먼저 매칭되는 규칙을 적용하고, 한 번 분류된 태스크는 이후 규칙과 비교하지 않는다:
 1. **status 가 "완료" 가 아니면서 endDate < todayIso → section "atRisk", priority "high"** (지연 위험 — 마감 초과). 가장 우선되는 규칙이며 어떤 경우에도 누락 금지.
 2. status 가 "완료" → 다른 부서/팀이 참고할 만한 결과물이면 section "reference", priority "low" (전체 최대 5개). 그 외 완료 태스크는 결과에 포함하지 않는다.
-3. status 가 "보류" → section "pending", priority "medium".
+3. status 가 "취소" → section "pending", priority "medium".
 4. endDate == todayIso 또는 startDate == todayIso → section "today", priority "high".
 5. endDate 가 todayIso 보다 1~3일 후이고 status 가 "진행" 또는 "예정" → section "immediate", priority "high".
 6. 그 외 진행/예정 항목은 임팩트 큰 것만 골라 가장 가까운 섹션(today/immediate/pending)에 배치하거나 결과에서 제외한다.

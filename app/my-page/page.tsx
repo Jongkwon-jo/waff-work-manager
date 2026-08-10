@@ -128,7 +128,7 @@ const priorityMeta: Record<MyPageTaskPreference["priority"], { label: string; cl
 
 type ProjectStatusFilter = TaskStatus
 
-const PROJECT_STATUS_FILTERS: ProjectStatusFilter[] = ["진행", "예정", "보류", "미정", "완료"]
+const PROJECT_STATUS_FILTERS: ProjectStatusFilter[] = ["진행", "예정", "취소", "미정", "완료"]
 
 const PROJECT_DATE_RANGE_PRESETS: { value: ProjectDateRangePreset; label: string }[] = [
   { value: "currentMonth", label: "이번달" },
@@ -146,7 +146,7 @@ const projectStatusFilterMeta: Record<ProjectStatusFilter, { className: string; 
     className: "border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-400",
     activeClassName: "border-gray-500 bg-gray-600 text-white ring-2 ring-gray-100",
   },
-  보류: {
+  취소: {
     className: "border-yellow-200 bg-yellow-50 text-yellow-800 hover:border-yellow-400",
     activeClassName: "border-yellow-500 bg-yellow-400 text-yellow-950 ring-2 ring-yellow-100",
   },

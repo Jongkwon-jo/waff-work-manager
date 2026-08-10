@@ -6,7 +6,7 @@ interface StatusSummaryProps {
     "완료": number
     "진행": number
     "예정": number
-    "보류": number
+    "취소": number
     "미정": number
   }
   showDescriptions?: boolean
@@ -47,12 +47,12 @@ const summaryItems = [
     description: "진행 예정된 업무",
   },
   {
-    key: "보류" as const,
-    label: "보류",
+    key: "취소" as const,
+    label: "취소",
     strip: "bg-yellow-400",
     labelColor: "text-yellow-700",
     numColor: "text-yellow-700",
-    description: "진행 보류된 업무",
+    description: "취소된 업무",
   },
   {
     key: "미정" as const,

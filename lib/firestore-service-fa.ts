@@ -160,6 +160,7 @@ function todayLabel(): string {
 function normalizeTaskStatus(status: string): Task["status"] {
   const normalized = status.trim()
   if (normalized === "대기") return "예정"
+  if (normalized === "보류") return "취소"
   return (normalized as Task["status"]) || "미정"
 }
 

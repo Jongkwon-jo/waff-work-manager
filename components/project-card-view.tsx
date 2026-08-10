@@ -10,7 +10,7 @@ import {
   Clock,
   CheckCircle2,
   Loader2,
-  PauseCircle,
+  XCircle,
   HelpCircle,
   Timer,
   ChevronDown,
@@ -149,7 +149,7 @@ function ProjectCard({
   const completedCount = project.tasks.filter((t) => t.status === "완료").length
   const inProgressCount = project.tasks.filter((t) => t.status === "진행").length
   const waitingCount = project.tasks.filter((t) => t.status === "예정").length
-  const holdCount = project.tasks.filter((t) => t.status === "보류").length
+  const canceledCount = project.tasks.filter((t) => t.status === "취소").length
   const undecidedCount = project.tasks.filter((t) => t.status === "미정").length
   const totalCount = project.tasks.length
   const progressPercent =
@@ -238,11 +238,11 @@ function ProjectCard({
               color="text-amber-600"
             />
           )}
-          {holdCount > 0 && (
+          {canceledCount > 0 && (
             <StatusCount
-              icon={<PauseCircle className="h-3 w-3 text-slate-400" />}
-              label="보류"
-              count={holdCount}
+              icon={<XCircle className="h-3 w-3 text-slate-400" />}
+              label="취소"
+              count={canceledCount}
               color="text-slate-500"
             />
           )}
@@ -356,7 +356,7 @@ function ProjectCard({
                               ? "bg-blue-500"
                               : task.status === "예정"
                                 ? "bg-amber-500"
-                                : task.status === "보류"
+                                : task.status === "취소"
                                   ? "bg-slate-400"
                                   : "bg-rose-400"
                         )}

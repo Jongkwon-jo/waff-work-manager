@@ -1,4 +1,4 @@
-﻿export type TaskStatus = "완료" | "진행" | "예정" | "보류" | "미정"
+﻿export type TaskStatus = "완료" | "진행" | "예정" | "취소" | "미정"
 export type TaskCategory = "일반" | "중요" | "정기" | "상시"
 
 export type TaskCompletionPhoto = {
@@ -165,7 +165,7 @@ export function getStatusCounts() {
     "완료": tasks.filter((t) => t.status === "완료").length,
     "진행": tasks.filter((t) => t.status === "진행").length,
     "예정": tasks.filter((t) => t.status === "예정").length,
-    "보류": tasks.filter((t) => t.status === "보류").length,
+    "취소": tasks.filter((t) => t.status === "취소").length,
     "미정": tasks.filter((t) => t.status === "미정").length,
   }
 }
