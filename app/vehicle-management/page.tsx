@@ -1,13 +1,11 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   AlertCircle,
   ArrowLeft,
   CarFront,
-  ChevronDown,
   Fuel,
   Gauge,
   History,
@@ -25,33 +23,20 @@ import { vehicleApiFetch } from "@/lib/vehicle-client"
 import type { Vehicle } from "@/lib/vehicle-types"
 
 function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
-  const retired = vehicle.status === "retired"
+  const driving = vehicle.activityStatus === "driving"
   return (
-    <Card className="group overflow-hidden border-slate-200/80 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg">
-      <div className="relative aspect-[16/9] overflow-hidden bg-gradient-to-br from-slate-100 to-cyan-50">
-        {vehicle.imageUrl ? (
-          <Image
-            src={vehicle.imageUrl}
-            alt={`${vehicle.plateNumber} 차량`}
-            fill
-            unoptimized
-            className="object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-slate-300">
-            <CarFront className="h-20 w-20" />
-          </div>
-        )}
-        <Badge className={`absolute left-3 top-3 ${retired ? "bg-slate-700" : "bg-emerald-600"}`}>
-          {retired ? "운행종료" : "운행중"}
-        </Badge>
-      </div>
+    <Card className="group border-slate-200/80 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg">
       <CardContent className="space-y-4 p-5">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-950">{vehicle.plateNumber}</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            {[vehicle.manufacturer, vehicle.model, vehicle.year].filter(Boolean).join(" · ")}
-          </p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="truncate text-xl font-bold tracking-tight text-slate-950">{vehicle.plateNumber}</h2>
+            <p className="mt-1 truncate text-sm text-slate-500">
+              {[vehicle.manufacturer, vehicle.model, vehicle.year].filter(Boolean).join(" · ") || "차량 상세정보 미지정"}
+            </p>
+          </div>
+          <Badge variant={driving ? "default" : "secondary"} className={driving ? "shrink-0 bg-emerald-600" : "shrink-0"}>
+            {driving ? "운행중" : "운행대기"}
+          </Badge>
         </div>
         <div className="grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-xl bg-slate-50 px-3 py-2.5">
@@ -80,40 +65,17 @@ function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          {retired ? (
-            <>
-              <Button type="button" variant="outline" className="gap-1.5" disabled>
-                <History className="h-4 w-4" /> 운행기록 입력
-              </Button>
-              <Button type="button" variant="outline" className="gap-1.5" disabled>
-                <Wrench className="h-4 w-4" /> 정비이력 입력
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button asChild className="gap-1.5">
-                <Link href={`/vehicle-management/${vehicle.id}/drives`}>
-                  <History className="h-4 w-4" /> 운행기록 입력
-                </Link>
-              </Button>
-              <Button asChild variant="outline" className="gap-1.5">
-                <Link href={`/vehicle-management/${vehicle.id}/maintenance`}>
-                  <Wrench className="h-4 w-4" /> 정비이력 입력
-                </Link>
-              </Button>
-            </>
-          )}
+          <Button asChild className="gap-1.5">
+            <Link href={`/vehicle-management/${vehicle.id}/drives`}>
+              <History className="h-4 w-4" /> 운행기록 입력
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="gap-1.5">
+            <Link href={`/vehicle-management/${vehicle.id}/maintenance`}>
+              <Wrench className="h-4 w-4" /> 정비이력 입력
+            </Link>
+          </Button>
         </div>
-        {retired && (
-          <div className="grid grid-cols-2 gap-2">
-            <Button asChild variant="ghost" size="sm">
-              <Link href={`/vehicle-management/${vehicle.id}/drives`}>운행이력 조회</Link>
-            </Button>
-            <Button asChild variant="ghost" size="sm">
-              <Link href={`/vehicle-management/${vehicle.id}/maintenance`}>정비이력 조회</Link>
-            </Button>
-          </div>
-        )}
       </CardContent>
     </Card>
   )
@@ -125,26 +87,29 @@ export default function VehicleManagementPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
-  const loadVehicles = useCallback(async () => {
+  const loadVehicles = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     if (!user) return
-    setLoading(true)
-    setError("")
+    if (!silent) {
+      setLoading(true)
+      setError("")
+    }
     try {
       const data = await vehicleApiFetch<{ vehicles: Vehicle[] }>(user, "/api/vehicles")
       setVehicles(data.vehicles)
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "차량 목록을 불러오지 못했습니다.")
+      if (!silent) setError(loadError instanceof Error ? loadError.message : "차량 목록을 불러오지 못했습니다.")
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [user])
 
   useEffect(() => {
     void loadVehicles()
+    const intervalId = window.setInterval(() => void loadVehicles({ silent: true }), 60 * 1000)
+    return () => window.clearInterval(intervalId)
   }, [loadVehicles])
 
-  const activeVehicles = useMemo(() => vehicles.filter((vehicle) => vehicle.status === "active"), [vehicles])
-  const retiredVehicles = useMemo(() => vehicles.filter((vehicle) => vehicle.status === "retired"), [vehicles])
+  const visibleVehicles = useMemo(() => vehicles.filter((vehicle) => vehicle.status === "active"), [vehicles])
 
   return (
     <main className="min-h-screen bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(6,182,212,0.13),transparent),linear-gradient(180deg,#f0f9ff_0%,#f8fafc_42%,#ffffff_100%)] px-4 py-8 lg:px-8">
@@ -182,10 +147,12 @@ export default function VehicleManagementPage() {
         {loading ? (
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-label="차량 목록 불러오는 중">
             {[0, 1, 2].map((item) => (
-              <Card key={item} className="overflow-hidden">
-                <Skeleton className="aspect-[16/9] w-full rounded-none" />
+              <Card key={item}>
                 <CardContent className="space-y-3 p-5">
-                  <Skeleton className="h-7 w-32" />
+                  <div className="flex justify-between gap-3">
+                    <Skeleton className="h-7 w-32" />
+                    <Skeleton className="h-6 w-16 rounded-full" />
+                  </div>
                   <Skeleton className="h-20 w-full" />
                   <Skeleton className="h-10 w-full" />
                 </CardContent>
@@ -229,36 +196,22 @@ export default function VehicleManagementPage() {
             <section className="space-y-3">
               <div className="flex items-end justify-between gap-3">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-950">운행중 차량</h2>
-                  <p className="text-sm text-slate-500">총 {activeVehicles.length}대</p>
+                  <h2 className="text-xl font-bold text-slate-950">차량 목록</h2>
+                  <p className="text-sm text-slate-500">현재 표시 중인 차량 {visibleVehicles.length}대</p>
                 </div>
               </div>
-              {activeVehicles.length > 0 ? (
+              {visibleVehicles.length > 0 ? (
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {activeVehicles.map((vehicle) => (
+                  {visibleVehicles.map((vehicle) => (
                     <VehicleCard key={vehicle.id} vehicle={vehicle} />
                   ))}
                 </div>
               ) : (
                 <p className="rounded-2xl border border-dashed bg-white/70 p-8 text-center text-sm text-slate-500">
-                  현재 운행중인 차량이 없습니다.
+                  현재 표시 중인 차량이 없습니다.{isAdmin ? " 차량 등록 관리에서 차량 보이기로 변경해 주세요." : ""}
                 </p>
               )}
             </section>
-
-            {retiredVehicles.length > 0 && (
-              <details className="group rounded-2xl border border-slate-200 bg-white/80 p-4">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-semibold text-slate-800">
-                  <span>운행종료 차량 · {retiredVehicles.length}대</span>
-                  <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
-                </summary>
-                <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {retiredVehicles.map((vehicle) => (
-                    <VehicleCard key={vehicle.id} vehicle={vehicle} />
-                  ))}
-                </div>
-              </details>
-            )}
           </>
         )}
       </div>

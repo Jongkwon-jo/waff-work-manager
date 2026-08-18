@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button"
 import type { Vehicle } from "@/lib/vehicle-types"
 
 export function VehicleRecordHeader({ vehicle, section }: { vehicle: Vehicle; section: "drives" | "maintenance" }) {
+  const hidden = vehicle.status === "retired"
+  const driving = vehicle.activityStatus === "driving"
+
   return (
     <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -19,8 +22,8 @@ export function VehicleRecordHeader({ vehicle, section }: { vehicle: Vehicle; se
               <h1 className="truncate text-2xl font-bold tracking-tight text-slate-950">
                 {vehicle.plateNumber} · {section === "drives" ? "차량운행 기록" : "정비이력"}
               </h1>
-              <Badge variant={vehicle.status === "active" ? "default" : "secondary"}>
-                {vehicle.status === "active" ? "운행중" : "운행종료"}
+              <Badge variant={!hidden && driving ? "default" : "secondary"} className={!hidden && driving ? "bg-emerald-600" : undefined}>
+                {hidden ? "차량 숨김" : driving ? "운행중" : "운행대기"}
               </Badge>
             </div>
             <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500">
@@ -51,10 +54,9 @@ export function VehicleRecordHeader({ vehicle, section }: { vehicle: Vehicle; se
       </div>
       {vehicle.status === "retired" && (
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          <CarFront className="h-4 w-4" /> 운행종료 차량은 과거 이력만 조회할 수 있습니다.
+          <CarFront className="h-4 w-4" /> 숨김 차량은 차량 선택 화면에 표시되지 않으며 과거 이력만 조회할 수 있습니다.
         </div>
       )}
     </header>
   )
 }
-

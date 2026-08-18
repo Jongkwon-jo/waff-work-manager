@@ -20,6 +20,7 @@ import { VehicleApiException, type VehicleRequestUser } from "@/lib/vehicle-api-
 const VEHICLES_COLLECTION = "vehicles"
 const DRIVE_RECORDS_COLLECTION = "driveRecords"
 const MAINTENANCE_RECORDS_COLLECTION = "maintenanceRecords"
+const KOREA_TIME_OFFSET_MS = 9 * 60 * 60 * 1000
 
 function firstValidationMessage(error: { issues: Array<{ message: string }> }) {
   return error.issues[0]?.message || "입력값을 확인해 주세요."
@@ -46,6 +47,7 @@ function serializeVehicle(id: string, data: DocumentData): Vehicle {
     year: String(data.year || ""),
     fuelType: String(data.fuelType || ""),
     status: data.status === "retired" ? "retired" : "active",
+    activityStatus: "waiting",
     baselineOdometerKm: Number(data.baselineOdometerKm || 0),
     currentOdometerKm: Number(data.currentOdometerKm || data.baselineOdometerKm || 0),
     primaryManagerEmail: String(data.primaryManagerEmail || ""),
@@ -151,20 +153,74 @@ async function signedImageUrl(imagePath?: string) {
   }
 }
 
+function koreaLocalDateTimeValue(date = new Date()) {
+  return new Date(date.getTime() + KOREA_TIME_OFFSET_MS).toISOString().slice(0, 16)
+}
+
+function parseKoreaLocalDateTime(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(value)
+  if (!match) return Number.NaN
+  const [, year, month, day, hour, minute, second = "0"] = match
+  return Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour) - 9,
+    Number(minute),
+    Number(second),
+  )
+}
+
+async function getVehicleActivityStatus(vehicleRef: DocumentReference, vehicle: Vehicle): Promise<Vehicle["activityStatus"]> {
+  if (vehicle.status !== "active") return "waiting"
+
+  try {
+    const now = new Date()
+    const snapshot = await vehicleRef
+      .collection(DRIVE_RECORDS_COLLECTION)
+      .where("drivenAt", "<=", koreaLocalDateTimeValue(now))
+      .orderBy("drivenAt", "desc")
+      .limit(1)
+      .get()
+    const record = snapshot.docs[0]?.data()
+    if (!record) return "waiting"
+
+    const startedAt = parseKoreaLocalDateTime(String(record.drivenAt || ""))
+    const durationMinutes = Number(record.naverDurationMinutes)
+    if (!Number.isFinite(startedAt) || !Number.isFinite(durationMinutes) || durationMinutes <= 0) return "waiting"
+
+    const nowValue = now.getTime()
+    return nowValue >= startedAt && nowValue < startedAt + durationMinutes * 60 * 1000 ? "driving" : "waiting"
+  } catch (error) {
+    console.error("Vehicle activity status error:", error)
+    return "waiting"
+  }
+}
+
 export async function listVehicles(): Promise<Vehicle[]> {
   const snapshot = await getFirebaseAdminFirestore().collection(VEHICLES_COLLECTION).orderBy("plateNumberKey", "asc").get()
   return Promise.all(
     snapshot.docs.map(async (document) => {
       const vehicle = serializeVehicle(document.id, document.data())
-      vehicle.imageUrl = await signedImageUrl(vehicle.imagePath)
+      const [imageUrl, activityStatus] = await Promise.all([
+        signedImageUrl(vehicle.imagePath),
+        getVehicleActivityStatus(document.ref, vehicle),
+      ])
+      vehicle.imageUrl = imageUrl
+      vehicle.activityStatus = activityStatus
       return vehicle
     }),
   )
 }
 
 export async function getVehicle(vehicleId: string): Promise<Vehicle> {
-  const { vehicle } = await getVehicleDocument(vehicleId)
-  vehicle.imageUrl = await signedImageUrl(vehicle.imagePath)
+  const { ref, vehicle } = await getVehicleDocument(vehicleId)
+  const [imageUrl, activityStatus] = await Promise.all([
+    signedImageUrl(vehicle.imagePath),
+    getVehicleActivityStatus(ref, vehicle),
+  ])
+  vehicle.imageUrl = imageUrl
+  vehicle.activityStatus = activityStatus
   return vehicle
 }
 
@@ -305,7 +361,7 @@ async function recalculateVehicleOdometer(vehicleRef: DocumentReference) {
 
 function ensureVehicleActive(vehicle: Vehicle) {
   if (vehicle.status !== "active") {
-    throw new VehicleApiException(409, "운행종료 차량은 기록을 변경할 수 없습니다. 관리자에게 재활성화를 요청해 주세요.")
+    throw new VehicleApiException(409, "숨김 차량은 기록을 변경할 수 없습니다. 관리자에게 차량 보이기를 요청해 주세요.")
   }
 }
 

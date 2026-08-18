@@ -34,6 +34,7 @@ export type VehicleInput = z.infer<typeof vehicleInputSchema>
 export type Vehicle = VehicleInput & {
   id: string
   currentOdometerKm: number
+  activityStatus: "driving" | "waiting"
   imagePath?: string
   imageUrl?: string
   createdByEmail: string

@@ -199,7 +199,7 @@ export function AdminVehicleManagement() {
                 <CarFront className="h-5 w-5 text-cyan-600" /> 차량 등록 관리
               </CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                법인차량 기본정보, 정/부 담당자, 차량 이미지와 운행 상태를 관리합니다.
+                법인차량 기본정보, 정/부 담당자, 차량 이미지와 차량 표시 여부를 관리합니다.
               </p>
             </div>
             <div className="flex gap-2">
@@ -228,7 +228,7 @@ export function AdminVehicleManagement() {
                   <TableHead className="w-[84px]">사진</TableHead>
                   <TableHead>차량번호</TableHead>
                   <TableHead>제조사 / 모델</TableHead>
-                  <TableHead>상태</TableHead>
+                  <TableHead>표시 여부</TableHead>
                   <TableHead className="text-right">현재 km</TableHead>
                   <TableHead>정 담당자</TableHead>
                   <TableHead>부 담당자</TableHead>
@@ -251,7 +251,7 @@ export function AdminVehicleManagement() {
                     <TableCell>{[vehicle.manufacturer, vehicle.model].filter(Boolean).join(" ")}</TableCell>
                     <TableCell>
                       <Badge variant={vehicle.status === "active" ? "default" : "secondary"}>
-                        {vehicle.status === "active" ? "운행중" : "운행종료"}
+                        {vehicle.status === "active" ? "차량 보이기" : "차량 숨기기"}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">{vehicle.currentOdometerKm.toLocaleString("ko-KR")}</TableCell>
@@ -364,14 +364,15 @@ export function AdminVehicleManagement() {
                 </Select>
               </div>
               <div className="space-y-1.5 sm:col-span-2">
-                <Label>운행 상태</Label>
+                <Label>차량 표시 설정</Label>
                 <Select value={draft.status} onValueChange={(value) => updateDraft("status", value as VehicleInput["status"])}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="active">운행중</SelectItem>
-                    <SelectItem value="retired">운행종료</SelectItem>
+                    <SelectItem value="active">차량 보이기</SelectItem>
+                    <SelectItem value="retired">차량 숨기기</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-[11px] text-muted-foreground">숨긴 차량은 차량 선택 화면에 표시되지 않습니다.</p>
               </div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="vehicle-memo">메모</Label>
