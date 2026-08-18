@@ -3,6 +3,10 @@ import { z } from "zod"
 export const vehicleStatusSchema = z.enum(["active", "retired"])
 export type VehicleStatus = z.infer<typeof vehicleStatusSchema>
 
+export const VEHICLE_MANAGEMENT_DEPARTMENTS = ["ICT", "FA", "전략기획", "기타"] as const
+export const vehicleManagementDepartmentSchema = z.enum(VEHICLE_MANAGEMENT_DEPARTMENTS)
+export type VehicleManagementDepartment = z.infer<typeof vehicleManagementDepartmentSchema>
+
 const optionalTrimmedString = (max: number) => z.string().trim().max(max).optional().default("")
 const optionalNonNegativeNumber = z.number().finite().nonnegative().nullable().optional().default(null)
 
@@ -13,6 +17,7 @@ export const vehicleInputSchema = z
     model: z.string().trim().min(1, "차량 모델을 입력해 주세요.").max(80),
     year: optionalTrimmedString(10),
     fuelType: optionalTrimmedString(30),
+    managementDepartment: z.union([vehicleManagementDepartmentSchema, z.literal("")]).default(""),
     status: vehicleStatusSchema.default("active"),
     baselineOdometerKm: z.number().finite().nonnegative(),
     primaryManagerEmail: z.string().trim().email("정 담당자를 선택해 주세요."),

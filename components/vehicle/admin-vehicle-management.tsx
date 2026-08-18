@@ -23,7 +23,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { useUserAccountDirectory } from "@/hooks/use-user-account-directory"
 import { vehicleApiFetch } from "@/lib/vehicle-client"
-import { vehicleInputSchema, type Vehicle, type VehicleInput } from "@/lib/vehicle-types"
+import {
+  VEHICLE_MANAGEMENT_DEPARTMENTS,
+  vehicleInputSchema,
+  type Vehicle,
+  type VehicleInput,
+} from "@/lib/vehicle-types"
 
 const emptyDraft: VehicleInput = {
   plateNumber: "",
@@ -31,6 +36,7 @@ const emptyDraft: VehicleInput = {
   model: "",
   year: "",
   fuelType: "",
+  managementDepartment: "",
   status: "active",
   baselineOdometerKm: 0,
   primaryManagerEmail: "",
@@ -45,6 +51,7 @@ function vehicleToDraft(vehicle: Vehicle): VehicleInput {
     model: vehicle.model,
     year: vehicle.year,
     fuelType: vehicle.fuelType,
+    managementDepartment: vehicle.managementDepartment,
     status: vehicle.status,
     baselineOdometerKm: vehicle.baselineOdometerKm,
     primaryManagerEmail: vehicle.primaryManagerEmail,
@@ -228,6 +235,7 @@ export function AdminVehicleManagement() {
                   <TableHead className="w-[84px]">사진</TableHead>
                   <TableHead>차량번호</TableHead>
                   <TableHead>제조사 / 모델</TableHead>
+                  <TableHead>관리부서</TableHead>
                   <TableHead>표시 여부</TableHead>
                   <TableHead className="text-right">현재 km</TableHead>
                   <TableHead>정 담당자</TableHead>
@@ -249,6 +257,9 @@ export function AdminVehicleManagement() {
                     </TableCell>
                     <TableCell className="font-semibold">{vehicle.plateNumber}</TableCell>
                     <TableCell>{[vehicle.manufacturer, vehicle.model].filter(Boolean).join(" ")}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{vehicle.managementDepartment || "미지정"}</Badge>
+                    </TableCell>
                     <TableCell>
                       <Badge variant={vehicle.status === "active" ? "default" : "secondary"}>
                         {vehicle.status === "active" ? "차량 보이기" : "차량 숨기기"}
@@ -360,6 +371,21 @@ export function AdminVehicleManagement() {
                   <SelectContent>
                     <SelectItem value="none">미지정</SelectItem>
                     {accountOptions.filter((email) => email !== draft.primaryManagerEmail).map((email) => <SelectItem key={email} value={email}>{email}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label>관리부서</Label>
+                <Select
+                  value={draft.managementDepartment || "none"}
+                  onValueChange={(value) => updateDraft("managementDepartment", value === "none" ? "" : value as VehicleInput["managementDepartment"])}
+                >
+                  <SelectTrigger><SelectValue placeholder="관리부서 선택" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">미지정</SelectItem>
+                    {VEHICLE_MANAGEMENT_DEPARTMENTS.map((department) => (
+                      <SelectItem key={department} value={department}>{department}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

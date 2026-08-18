@@ -7,6 +7,7 @@ import {
   driveRecordInputSchema,
   maintenanceRecordInputSchema,
   normalizePlateNumber,
+  vehicleManagementDepartmentSchema,
   vehicleInputSchema,
   type DriveRecord,
   type DriveRecordInput,
@@ -39,6 +40,7 @@ function cleanObject<T extends Record<string, unknown>>(value: T): T {
 }
 
 function serializeVehicle(id: string, data: DocumentData): Vehicle {
+  const parsedManagementDepartment = vehicleManagementDepartmentSchema.safeParse(data.managementDepartment)
   return {
     id,
     plateNumber: String(data.plateNumber || ""),
@@ -46,6 +48,7 @@ function serializeVehicle(id: string, data: DocumentData): Vehicle {
     model: String(data.model || ""),
     year: String(data.year || ""),
     fuelType: String(data.fuelType || ""),
+    managementDepartment: parsedManagementDepartment.success ? parsedManagementDepartment.data : "",
     status: data.status === "retired" ? "retired" : "active",
     activityStatus: "waiting",
     baselineOdometerKm: Number(data.baselineOdometerKm || 0),

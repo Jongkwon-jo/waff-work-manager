@@ -40,9 +40,14 @@ function VehicleCard({ vehicle, managerAliasByEmail }: { vehicle: Vehicle; manag
               {[vehicle.manufacturer, vehicle.model, vehicle.year].filter(Boolean).join(" · ") || "차량 상세정보 미지정"}
             </p>
           </div>
-          <Badge variant={driving ? "default" : "secondary"} className={driving ? "shrink-0 bg-emerald-600" : "shrink-0"}>
-            {driving ? "운행중" : "운행대기"}
-          </Badge>
+          <div className="flex shrink-0 flex-col items-end gap-1.5">
+            <Badge variant="outline" className="border-cyan-200 bg-cyan-50 text-cyan-800">
+              관리부서 · {vehicle.managementDepartment || "미지정"}
+            </Badge>
+            <Badge variant={driving ? "default" : "secondary"} className={driving ? "bg-emerald-600" : undefined}>
+              {driving ? "운행중" : "운행대기"}
+            </Badge>
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-xl bg-slate-50 px-3 py-2.5">
