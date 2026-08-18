@@ -19,11 +19,17 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useUserAccountDirectory } from "@/hooks/use-user-account-directory"
 import { vehicleApiFetch } from "@/lib/vehicle-client"
 import type { Vehicle } from "@/lib/vehicle-types"
 
-function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
+function VehicleCard({ vehicle, managerAliasByEmail }: { vehicle: Vehicle; managerAliasByEmail: ReadonlyMap<string, string> }) {
   const driving = vehicle.activityStatus === "driving"
+  const primaryManagerAlias = managerAliasByEmail.get(vehicle.primaryManagerEmail.toLowerCase()) || vehicle.primaryManagerEmail
+  const secondaryManagerAlias = vehicle.secondaryManagerEmail
+    ? managerAliasByEmail.get(vehicle.secondaryManagerEmail.toLowerCase()) || vehicle.secondaryManagerEmail
+    : "미지정"
+
   return (
     <Card className="group border-slate-200/80 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg">
       <CardContent className="space-y-4 p-5">
@@ -56,12 +62,12 @@ function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
           <p className="flex items-center gap-2">
             <UserRound className="h-3.5 w-3.5 text-cyan-600" />
             <span className="w-6 font-semibold">정</span>
-            <span className="truncate">{vehicle.primaryManagerEmail}</span>
+            <span className="truncate" title={vehicle.primaryManagerEmail}>{primaryManagerAlias}</span>
           </p>
           <p className="flex items-center gap-2">
             <UserRound className="h-3.5 w-3.5 text-slate-400" />
             <span className="w-6 font-semibold">부</span>
-            <span className="truncate">{vehicle.secondaryManagerEmail || "미지정"}</span>
+            <span className="truncate" title={vehicle.secondaryManagerEmail || undefined}>{secondaryManagerAlias}</span>
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -83,6 +89,7 @@ function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
 
 export default function VehicleManagementPage() {
   const { user, isAdmin } = useAuth()
+  const { accountProfiles } = useUserAccountDirectory(user)
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -110,6 +117,10 @@ export default function VehicleManagementPage() {
   }, [loadVehicles])
 
   const visibleVehicles = useMemo(() => vehicles.filter((vehicle) => vehicle.status === "active"), [vehicles])
+  const managerAliasByEmail = useMemo(
+    () => new Map((accountProfiles || []).map((profile) => [profile.email, profile.taskAliases[0]?.trim() || profile.email])),
+    [accountProfiles],
+  )
 
   return (
     <main className="min-h-screen bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(6,182,212,0.13),transparent),linear-gradient(180deg,#f0f9ff_0%,#f8fafc_42%,#ffffff_100%)] px-4 py-8 lg:px-8">
@@ -203,7 +214,7 @@ export default function VehicleManagementPage() {
               {visibleVehicles.length > 0 ? (
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {visibleVehicles.map((vehicle) => (
-                    <VehicleCard key={vehicle.id} vehicle={vehicle} />
+                    <VehicleCard key={vehicle.id} vehicle={vehicle} managerAliasByEmail={managerAliasByEmail} />
                   ))}
                 </div>
               ) : (
