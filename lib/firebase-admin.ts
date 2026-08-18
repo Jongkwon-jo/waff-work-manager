@@ -2,6 +2,8 @@ import "server-only"
 
 import { applicationDefault, cert, getApps, initializeApp } from "firebase-admin/app"
 import { getAuth } from "firebase-admin/auth"
+import { getFirestore } from "firebase-admin/firestore"
+import { getStorage } from "firebase-admin/storage"
 
 type ServiceAccountJson = {
   project_id?: string
@@ -99,9 +101,18 @@ function getFirebaseAdminApp() {
   return initializeApp({
     credential: getFirebaseAdminCredential(),
     projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   })
 }
 
 export function getFirebaseAdminAuth() {
   return getAuth(getFirebaseAdminApp())
+}
+
+export function getFirebaseAdminFirestore() {
+  return getFirestore(getFirebaseAdminApp())
+}
+
+export function getFirebaseAdminStorage() {
+  return getStorage(getFirebaseAdminApp())
 }

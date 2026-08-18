@@ -57,6 +57,7 @@ import {
 } from "@/lib/page-access"
 import { cn } from "@/lib/utils"
 import { useUserAccountDirectory } from "@/hooks/use-user-account-directory"
+import { AdminVehicleManagement } from "@/components/vehicle/admin-vehicle-management"
 
 type DraftPermissionMap = Record<string, UserPagePermissions>
 type DraftAliasMap = Record<string, string>
@@ -717,6 +718,8 @@ export default function AdminPage() {
             </Link>
           </Button>
         </div>
+
+        <AdminVehicleManagement />
 
         <Card>
           <CardHeader>

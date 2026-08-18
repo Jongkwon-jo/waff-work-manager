@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server"
-import { getFirebaseAdminAuth } from "@/lib/firebase-admin"
+import { getFirebaseAdminAuth, getFirebaseAdminFirestore } from "@/lib/firebase-admin"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-type AccountDirectoryOperation = "initialize" | "verify-token" | "list-users"
+type AccountDirectoryOperation = "initialize" | "verify-token" | "list-users" | "list-profiles"
 
-const ACCOUNT_DIRECTORY_API_VERSION = "4"
+const ACCOUNT_DIRECTORY_API_VERSION = "5"
 
 function getBearerToken(request: Request): string {
   const authorization = request.headers.get("authorization") || ""
@@ -47,6 +47,9 @@ function getAccountDirectoryErrorMessage(error: unknown, operation: AccountDirec
   if (operation === "list-users") {
     return `Firebase Auth 계정 목록 조회가 거부되었습니다. 서비스 계정의 프로젝트와 권한을 확인해 주세요.${errorCodeSuffix}`
   }
+  if (operation === "list-profiles") {
+    return `사용자 별칭 목록 조회가 거부되었습니다. 서비스 계정의 Firestore 권한을 확인해 주세요.${errorCodeSuffix}`
+  }
   return `Firebase Admin 초기화에 실패했습니다.${errorCodeSuffix}`
 }
 
@@ -82,10 +85,33 @@ export async function GET(request: Request) {
       pageToken = page.pageToken
     } while (pageToken)
 
+    operation = "list-profiles"
+    const profileSnapshot = await getFirebaseAdminFirestore().collection("user_profiles").get()
+    const accountProfiles = profileSnapshot.docs
+      .map((document) => {
+        const data = document.data() as { email?: unknown; taskAliases?: unknown }
+        const email = typeof data.email === "string" ? data.email.trim().toLowerCase() : ""
+        if (!email || !activeAccountEmails.has(email)) return null
+        const taskAliases = Array.isArray(data.taskAliases)
+          ? Array.from(
+              new Set(
+                data.taskAliases
+                  .filter((alias): alias is string => typeof alias === "string")
+                  .map((alias) => alias.trim())
+                  .filter(Boolean),
+              ),
+            )
+          : []
+        return { email, taskAliases }
+      })
+      .filter((profile): profile is { email: string; taskAliases: string[] } => Boolean(profile))
+      .sort((a, b) => a.email.localeCompare(b.email))
+
     return NextResponse.json(
       {
         accountEmails: Array.from(accountEmails).sort((a, b) => a.localeCompare(b)),
         activeAccountEmails: Array.from(activeAccountEmails).sort((a, b) => a.localeCompare(b)),
+        accountProfiles,
       },
       {
         headers: {
