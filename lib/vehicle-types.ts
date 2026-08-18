@@ -69,6 +69,7 @@ export const driveRecordInputSchema = z
     purpose: z.string().trim().min(1, "운행목적을 입력해 주세요.").max(200),
     origin: addressPointSchema,
     destination: addressPointSchema,
+    roundTrip: z.boolean().default(false),
     naverDistanceKm: optionalNonNegativeNumber,
     naverDurationMinutes: optionalNonNegativeNumber,
     routeCalculatedAt: optionalTrimmedString(40),

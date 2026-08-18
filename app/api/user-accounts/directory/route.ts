@@ -91,7 +91,7 @@ export async function GET(request: Request) {
       .map((document) => {
         const data = document.data() as { email?: unknown; taskAliases?: unknown }
         const email = typeof data.email === "string" ? data.email.trim().toLowerCase() : ""
-        if (!email || !activeAccountEmails.has(email)) return null
+        if (!email || !accountEmails.has(email)) return null
         const taskAliases = Array.isArray(data.taskAliases)
           ? Array.from(
               new Set(

@@ -30,6 +30,9 @@ type NaverLocalItem = {
 
 type NaverLocalResponse = {
   items?: unknown
+  error?: { message?: unknown; details?: unknown }
+  errorCode?: unknown
+  errorMessage?: unknown
 }
 
 function mapsCredentials() {
@@ -117,7 +120,20 @@ async function searchPlaces(query: string, credentials: NonNullable<ReturnType<t
     },
   )
   const body = (await response.json().catch(() => ({}))) as NaverLocalResponse
-  if (!response.ok) throw new Error("NAVER API HUB local search request failed")
+  if (!response.ok) {
+    const details = typeof body.error?.details === "string" ? body.error.details : ""
+    const apiMessage = typeof body.errorMessage === "string" ? body.errorMessage : ""
+    if (response.status === 401 && /subscription|permission/i.test(`${details} ${apiMessage}`)) {
+      throw new Error("NAVER API HUB 애플리케이션에서 지역 검색 API 이용 신청이 필요합니다.")
+    }
+    if (response.status === 401) {
+      throw new Error("NAVER API HUB 지역 검색 인증정보 또는 API 권한을 확인해 주세요.")
+    }
+    if (response.status === 429) {
+      throw new Error("NAVER API HUB 지역 검색 일일 호출 한도를 초과했습니다.")
+    }
+    throw new Error("네이버 장소 검색에 실패했습니다. 잠시 후 다시 시도해 주세요.")
+  }
   const items = Array.isArray(body.items) ? (body.items as NaverLocalItem[]) : []
   return items
     .map((item) => {
@@ -167,11 +183,19 @@ export async function GET(request: Request) {
     ])
     const addresses = addressResult.status === "fulfilled" ? addressResult.value : []
     const places = placeResult.status === "fulfilled" ? placeResult.value : []
+    const placeSearchError =
+      placeResult.status === "rejected" && placeResult.reason instanceof Error
+        ? placeResult.reason.message
+        : ""
     if (addressResult.status === "rejected" && (!hubCredentials || placeResult.status === "rejected")) {
       throw new VehicleApiException(502, "네이버 주소·장소 검색에 실패했습니다. API 설정을 확인해 주세요.")
     }
     return NextResponse.json(
-      { candidates: mergeCandidates(addresses, places), placeSearchConfigured: Boolean(hubCredentials) },
+      {
+        candidates: mergeCandidates(addresses, places),
+        placeSearchConfigured: Boolean(hubCredentials),
+        placeSearchError,
+      },
       { headers: { "Cache-Control": "private, no-store" } },
     )
   } catch (error) {

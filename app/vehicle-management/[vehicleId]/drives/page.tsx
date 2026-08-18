@@ -17,9 +17,7 @@ import { useAuth } from "@/components/auth/auth-provider"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Textarea } from "@/components/ui/textarea"
 import { useUserAccountDirectory } from "@/hooks/use-user-account-directory"
 import { vehicleApiFetch } from "@/lib/vehicle-client"
 import {
@@ -31,7 +29,18 @@ import {
   type Vehicle,
 } from "@/lib/vehicle-types"
 
-const COLUMN_COUNT = 12
+const COLUMN_COUNT = 11
+
+const COMPANY_ADDRESS: AddressPoint = {
+  address: "경상남도 창원시 성산구 완암로 147",
+  roadAddress: "경상남도 창원시 성산구 완암로 147",
+  jibunAddress: "경상남도 창원시 성산구 내동 456-29",
+  placeName: "회사",
+  category: "",
+  source: "place",
+  latitude: 35.214476,
+  longitude: 128.6684653,
+}
 
 type DriveDraft = {
   drivenAt: string
@@ -41,6 +50,7 @@ type DriveDraft = {
   purpose: string
   origin: AddressPoint | null
   destination: AddressPoint | null
+  roundTrip: boolean
   naverDistanceKm: string
   naverDurationMinutes: string
   routeCalculatedAt: string
@@ -65,6 +75,7 @@ function emptyDriveDraft(email: string): DriveDraft {
     purpose: "",
     origin: null,
     destination: null,
+    roundTrip: false,
     naverDistanceKm: "",
     naverDurationMinutes: "",
     routeCalculatedAt: "",
@@ -85,6 +96,7 @@ function recordToDraft(record: DriveRecord): DriveDraft {
     purpose: record.purpose,
     origin: record.origin,
     destination: record.destination,
+    roundTrip: record.roundTrip,
     naverDistanceKm: record.naverDistanceKm === null ? "" : String(record.naverDistanceKm),
     naverDurationMinutes: record.naverDurationMinutes === null ? "" : String(record.naverDurationMinutes),
     routeCalculatedAt: record.routeCalculatedAt,
@@ -110,6 +122,7 @@ function buildDriveInput(draft: DriveDraft): DriveRecordInput | null {
     purpose: draft.purpose,
     origin: draft.origin,
     destination: draft.destination,
+    roundTrip: draft.roundTrip,
     naverDistanceKm: nullableNumber(draft.naverDistanceKm),
     naverDurationMinutes: nullableNumber(draft.naverDurationMinutes),
     routeCalculatedAt: draft.routeCalculatedAt,
@@ -167,6 +180,25 @@ function DriveEditorRows({
     }))
   }
 
+  const updateRoundTrip = (checked: boolean) => {
+    setDraft((previous) => {
+      const previousMultiplier = previous.roundTrip ? 2 : 1
+      const nextMultiplier = checked ? 2 : 1
+      const distance = nullableNumber(previous.naverDistanceKm)
+      const duration = nullableNumber(previous.naverDurationMinutes)
+      const nextDistance = distance === null ? null : Math.round((distance / previousMultiplier) * nextMultiplier * 100) / 100
+      const nextDuration = duration === null ? null : Math.round((duration / previousMultiplier) * nextMultiplier * 10) / 10
+      return {
+        ...previous,
+        roundTrip: checked,
+        naverDistanceKm: nextDistance === null ? "" : String(nextDistance),
+        naverDurationMinutes: nextDuration === null ? "" : String(nextDuration),
+        recordedDistanceKm: nextDistance === null ? previous.recordedDistanceKm : String(nextDistance),
+        distanceOverrideReason: nextDistance === null ? previous.distanceOverrideReason : "",
+      }
+    })
+  }
+
   useEffect(() => {
     if (routeRevision === 0 || !draft.origin || !draft.destination) return
     const controller = new AbortController()
@@ -177,14 +209,19 @@ function DriveEditorRows({
       signal: controller.signal,
     })
       .then(({ result }) => {
-        setDraft((previous) => ({
-          ...previous,
-          naverDistanceKm: String(result.distanceKm),
-          naverDurationMinutes: String(result.durationMinutes),
-          routeCalculatedAt: result.calculatedAt,
-          recordedDistanceKm: String(result.distanceKm),
-          distanceOverrideReason: "",
-        }))
+        setDraft((previous) => {
+          const multiplier = previous.roundTrip ? 2 : 1
+          const effectiveDistance = Math.round(result.distanceKm * multiplier * 100) / 100
+          const effectiveDuration = Math.round(result.durationMinutes * multiplier * 10) / 10
+          return {
+            ...previous,
+            naverDistanceKm: String(effectiveDistance),
+            naverDurationMinutes: String(effectiveDuration),
+            routeCalculatedAt: result.calculatedAt,
+            recordedDistanceKm: String(effectiveDistance),
+            distanceOverrideReason: "",
+          }
+        })
         setRoutePath(result.path)
       })
       .catch((error) => {
@@ -203,6 +240,10 @@ function DriveEditorRows({
     const input = buildDriveInput(draft)
     if (!input) {
       toast.error("출발지와 도착지를 검색해 선택해 주세요.")
+      return
+    }
+    if (!draft.naverDistanceKm || !draft.naverDurationMinutes) {
+      toast.error("출발지와 도착지를 선택하고 네이버 거리 계산이 완료된 후 저장해 주세요.")
       return
     }
     const parsed = driveRecordInputSchema.safeParse(input)
@@ -228,9 +269,8 @@ function DriveEditorRows({
     }
   }
 
-  const adjusted =
-    draft.recordedDistanceKm !== "" &&
-    (draft.naverDistanceKm === "" || Math.abs(Number(draft.recordedDistanceKm) - Number(draft.naverDistanceKm)) >= 0.01)
+  const authorEmail = record?.createdByEmail || user.email || ""
+  const authorAlias = accountOptions.find((option) => option.email === authorEmail)?.alias || authorEmail
 
   return (
     <>
@@ -252,23 +292,35 @@ function DriveEditorRows({
           </div>
         </TableCell>
         <TableCell><Input value={draft.purpose} onChange={(event) => update("purpose", event.target.value)} className="h-8 w-44 text-xs" placeholder="운행 목적" /></TableCell>
-        <TableCell><AddressSearchInput user={user} value={draft.origin} onChange={(point) => updateAddress("origin", point)} placeholder="출발지 주소·장소명" /></TableCell>
-        <TableCell><AddressSearchInput user={user} value={draft.destination} onChange={(point) => updateAddress("destination", point)} placeholder="도착지 주소·장소명" /></TableCell>
         <TableCell>
-          <div className="w-28 text-xs">
-            {routeLoading ? <span className="inline-flex items-center gap-1 text-cyan-700"><Loader2 className="h-3 w-3 animate-spin" /> 계산중</span> : draft.naverDistanceKm ? <><p className="font-semibold">{draft.naverDistanceKm} km</p><p className="text-slate-500">약 {draft.naverDurationMinutes}분</p></> : <span className="text-slate-400">수동 입력</span>}
+          <div className="flex items-start gap-1">
+            <AddressSearchInput user={user} value={draft.origin} onChange={(point) => updateAddress("origin", point)} placeholder="출발지 주소·장소명" />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 shrink-0 border-cyan-200 bg-cyan-50 px-2 text-[11px] text-cyan-800 hover:bg-cyan-100"
+              title={COMPANY_ADDRESS.address}
+              onClick={() => updateAddress("origin", COMPANY_ADDRESS)}
+            >
+              [회사]
+            </Button>
           </div>
         </TableCell>
-        <TableCell><Input type="number" min={0.01} step="0.01" value={draft.recordedDistanceKm} onChange={(event) => update("recordedDistanceKm", event.target.value)} className="h-8 w-24 text-xs" placeholder="km" /></TableCell>
+        <TableCell><AddressSearchInput user={user} value={draft.destination} onChange={(point) => updateAddress("destination", point)} placeholder="도착지 주소·장소명" /></TableCell>
         <TableCell>
-          <div className="flex w-52 items-center gap-1">
-            <Input type="number" min={0} value={draft.startOdometerKm} onChange={(event) => update("startOdometerKm", event.target.value)} className="h-8 text-xs" placeholder="출발" />
-            <span className="text-slate-400">→</span>
-            <Input type="number" min={0} value={draft.endOdometerKm} onChange={(event) => update("endOdometerKm", event.target.value)} className="h-8 text-xs" placeholder="도착" />
+          <label className="flex h-8 w-20 cursor-pointer items-center gap-1.5 rounded-md border bg-white px-2 text-xs">
+            <input type="checkbox" checked={draft.roundTrip} onChange={(event) => updateRoundTrip(event.target.checked)} className="h-4 w-4 accent-cyan-600" />
+            왕복
+          </label>
+        </TableCell>
+        <TableCell>
+          <div className="w-28 text-xs">
+            {routeLoading ? <span className="inline-flex items-center gap-1 text-cyan-700"><Loader2 className="h-3 w-3 animate-spin" /> 계산중</span> : draft.naverDistanceKm ? <><p className="font-semibold">{draft.naverDistanceKm} km</p><p className="text-slate-500">약 {draft.naverDurationMinutes}분</p>{draft.roundTrip && <p className="mt-0.5 text-[10px] text-cyan-700">편도 × 2</p>}</> : <span className="text-slate-400">경로 계산 대기</span>}
           </div>
         </TableCell>
         <TableCell><Input value={draft.memo} onChange={(event) => update("memo", event.target.value)} className="h-8 w-40 text-xs" placeholder="비고" /></TableCell>
-        <TableCell className="text-xs text-slate-500">{record?.createdByEmail || user.email}</TableCell>
+        <TableCell className="max-w-32 truncate text-xs text-slate-600">{authorAlias}</TableCell>
         <TableCell>
           <div className="flex w-28 gap-1">
             <Button type="button" size="sm" className="h-8 px-2" onClick={() => void save()} disabled={saving || routeLoading}>
@@ -280,23 +332,12 @@ function DriveEditorRows({
       </TableRow>
       <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
         <TableCell colSpan={COLUMN_COUNT} className="p-3">
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(300px,1fr)]">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(260px,0.7fr)]">
             <NaverRouteMap origin={draft.origin} destination={draft.destination} path={routePath} />
-            <div className="space-y-3 rounded-xl border bg-white p-4">
-              <div>
-                <Label htmlFor={`distance-reason-${record?.id || "new"}`} className="text-xs">거리 보정/수동 입력 사유 {adjusted && "*"}</Label>
-                <Textarea
-                  id={`distance-reason-${record?.id || "new"}`}
-                  value={draft.distanceOverrideReason}
-                  onChange={(event) => update("distanceOverrideReason", event.target.value)}
-                  className="mt-1 min-h-20 text-xs"
-                  placeholder="실제 우회, 경유, API 오류 등 사유를 입력해 주세요."
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-lg bg-slate-50 p-3"><p className="text-slate-500">네이버 산출거리</p><p className="mt-1 font-semibold">{draft.naverDistanceKm ? `${draft.naverDistanceKm} km` : "산출 없음"}</p></div>
-                <div className="rounded-lg bg-slate-50 p-3"><p className="text-slate-500">최종 기록거리</p><p className="mt-1 font-semibold">{draft.recordedDistanceKm ? `${draft.recordedDistanceKm} km` : "입력 필요"}</p></div>
-              </div>
+            <div className="grid grid-cols-2 gap-2 rounded-xl border bg-white p-4 text-xs">
+              <div className="rounded-lg bg-slate-50 p-3"><p className="text-slate-500">운행 구분</p><p className="mt-1 font-semibold">{draft.roundTrip ? "왕복 (편도 × 2)" : "편도"}</p></div>
+              <div className="rounded-lg bg-slate-50 p-3"><p className="text-slate-500">네이버 산출거리</p><p className="mt-1 font-semibold">{draft.naverDistanceKm ? `${draft.naverDistanceKm} km` : "계산 대기"}</p></div>
+              <div className="col-span-2 rounded-lg bg-cyan-50 p-3"><p className="text-cyan-700">예상 운행시간</p><p className="mt-1 font-semibold text-cyan-950">{draft.naverDurationMinutes ? `약 ${draft.naverDurationMinutes}분` : "계산 대기"}</p></div>
             </div>
           </div>
         </TableCell>
@@ -326,6 +367,7 @@ export default function VehicleDrivesPage() {
     if (user?.email) values.add(user.email)
     records.forEach((record) => {
       values.add(record.driverEmail)
+      values.add(record.createdByEmail)
       record.passengerEmails.forEach((email) => values.add(email))
     })
     const aliasByEmail = new Map(
@@ -397,7 +439,7 @@ export default function VehicleDrivesPage() {
         <Card>
           <CardHeader className="space-y-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div><CardTitle className="flex items-center gap-2 text-xl"><Plus className="h-5 w-5 text-cyan-600" /> 운행기록 엑셀형 입력</CardTitle><p className="mt-1 text-sm text-muted-foreground">주소 또는 장소명을 검색해 선택하면 최적 경로의 거리와 예상시간을 자동 계산합니다.</p></div>
+              <div><CardTitle className="flex items-center gap-2 text-xl"><Plus className="h-5 w-5 text-cyan-600" /> 운행기록 엑셀형 입력</CardTitle><p className="mt-1 text-sm text-muted-foreground">주소 또는 장소명을 선택하면 거리와 예상시간을 계산하며, 왕복 선택 시 산출값을 2배로 저장합니다.</p></div>
               <Button type="button" variant="outline" onClick={() => void loadData()}><RefreshCw className="h-4 w-4" /> 새로고침</Button>
             </div>
             <div className="grid gap-2 rounded-xl border bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-[145px_145px_220px_minmax(180px,1fr)_minmax(180px,1fr)_auto]">
@@ -410,8 +452,8 @@ export default function VehicleDrivesPage() {
             </div>
           </CardHeader>
           <CardContent className="overflow-x-auto p-0 pb-4">
-            <Table className="min-w-[2150px] border-t">
-              <TableHeader><TableRow className="bg-slate-100"><TableHead>운행일시</TableHead><TableHead>운전자</TableHead><TableHead>탑승자</TableHead><TableHead>운행목적</TableHead><TableHead>출발지</TableHead><TableHead>도착지</TableHead><TableHead>네이버 거리/시간</TableHead><TableHead>기록거리</TableHead><TableHead>출발/도착 km</TableHead><TableHead>비고</TableHead><TableHead>작성자</TableHead><TableHead>관리</TableHead></TableRow></TableHeader>
+            <Table className="min-w-[1900px] border-t">
+              <TableHeader><TableRow className="bg-slate-100"><TableHead>운행일시</TableHead><TableHead>운전자</TableHead><TableHead>탑승자</TableHead><TableHead>운행목적</TableHead><TableHead>출발지</TableHead><TableHead>도착지</TableHead><TableHead>왕복</TableHead><TableHead>네이버 거리/시간</TableHead><TableHead>비고</TableHead><TableHead>작성자</TableHead><TableHead>관리</TableHead></TableRow></TableHeader>
               <TableBody>
                 {vehicle.status === "active" && <DriveEditorRows key="new-drive-row" user={user} vehicle={vehicle} accountOptions={accountOptions} onSaved={() => void loadData()} />}
                 {filteredRecords.map((record) => editingId === record.id ? (
@@ -424,11 +466,10 @@ export default function VehicleDrivesPage() {
                     <TableCell className="max-w-48 text-xs">{record.purpose}</TableCell>
                     <TableCell className="max-w-64 text-xs"><p className="font-medium">{record.origin.placeName || record.origin.address}</p>{record.origin.placeName && <p className="mt-0.5 text-[11px] text-slate-500">{record.origin.address}</p>}</TableCell>
                     <TableCell className="max-w-64 text-xs"><p className="font-medium">{record.destination.placeName || record.destination.address}</p>{record.destination.placeName && <p className="mt-0.5 text-[11px] text-slate-500">{record.destination.address}</p>}</TableCell>
-                    <TableCell className="whitespace-nowrap text-xs">{record.naverDistanceKm === null ? "수동" : `${record.naverDistanceKm.toLocaleString("ko-KR")} km / ${record.naverDurationMinutes || 0}분`}</TableCell>
-                    <TableCell className="font-semibold">{record.recordedDistanceKm.toLocaleString("ko-KR")} km</TableCell>
-                    <TableCell className="whitespace-nowrap text-xs">{record.startOdometerKm === null ? "-" : `${record.startOdometerKm.toLocaleString("ko-KR")} → ${record.endOdometerKm?.toLocaleString("ko-KR")}`}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">{record.roundTrip ? <span className="rounded-full bg-cyan-100 px-2 py-1 font-medium text-cyan-800">왕복</span> : <span className="text-slate-500">편도</span>}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">{record.naverDistanceKm === null ? "-" : `${record.naverDistanceKm.toLocaleString("ko-KR")} km / ${record.naverDurationMinutes || 0}분`}</TableCell>
                     <TableCell className="max-w-48 text-xs">{record.memo || record.distanceOverrideReason || "-"}</TableCell>
-                    <TableCell className="max-w-48 truncate text-xs">{record.createdByEmail}</TableCell>
+                    <TableCell className="max-w-32 truncate text-xs">{accountAliasByEmail.get(record.createdByEmail) || record.createdByEmail}</TableCell>
                     <TableCell>{vehicle.status === "active" && (isAdmin || record.createdByEmail === user.email) ? <div className="flex gap-1"><Button type="button" variant="outline" size="sm" className="h-8 px-2" onClick={() => setEditingId(record.id)}><Pencil className="h-3.5 w-3.5" /> 수정</Button><Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-rose-600" onClick={() => void removeRecord(record)}><Trash2 className="h-3.5 w-3.5" /><span className="sr-only">삭제</span></Button></div> : <span className="text-xs text-slate-400">조회만</span>}</TableCell>
                   </TableRow>
                 ))}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import type { User } from "firebase/auth"
 import { Loader2, MapPin, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -19,38 +19,58 @@ export function AddressSearchInput({
   onChange: (point: AddressPoint) => void
   placeholder: string
 }) {
-  const [query, setQuery] = useState(value?.address || "")
+  const [query, setQuery] = useState(value?.placeName || value?.address || "")
   const [candidates, setCandidates] = useState<AddressCandidate[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
-  const search = async () => {
-    if (query.trim().length < 2) {
-      setError("주소를 2자 이상 입력해 주세요.")
+  const search = useCallback(async (searchQuery: string, signal?: AbortSignal) => {
+    if (searchQuery.length < 2) {
+      setError("주소 또는 장소명을 2자 이상 입력해 주세요.")
       return
     }
     setLoading(true)
     setError("")
     try {
-      const data = await vehicleApiFetch<{ candidates: AddressCandidate[]; placeSearchConfigured?: boolean }>(
+      const data = await vehicleApiFetch<{
+        candidates: AddressCandidate[]
+        placeSearchConfigured?: boolean
+        placeSearchError?: string
+      }>(
         user,
-        `/api/naver-maps/geocode?query=${encodeURIComponent(query.trim())}`,
+        `/api/naver-maps/geocode?query=${encodeURIComponent(searchQuery)}`,
+        { signal },
       )
       setCandidates(data.candidates)
       if (data.candidates.length === 0) {
         setError(
-          data.placeSearchConfigured === false
+          data.placeSearchError || (data.placeSearchConfigured === false
             ? "검색 결과가 없습니다. 장소명 검색을 사용하려면 NAVER API HUB 키 설정이 필요합니다."
-            : "검색 결과가 없습니다. 주소 또는 장소명을 확인해 주세요.",
+            : "검색 결과가 없습니다. 주소 또는 장소명을 확인해 주세요."),
         )
       }
     } catch (searchError) {
+      if (signal?.aborted) return
       setCandidates([])
       setError(searchError instanceof Error ? searchError.message : "주소를 검색하지 못했습니다.")
     } finally {
-      setLoading(false)
+      if (!signal?.aborted) setLoading(false)
     }
-  }
+  }, [user])
+
+  useEffect(() => {
+    const searchQuery = query.trim()
+    const selectedLabel = value?.placeName || value?.address || ""
+    if (searchQuery.length < 2 || searchQuery === selectedLabel) return
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      void search(searchQuery, controller.signal)
+    }, 350)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [query, search, value?.address, value?.placeName])
 
   return (
     <div className="relative min-w-56 space-y-1">
@@ -60,17 +80,19 @@ export function AddressSearchInput({
           onChange={(event) => {
             setQuery(event.target.value)
             setCandidates([])
+            setError("")
+            setLoading(false)
           }}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault()
-              void search()
+              void search(query.trim())
             }
           }}
           placeholder={placeholder}
           className="h-8 min-w-0 text-xs"
         />
-        <Button type="button" variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => void search()} disabled={loading}>
+        <Button type="button" variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => void search(query.trim())} disabled={loading}>
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
           <span className="sr-only">주소 검색</span>
         </Button>

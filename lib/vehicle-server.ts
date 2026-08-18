@@ -70,6 +70,7 @@ function serializeDriveRecord(id: string, data: DocumentData): DriveRecord {
     purpose: String(data.purpose || ""),
     origin: data.origin,
     destination: data.destination,
+    roundTrip: data.roundTrip === true,
     naverDistanceKm: typeof data.naverDistanceKm === "number" ? data.naverDistanceKm : null,
     naverDurationMinutes: typeof data.naverDurationMinutes === "number" ? data.naverDurationMinutes : null,
     routeCalculatedAt: String(data.routeCalculatedAt || ""),
@@ -439,4 +440,3 @@ export function parseDriveInput(raw: DriveRecordInput) {
 export function parseMaintenanceInput(raw: MaintenanceRecordInput) {
   return maintenanceRecordInputSchema.parse(raw)
 }
-
