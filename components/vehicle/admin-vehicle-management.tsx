@@ -138,11 +138,25 @@ export function AdminVehicleManagement() {
       if (imageFile) {
         const formData = new FormData()
         formData.set("image", imageFile)
-        const imageData = await vehicleApiFetch<{ vehicle: Vehicle }>(user, `/api/vehicles/${savedVehicle.id}/image`, {
-          method: "PUT",
-          body: formData,
-        })
-        savedVehicle = imageData.vehicle
+        try {
+          const imageData = await vehicleApiFetch<{ vehicle: Vehicle }>(user, `/api/vehicles/${savedVehicle.id}/image`, {
+            method: "PUT",
+            body: formData,
+          })
+          savedVehicle = imageData.vehicle
+        } catch (imageError) {
+          setVehicles((previous) => {
+            const next = previous.filter((vehicle) => vehicle.id !== savedVehicle.id)
+            return [...next, savedVehicle].sort((a, b) => a.plateNumber.localeCompare(b.plateNumber))
+          })
+          setDialogOpen(false)
+          toast.error(
+            `차량 기본정보는 저장됐지만 이미지는 업로드되지 않았습니다. ${
+              imageError instanceof Error ? imageError.message : "이미지 저장소 설정을 확인해 주세요."
+            }`,
+          )
+          return
+        }
       }
       setVehicles((previous) => {
         const next = previous.filter((vehicle) => vehicle.id !== savedVehicle.id)
@@ -377,4 +391,3 @@ export function AdminVehicleManagement() {
     </>
   )
 }
-

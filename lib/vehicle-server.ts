@@ -224,12 +224,36 @@ export async function saveVehicleImage(vehicleId: string, file: File, user: Vehi
   const { ref, vehicle } = await getVehicleDocument(vehicleId)
   const imagePath = `vehicle-images/${vehicleId}/${randomUUID()}.${extension}`
   const target = getFirebaseAdminStorage().bucket().file(imagePath)
-  await target.save(Buffer.from(await file.arrayBuffer()), {
-    resumable: false,
-    metadata: { contentType: file.type, cacheControl: "private, max-age=3600" },
-  })
+  try {
+    await target.save(Buffer.from(await file.arrayBuffer()), {
+      resumable: false,
+      metadata: { contentType: file.type, cacheControl: "private, max-age=3600" },
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ""
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : ""
+    console.error("Vehicle image upload error:", { code, message })
+    if (code === "404" || /bucket.*(does not exist|not found)|notfound/i.test(message)) {
+      throw new VehicleApiException(
+        503,
+        "Firebase Storage가 아직 생성되지 않았습니다. Firebase 콘솔의 Storage에서 버킷을 먼저 생성해 주세요.",
+      )
+    }
+    if (code === "403" || /permission|forbidden|denied/i.test(message)) {
+      throw new VehicleApiException(
+        503,
+        "Firebase Storage 업로드 권한이 없습니다. 서버 서비스 계정에 Storage Object Admin 권한을 확인해 주세요.",
+      )
+    }
+    throw new VehicleApiException(502, "차량 이미지 저장소에 업로드하지 못했습니다. 잠시 후 다시 시도해 주세요.")
+  }
 
-  await ref.update({ imagePath, updatedByEmail: user.email, updatedAt: FieldValue.serverTimestamp() })
+  try {
+    await ref.update({ imagePath, updatedByEmail: user.email, updatedAt: FieldValue.serverTimestamp() })
+  } catch (error) {
+    await target.delete({ ignoreNotFound: true }).catch(console.error)
+    throw error
+  }
   if (vehicle.imagePath && vehicle.imagePath !== imagePath) {
     await getFirebaseAdminStorage().bucket().file(vehicle.imagePath).delete({ ignoreNotFound: true }).catch(console.error)
   }
