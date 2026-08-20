@@ -1,8 +1,7 @@
 import "server-only"
 
-import { randomUUID } from "node:crypto"
 import { FieldValue, Timestamp, type DocumentData, type DocumentReference } from "firebase-admin/firestore"
-import { getFirebaseAdminAuth, getFirebaseAdminFirestore, getFirebaseAdminStorage } from "@/lib/firebase-admin"
+import { getFirebaseAdminAuth, getFirebaseAdminFirestore } from "@/lib/firebase-admin"
 import {
   driveRecordInputSchema,
   maintenanceRecordInputSchema,
@@ -56,7 +55,6 @@ function serializeVehicle(id: string, data: DocumentData): Vehicle {
     primaryManagerEmail: String(data.primaryManagerEmail || ""),
     secondaryManagerEmail: String(data.secondaryManagerEmail || ""),
     memo: String(data.memo || ""),
-    imagePath: typeof data.imagePath === "string" ? data.imagePath : undefined,
     createdByEmail: String(data.createdByEmail || ""),
     updatedByEmail: String(data.updatedByEmail || ""),
     createdAt: toIsoString(data.createdAt),
@@ -142,20 +140,6 @@ async function ensureUniquePlate(plateNumber: string, excludeVehicleId?: string)
   return plateNumberKey
 }
 
-async function signedImageUrl(imagePath?: string) {
-  if (!imagePath) return undefined
-  try {
-    const [url] = await getFirebaseAdminStorage()
-      .bucket()
-      .file(imagePath)
-      .getSignedUrl({ action: "read", expires: Date.now() + 60 * 60 * 1000 })
-    return url
-  } catch (error) {
-    console.error("Vehicle image signed URL error:", error)
-    return undefined
-  }
-}
-
 function koreaLocalDateTimeValue(date = new Date()) {
   return new Date(date.getTime() + KOREA_TIME_OFFSET_MS).toISOString().slice(0, 16)
 }
@@ -205,12 +189,7 @@ export async function listVehicles(): Promise<Vehicle[]> {
   return Promise.all(
     snapshot.docs.map(async (document) => {
       const vehicle = serializeVehicle(document.id, document.data())
-      const [imageUrl, activityStatus] = await Promise.all([
-        signedImageUrl(vehicle.imagePath),
-        getVehicleActivityStatus(document.ref, vehicle),
-      ])
-      vehicle.imageUrl = imageUrl
-      vehicle.activityStatus = activityStatus
+      vehicle.activityStatus = await getVehicleActivityStatus(document.ref, vehicle)
       return vehicle
     }),
   )
@@ -218,12 +197,7 @@ export async function listVehicles(): Promise<Vehicle[]> {
 
 export async function getVehicle(vehicleId: string): Promise<Vehicle> {
   const { ref, vehicle } = await getVehicleDocument(vehicleId)
-  const [imageUrl, activityStatus] = await Promise.all([
-    signedImageUrl(vehicle.imagePath),
-    getVehicleActivityStatus(ref, vehicle),
-  ])
-  vehicle.imageUrl = imageUrl
-  vehicle.activityStatus = activityStatus
+  vehicle.activityStatus = await getVehicleActivityStatus(ref, vehicle)
   return vehicle
 }
 
@@ -265,70 +239,6 @@ export async function updateVehicle(vehicleId: string, raw: unknown, user: Vehic
     }),
   )
   await recalculateVehicleOdometer(ref)
-  return getVehicle(vehicleId)
-}
-
-export async function saveVehicleImage(vehicleId: string, file: File, user: VehicleRequestUser): Promise<Vehicle> {
-  const allowedTypes: Record<string, string> = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/webp": "webp",
-  }
-  const extension = allowedTypes[file.type]
-  if (!extension) throw new VehicleApiException(400, "JPEG, PNG, WebP 이미지만 등록할 수 있습니다.")
-  if (file.size <= 0 || file.size > 5 * 1024 * 1024) {
-    throw new VehicleApiException(400, "차량 이미지는 5MB 이하로 등록해 주세요.")
-  }
-
-  const { ref, vehicle } = await getVehicleDocument(vehicleId)
-  const imagePath = `vehicle-images/${vehicleId}/${randomUUID()}.${extension}`
-  const target = getFirebaseAdminStorage().bucket().file(imagePath)
-  try {
-    await target.save(Buffer.from(await file.arrayBuffer()), {
-      resumable: false,
-      metadata: { contentType: file.type, cacheControl: "private, max-age=3600" },
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : ""
-    const code = error && typeof error === "object" && "code" in error ? String(error.code) : ""
-    console.error("Vehicle image upload error:", { code, message })
-    if (code === "404" || /bucket.*(does not exist|not found)|notfound/i.test(message)) {
-      throw new VehicleApiException(
-        503,
-        "Firebase Storage가 아직 생성되지 않았습니다. Firebase 콘솔의 Storage에서 버킷을 먼저 생성해 주세요.",
-      )
-    }
-    if (code === "403" || /permission|forbidden|denied/i.test(message)) {
-      throw new VehicleApiException(
-        503,
-        "Firebase Storage 업로드 권한이 없습니다. 서버 서비스 계정에 Storage Object Admin 권한을 확인해 주세요.",
-      )
-    }
-    throw new VehicleApiException(502, "차량 이미지 저장소에 업로드하지 못했습니다. 잠시 후 다시 시도해 주세요.")
-  }
-
-  try {
-    await ref.update({ imagePath, updatedByEmail: user.email, updatedAt: FieldValue.serverTimestamp() })
-  } catch (error) {
-    await target.delete({ ignoreNotFound: true }).catch(console.error)
-    throw error
-  }
-  if (vehicle.imagePath && vehicle.imagePath !== imagePath) {
-    await getFirebaseAdminStorage().bucket().file(vehicle.imagePath).delete({ ignoreNotFound: true }).catch(console.error)
-  }
-  return getVehicle(vehicleId)
-}
-
-export async function deleteVehicleImage(vehicleId: string, user: VehicleRequestUser): Promise<Vehicle> {
-  const { ref, vehicle } = await getVehicleDocument(vehicleId)
-  await ref.update({
-    imagePath: FieldValue.delete(),
-    updatedByEmail: user.email,
-    updatedAt: FieldValue.serverTimestamp(),
-  })
-  if (vehicle.imagePath) {
-    await getFirebaseAdminStorage().bucket().file(vehicle.imagePath).delete({ ignoreNotFound: true }).catch(console.error)
-  }
   return getVehicle(vehicleId)
 }
 

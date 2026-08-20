@@ -1,8 +1,7 @@
 "use client"
 
-import Image from "next/image"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { CarFront, ImagePlus, Loader2, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { CarFront, Loader2, Pencil, Plus, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/components/auth/auth-provider"
 import { Badge } from "@/components/ui/badge"
@@ -23,6 +22,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { useUserAccountDirectory } from "@/hooks/use-user-account-directory"
 import { vehicleApiFetch } from "@/lib/vehicle-client"
+import { VehicleStaticImage } from "@/components/vehicle/vehicle-static-image"
 import {
   VEHICLE_MANAGEMENT_DEPARTMENTS,
   vehicleInputSchema,
@@ -69,8 +69,6 @@ export function AdminVehicleManagement() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null)
   const [draft, setDraft] = useState<VehicleInput>({ ...emptyDraft })
-  const [imageFile, setImageFile] = useState<File | null>(null)
-  const [imagePreview, setImagePreview] = useState("")
 
   const accountAliasByEmail = useMemo(
     () => new Map((accountProfiles || []).map((profile) => [profile.email, profile.taskAliases[0]?.trim() || profile.email])),
@@ -103,27 +101,15 @@ export function AdminVehicleManagement() {
     void loadVehicles()
   }, [loadVehicles])
 
-  useEffect(() => {
-    if (!imageFile) {
-      setImagePreview("")
-      return
-    }
-    const url = URL.createObjectURL(imageFile)
-    setImagePreview(url)
-    return () => URL.revokeObjectURL(url)
-  }, [imageFile])
-
   const openCreate = () => {
     setEditingVehicle(null)
     setDraft({ ...emptyDraft })
-    setImageFile(null)
     setDialogOpen(true)
   }
 
   const openEdit = (vehicle: Vehicle) => {
     setEditingVehicle(vehicle)
     setDraft(vehicleToDraft(vehicle))
-    setImageFile(null)
     setDialogOpen(true)
   }
 
@@ -138,11 +124,6 @@ export function AdminVehicleManagement() {
       toast.error(parsed.error.issues[0]?.message || "차량 정보를 확인해 주세요.")
       return
     }
-    if (imageFile && imageFile.size > 5 * 1024 * 1024) {
-      toast.error("차량 이미지는 5MB 이하로 등록해 주세요.")
-      return
-    }
-
     setSaving(true)
     try {
       const path = editingVehicle ? `/api/vehicles/${editingVehicle.id}` : "/api/vehicles"
@@ -150,30 +131,7 @@ export function AdminVehicleManagement() {
         method: editingVehicle ? "PATCH" : "POST",
         body: JSON.stringify(parsed.data),
       })
-      let savedVehicle = data.vehicle
-      if (imageFile) {
-        const formData = new FormData()
-        formData.set("image", imageFile)
-        try {
-          const imageData = await vehicleApiFetch<{ vehicle: Vehicle }>(user, `/api/vehicles/${savedVehicle.id}/image`, {
-            method: "PUT",
-            body: formData,
-          })
-          savedVehicle = imageData.vehicle
-        } catch (imageError) {
-          setVehicles((previous) => {
-            const next = previous.filter((vehicle) => vehicle.id !== savedVehicle.id)
-            return [...next, savedVehicle].sort((a, b) => a.plateNumber.localeCompare(b.plateNumber))
-          })
-          setDialogOpen(false)
-          toast.error(
-            `차량 기본정보는 저장됐지만 이미지는 업로드되지 않았습니다. ${
-              imageError instanceof Error ? imageError.message : "이미지 저장소 설정을 확인해 주세요."
-            }`,
-          )
-          return
-        }
-      }
+      const savedVehicle = data.vehicle
       setVehicles((previous) => {
         const next = previous.filter((vehicle) => vehicle.id !== savedVehicle.id)
         return [...next, savedVehicle].sort((a, b) => a.plateNumber.localeCompare(b.plateNumber))
@@ -182,24 +140,6 @@ export function AdminVehicleManagement() {
       toast.success(editingVehicle ? "차량 정보가 수정되었습니다." : "차량이 등록되었습니다.")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "차량 정보를 저장하지 못했습니다.")
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const removeImage = async () => {
-    if (!user || !editingVehicle?.imagePath) return
-    if (!window.confirm("등록된 차량 이미지를 삭제할까요?")) return
-    setSaving(true)
-    try {
-      const data = await vehicleApiFetch<{ vehicle: Vehicle }>(user, `/api/vehicles/${editingVehicle.id}/image`, {
-        method: "DELETE",
-      })
-      setEditingVehicle(data.vehicle)
-      setVehicles((previous) => previous.map((vehicle) => (vehicle.id === data.vehicle.id ? data.vehicle : vehicle)))
-      toast.success("차량 이미지가 삭제되었습니다.")
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "차량 이미지를 삭제하지 못했습니다.")
     } finally {
       setSaving(false)
     }
@@ -215,7 +155,10 @@ export function AdminVehicleManagement() {
                 <CarFront className="h-5 w-5 text-cyan-600" /> 차량 등록 관리
               </CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                법인차량 기본정보, 정/부 담당자, 차량 이미지와 차량 표시 여부를 관리합니다.
+                법인차량 기본정보, 정/부 담당자와 차량 표시 여부를 관리합니다.
+              </p>
+              <p className="mt-1 text-xs text-cyan-700">
+                차량 이미지는 public/vehicle-images에 차량번호.webp, .jpg, .jpeg 또는 .png 파일을 배포하면 자동 표시됩니다.
               </p>
             </div>
             <div className="flex gap-2">
@@ -256,13 +199,7 @@ export function AdminVehicleManagement() {
                 {vehicles.map((vehicle) => (
                   <TableRow key={vehicle.id}>
                     <TableCell>
-                      <div className="relative h-12 w-16 overflow-hidden rounded-md bg-slate-100">
-                        {vehicle.imageUrl ? (
-                          <Image src={vehicle.imageUrl} alt="" fill unoptimized className="object-cover" />
-                        ) : (
-                          <CarFront className="absolute inset-0 m-auto h-6 w-6 text-slate-300" />
-                        )}
-                      </div>
+                      <VehicleStaticImage plateNumber={vehicle.plateNumber} className="h-12 w-16 rounded-md" />
                     </TableCell>
                     <TableCell className="font-semibold">{vehicle.plateNumber}</TableCell>
                     <TableCell>{[vehicle.manufacturer, vehicle.model].filter(Boolean).join(" ")}</TableCell>
@@ -295,44 +232,12 @@ export function AdminVehicleManagement() {
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={(open) => !saving && setDialogOpen(open)}>
-        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editingVehicle ? "차량 정보 수정" : "새 차량 등록"}</DialogTitle>
-            <DialogDescription>차량 기본정보와 담당자를 입력하고 필요하면 대표 사진을 첨부합니다.</DialogDescription>
+            <DialogDescription>차량 기본정보와 담당자를 입력합니다. 이미지는 차량번호에 맞는 정적 파일을 사용합니다.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-5 py-2 md:grid-cols-[220px_minmax(0,1fr)]">
-            <div className="space-y-3">
-              <div className="relative aspect-[4/3] overflow-hidden rounded-xl border bg-slate-50">
-                {imagePreview || editingVehicle?.imageUrl ? (
-                  <Image
-                    src={imagePreview || editingVehicle?.imageUrl || ""}
-                    alt="차량 이미지 미리보기"
-                    fill
-                    unoptimized
-                    className="object-cover"
-                  />
-                ) : (
-                  <CarFront className="absolute inset-0 m-auto h-16 w-16 text-slate-300" />
-                )}
-              </div>
-              <Label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted">
-                <ImagePlus className="h-4 w-4" /> 이미지 선택
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="sr-only"
-                  onChange={(event) => setImageFile(event.target.files?.[0] || null)}
-                />
-              </Label>
-              <p className="text-center text-xs text-muted-foreground">JPEG · PNG · WebP / 최대 5MB</p>
-              {editingVehicle?.imagePath && !imageFile && (
-                <Button type="button" variant="ghost" size="sm" className="w-full text-destructive" onClick={() => void removeImage()}>
-                  <Trash2 className="h-4 w-4" /> 등록 이미지 삭제
-                </Button>
-              )}
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 py-2 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="vehicle-plate">차량번호 *</Label>
                 <Input id="vehicle-plate" value={draft.plateNumber} onChange={(event) => updateDraft("plateNumber", event.target.value)} />
@@ -421,7 +326,6 @@ export function AdminVehicleManagement() {
                 <Label htmlFor="vehicle-memo">메모</Label>
                 <Textarea id="vehicle-memo" value={draft.memo} onChange={(event) => updateDraft("memo", event.target.value)} rows={3} />
               </div>
-            </div>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>취소</Button>

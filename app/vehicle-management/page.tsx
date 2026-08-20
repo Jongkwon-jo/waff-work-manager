@@ -22,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useUserAccountDirectory } from "@/hooks/use-user-account-directory"
 import { vehicleApiFetch } from "@/lib/vehicle-client"
 import type { Vehicle } from "@/lib/vehicle-types"
+import { VehicleStaticImage } from "@/components/vehicle/vehicle-static-image"
 
 function VehicleCard({ vehicle, managerAliasByEmail }: { vehicle: Vehicle; managerAliasByEmail: ReadonlyMap<string, string> }) {
   const driving = vehicle.activityStatus === "driving"
@@ -31,7 +32,17 @@ function VehicleCard({ vehicle, managerAliasByEmail }: { vehicle: Vehicle; manag
     : "미지정"
 
   return (
-    <Card className="group border-slate-200/80 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg">
+    <Card className="group overflow-hidden border-slate-200/80 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg">
+      <div className="relative">
+        <VehicleStaticImage
+          plateNumber={vehicle.plateNumber}
+          className="aspect-[16/9] w-full"
+          imageClassName="transition-transform duration-300 group-hover:scale-[1.02]"
+        />
+        <Badge variant="outline" className="absolute right-3 top-3 border-cyan-200 bg-white/95 text-cyan-800 shadow-sm">
+          관리부서 · {vehicle.managementDepartment || "미지정"}
+        </Badge>
+      </div>
       <CardContent className="space-y-4 p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -40,14 +51,9 @@ function VehicleCard({ vehicle, managerAliasByEmail }: { vehicle: Vehicle; manag
               {[vehicle.manufacturer, vehicle.model, vehicle.year].filter(Boolean).join(" · ") || "차량 상세정보 미지정"}
             </p>
           </div>
-          <div className="flex shrink-0 flex-col items-end gap-1.5">
-            <Badge variant="outline" className="border-cyan-200 bg-cyan-50 text-cyan-800">
-              관리부서 · {vehicle.managementDepartment || "미지정"}
-            </Badge>
-            <Badge variant={driving ? "default" : "secondary"} className={driving ? "bg-emerald-600" : undefined}>
-              {driving ? "운행중" : "운행대기"}
-            </Badge>
-          </div>
+          <Badge variant={driving ? "default" : "secondary"} className={driving ? "shrink-0 bg-emerald-600" : "shrink-0"}>
+            {driving ? "운행중" : "운행대기"}
+          </Badge>
         </div>
         <div className="grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-xl bg-slate-50 px-3 py-2.5">
