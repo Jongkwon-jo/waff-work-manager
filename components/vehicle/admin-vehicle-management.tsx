@@ -62,7 +62,7 @@ function vehicleToDraft(vehicle: Vehicle): VehicleInput {
 
 export function AdminVehicleManagement() {
   const { user } = useAuth()
-  const { activeAccountEmails, loading: accountsLoading } = useUserAccountDirectory(user)
+  const { activeAccountEmails, accountProfiles, loading: accountsLoading } = useUserAccountDirectory(user)
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -72,10 +72,19 @@ export function AdminVehicleManagement() {
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState("")
 
-  const accountOptions = useMemo(
-    () => Array.from(activeAccountEmails || []).sort((a, b) => a.localeCompare(b)),
-    [activeAccountEmails],
+  const accountAliasByEmail = useMemo(
+    () => new Map((accountProfiles || []).map((profile) => [profile.email, profile.taskAliases[0]?.trim() || profile.email])),
+    [accountProfiles],
   )
+
+  const accountOptions = useMemo(
+    () => Array.from(activeAccountEmails || [])
+      .map((email) => ({ email, alias: accountAliasByEmail.get(email) || email }))
+      .sort((a, b) => a.alias.localeCompare(b.alias, "ko") || a.email.localeCompare(b.email)),
+    [accountAliasByEmail, activeAccountEmails],
+  )
+
+  const getAccountAlias = (email: string) => accountAliasByEmail.get(email.trim().toLowerCase()) || email
 
   const loadVehicles = useCallback(async () => {
     if (!user) return
@@ -266,8 +275,12 @@ export function AdminVehicleManagement() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">{vehicle.currentOdometerKm.toLocaleString("ko-KR")}</TableCell>
-                    <TableCell className="max-w-48 truncate text-xs">{vehicle.primaryManagerEmail}</TableCell>
-                    <TableCell className="max-w-48 truncate text-xs">{vehicle.secondaryManagerEmail || "-"}</TableCell>
+                    <TableCell className="max-w-48 truncate text-xs" title={vehicle.primaryManagerEmail}>
+                      {getAccountAlias(vehicle.primaryManagerEmail)}
+                    </TableCell>
+                    <TableCell className="max-w-48 truncate text-xs" title={vehicle.secondaryManagerEmail || undefined}>
+                      {vehicle.secondaryManagerEmail ? getAccountAlias(vehicle.secondaryManagerEmail) : "-"}
+                    </TableCell>
                     <TableCell className="text-right">
                       <Button type="button" size="sm" variant="outline" onClick={() => openEdit(vehicle)}>
                         <Pencil className="h-3.5 w-3.5" /> 수정
@@ -360,7 +373,9 @@ export function AdminVehicleManagement() {
                 <Select value={draft.primaryManagerEmail || undefined} onValueChange={(value) => updateDraft("primaryManagerEmail", value)}>
                   <SelectTrigger><SelectValue placeholder={accountsLoading ? "계정 불러오는 중" : "정 담당자 선택"} /></SelectTrigger>
                   <SelectContent>
-                    {accountOptions.map((email) => <SelectItem key={email} value={email}>{email}</SelectItem>)}
+                    {accountOptions.map((option) => (
+                      <SelectItem key={option.email} value={option.email}>{option.alias}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -370,7 +385,9 @@ export function AdminVehicleManagement() {
                   <SelectTrigger><SelectValue placeholder="부 담당자 선택" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">미지정</SelectItem>
-                    {accountOptions.filter((email) => email !== draft.primaryManagerEmail).map((email) => <SelectItem key={email} value={email}>{email}</SelectItem>)}
+                    {accountOptions
+                      .filter((option) => option.email !== draft.primaryManagerEmail)
+                      .map((option) => <SelectItem key={option.email} value={option.email}>{option.alias}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
