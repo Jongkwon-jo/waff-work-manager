@@ -25,6 +25,7 @@ import { vehicleApiFetch } from "@/lib/vehicle-client"
 import { VehicleStaticImage } from "@/components/vehicle/vehicle-static-image"
 import {
   VEHICLE_MANAGEMENT_DEPARTMENTS,
+  compareVehicleDisplayOrder,
   vehicleInputSchema,
   type Vehicle,
   type VehicleInput,
@@ -38,6 +39,7 @@ const emptyDraft: VehicleInput = {
   fuelType: "",
   managementDepartment: "",
   status: "active",
+  displayOrder: 0,
   baselineOdometerKm: 0,
   primaryManagerEmail: "",
   secondaryManagerEmail: "",
@@ -53,6 +55,7 @@ function vehicleToDraft(vehicle: Vehicle): VehicleInput {
     fuelType: vehicle.fuelType,
     managementDepartment: vehicle.managementDepartment,
     status: vehicle.status,
+    displayOrder: vehicle.displayOrder,
     baselineOdometerKm: vehicle.baselineOdometerKm,
     primaryManagerEmail: vehicle.primaryManagerEmail,
     secondaryManagerEmail: vehicle.secondaryManagerEmail,
@@ -134,7 +137,7 @@ export function AdminVehicleManagement() {
       const savedVehicle = data.vehicle
       setVehicles((previous) => {
         const next = previous.filter((vehicle) => vehicle.id !== savedVehicle.id)
-        return [...next, savedVehicle].sort((a, b) => a.plateNumber.localeCompare(b.plateNumber))
+        return [...next, savedVehicle].sort(compareVehicleDisplayOrder)
       })
       setDialogOpen(false)
       toast.success(editingVehicle ? "차량 정보가 수정되었습니다." : "차량이 등록되었습니다.")
@@ -181,13 +184,14 @@ export function AdminVehicleManagement() {
               등록된 차량이 없습니다. 차량 등록 버튼으로 첫 차량을 추가해 주세요.
             </p>
           ) : (
-            <Table className="min-w-[1050px]">
+            <Table className="min-w-[1140px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[84px]">사진</TableHead>
                   <TableHead>차량번호</TableHead>
                   <TableHead>제조사 / 모델</TableHead>
                   <TableHead>관리부서</TableHead>
+                  <TableHead className="text-center">표출 순서</TableHead>
                   <TableHead>표시 여부</TableHead>
                   <TableHead className="text-right">현재 km</TableHead>
                   <TableHead>정 담당자</TableHead>
@@ -206,6 +210,7 @@ export function AdminVehicleManagement() {
                     <TableCell>
                       <Badge variant="outline">{vehicle.managementDepartment || "미지정"}</Badge>
                     </TableCell>
+                    <TableCell className="text-center font-medium">{vehicle.displayOrder || "미지정"}</TableCell>
                     <TableCell>
                       <Badge variant={vehicle.status === "active" ? "default" : "secondary"}>
                         {vehicle.status === "active" ? "차량 보이기" : "차량 숨기기"}
@@ -272,6 +277,18 @@ export function AdminVehicleManagement() {
                     기록 반영 현재 km: {editingVehicle.currentOdometerKm.toLocaleString("ko-KR")} km
                   </p>
                 )}
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="vehicle-display-order">표출 순서</Label>
+                <Input
+                  id="vehicle-display-order"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={draft.displayOrder}
+                  onChange={(event) => updateDraft("displayOrder", Math.max(0, Math.trunc(Number(event.target.value))))}
+                />
+                <p className="text-[11px] text-muted-foreground">1부터 낮은 숫자가 먼저 표시됩니다. 0은 미지정으로 마지막에 표시됩니다.</p>
               </div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label>정 담당자 *</Label>

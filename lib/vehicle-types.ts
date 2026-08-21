@@ -19,6 +19,7 @@ export const vehicleInputSchema = z
     fuelType: optionalTrimmedString(30),
     managementDepartment: z.union([vehicleManagementDepartmentSchema, z.literal("")]).default(""),
     status: vehicleStatusSchema.default("active"),
+    displayOrder: z.number().int("표출 순서는 정수로 입력해 주세요.").nonnegative("표출 순서는 0 이상이어야 합니다.").default(0),
     baselineOdometerKm: z.number().finite().nonnegative(),
     primaryManagerEmail: z.string().trim().email("정 담당자를 선택해 주세요."),
     secondaryManagerEmail: z.union([z.string().trim().email(), z.literal("")]).default(""),
@@ -149,4 +150,13 @@ export type DirectionsResult = {
 
 export function normalizePlateNumber(value: string) {
   return value.trim().toUpperCase().replace(/[\s-]+/g, "")
+}
+
+export function compareVehicleDisplayOrder(
+  first: Pick<Vehicle, "displayOrder" | "plateNumber">,
+  second: Pick<Vehicle, "displayOrder" | "plateNumber">,
+) {
+  const firstOrder = first.displayOrder > 0 ? first.displayOrder : Number.MAX_SAFE_INTEGER
+  const secondOrder = second.displayOrder > 0 ? second.displayOrder : Number.MAX_SAFE_INTEGER
+  return firstOrder - secondOrder || first.plateNumber.localeCompare(second.plateNumber, "ko")
 }

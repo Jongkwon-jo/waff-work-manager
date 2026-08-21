@@ -3,6 +3,7 @@ import "server-only"
 import { FieldValue, Timestamp, type DocumentData, type DocumentReference } from "firebase-admin/firestore"
 import { getFirebaseAdminAuth, getFirebaseAdminFirestore } from "@/lib/firebase-admin"
 import {
+  compareVehicleDisplayOrder,
   driveRecordInputSchema,
   maintenanceRecordInputSchema,
   normalizePlateNumber,
@@ -40,6 +41,7 @@ function cleanObject<T extends Record<string, unknown>>(value: T): T {
 
 function serializeVehicle(id: string, data: DocumentData): Vehicle {
   const parsedManagementDepartment = vehicleManagementDepartmentSchema.safeParse(data.managementDepartment)
+  const displayOrder = Number(data.displayOrder)
   return {
     id,
     plateNumber: String(data.plateNumber || ""),
@@ -49,6 +51,7 @@ function serializeVehicle(id: string, data: DocumentData): Vehicle {
     fuelType: String(data.fuelType || ""),
     managementDepartment: parsedManagementDepartment.success ? parsedManagementDepartment.data : "",
     status: data.status === "retired" ? "retired" : "active",
+    displayOrder: Number.isInteger(displayOrder) && displayOrder >= 0 ? displayOrder : 0,
     activityStatus: "waiting",
     baselineOdometerKm: Number(data.baselineOdometerKm || 0),
     currentOdometerKm: Number(data.currentOdometerKm || data.baselineOdometerKm || 0),
@@ -186,13 +189,14 @@ async function getVehicleActivityStatus(vehicleRef: DocumentReference, vehicle: 
 
 export async function listVehicles(): Promise<Vehicle[]> {
   const snapshot = await getFirebaseAdminFirestore().collection(VEHICLES_COLLECTION).orderBy("plateNumberKey", "asc").get()
-  return Promise.all(
+  const vehicles = await Promise.all(
     snapshot.docs.map(async (document) => {
       const vehicle = serializeVehicle(document.id, document.data())
       vehicle.activityStatus = await getVehicleActivityStatus(document.ref, vehicle)
       return vehicle
     }),
   )
+  return vehicles.sort(compareVehicleDisplayOrder)
 }
 
 export async function getVehicle(vehicleId: string): Promise<Vehicle> {
