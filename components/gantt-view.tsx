@@ -36,6 +36,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { calculateManDaysBetweenDates } from "@/lib/man-days"
+import { buildGanttProjectSummaryRanges, buildGanttSummaryRanges, getGanttSummaryDaySpan, type GanttSummaryRange } from "@/lib/gantt-summary"
 import { ko } from "date-fns/locale"
 import {
   DEFAULT_DEPARTMENT_PERSON_SETTINGS,
@@ -157,6 +158,8 @@ const TASK_ROW_HEIGHT = 36
 const VIRTUAL_OVERSCAN_ROWS = 20
 const PROJECT_HEADER_ROW_BG_CLASS = "bg-blue-600/50"
 const PROJECT_NAME_BADGE_BG_CLASS = "bg-transparent text-white"
+const SUMMARY_RANGE_CLASS = "border-x-2 border-[#475569] bg-[#CBD5E1] after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-dashed after:border-[#475569]"
+const SUMMARY_DESKTOP_CLASS = "absolute top-1/2 flex h-4 -translate-y-1/2 items-center px-2 text-[9px] font-medium text-[#334155] select-none cursor-default"
 const HISTORY_FIELD_LABELS: Record<string, string> = {
   task: "제목",
   status: "상태",
@@ -204,6 +207,10 @@ function formatDateKey(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0")
   const day = String(date.getDate()).padStart(2, "0")
   return `${year}-${month}-${day}`
+}
+
+function getSummaryLabel(name: string, range: GanttSummaryRange): string {
+  return `${name} · 하위 업무 일정 (${formatDateKey(range.startDate)} ~ ${formatDateKey(range.endDate)})`
 }
 
 function formatDateKorean(date: Date) {
@@ -1015,6 +1022,16 @@ export function GanttView({
     target.scrollIntoView({ behavior: "smooth", block: "center" })
     setRecentlyAddedTaskId(null)
   }, [projects, recentlyAddedTaskId])
+
+  const summaryYear = new Date().getFullYear()
+  const summaryRanges = useMemo(
+    () => buildGanttSummaryRanges(projects.flatMap((project) => project.tasks), summaryYear, hiddenTaskIds),
+    [projects, summaryYear, hiddenTaskIds],
+  )
+  const projectSummaryRanges = useMemo(
+    () => buildGanttProjectSummaryRanges(projects, summaryYear, hiddenTaskIds),
+    [projects, summaryYear, hiddenTaskIds],
+  )
 
   const filteredProjects = useMemo<FilteredProject[]>(() => {
     const lowerQuery = searchQuery.trim().toLowerCase()
@@ -2096,6 +2113,8 @@ export function GanttView({
     return (
       <MobileGanttView
         filteredProjects={filteredProjects}
+        summaryRanges={summaryRanges}
+        projectSummaryRanges={projectSummaryRanges}
         allDays={allDays}
         changeHistoryEntries={changeHistoryEntries}
         seenChangeHistoryIds={seenChangeHistoryIds}
@@ -2567,6 +2586,8 @@ export function GanttView({
             {virtualizedBody.items.map((virtualItem) => {
               const project = virtualItem.project
               const isProjectCollapsed = virtualItem.isProjectCollapsed
+              const projectSummaryRange = projectSummaryRanges.get(project.id)
+              const projectSummarySpan = getGanttSummaryDaySpan(projectSummaryRange, allDays)
 
               return (
                 <div key={project.id}>
@@ -2757,7 +2778,27 @@ export function GanttView({
                       />
                     )}
 
-                    <div className="min-w-0 flex-1 h-7" />
+                    <div className="relative min-w-0 flex-1 h-9 overflow-hidden">
+                      <div
+                        className="relative h-full will-change-transform"
+                        style={{ width: timelineWidth, transform: `translateX(-${timelineScrollLeft}px)` }}
+                      >
+                        {projectSummaryRange && projectSummarySpan && (
+                          <div
+                            role="img"
+                            aria-label={getSummaryLabel(project.name, projectSummaryRange)}
+                            title={getSummaryLabel(project.name, projectSummaryRange)}
+                            className={cn(SUMMARY_DESKTOP_CLASS, SUMMARY_RANGE_CLASS)}
+                            style={{
+                              left: projectSummarySpan.startIndex * CELL_WIDTH + 2,
+                              width: (projectSummarySpan.endIndex - projectSummarySpan.startIndex + 1) * CELL_WIDTH - 4,
+                            }}
+                          >
+                            <span className="truncate">요약 · {project.name}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                     )
                   })()}
@@ -2777,6 +2818,8 @@ export function GanttView({
                       const depthPrefix = displayDepth >= 3 ? "- " : displayDepth >= 2 ? "• " : ""
                       const depthRowBgClass = getDepthRowBgClass(displayDepth)
                       const isParentTask = task.hasChildren
+                      const summaryRange = isParentTask && task.depth === 0 ? summaryRanges.get(task.id) : undefined
+                      const summarySpan = getGanttSummaryDaySpan(summaryRange, allDays)
                       const hasMemo = Boolean(task.memo?.trim())
                       const hasHiddenChild = hasHiddenChildren(task)
                       const isParentHiddenExpanded =
@@ -3276,6 +3319,21 @@ export function GanttView({
                                   </div>
                                 ))}
 
+                                {summaryRange && summarySpan && (
+                                  <div
+                                    role="img"
+                                    aria-label={getSummaryLabel(task.task, summaryRange)}
+                                    title={getSummaryLabel(task.task, summaryRange)}
+                                    className={cn(SUMMARY_DESKTOP_CLASS, SUMMARY_RANGE_CLASS)}
+                                    style={{
+                                      left: summarySpan.startIndex * CELL_WIDTH + 2,
+                                      width: (summarySpan.endIndex - summarySpan.startIndex + 1) * CELL_WIDTH - 4,
+                                    }}
+                                  >
+                                    <span className="truncate">요약 · {task.task}</span>
+                                  </div>
+                                )}
+
                                 {bar && !isParentTask && (
                                   <div
                                     id={`bar-${task.id}`}
@@ -3371,6 +3429,8 @@ export function GanttView({
 
 interface MobileGanttViewProps {
   filteredProjects: FilteredProject[]
+  summaryRanges: ReadonlyMap<string, GanttSummaryRange>
+  projectSummaryRanges: ReadonlyMap<string, GanttSummaryRange>
   allDays: Array<{
     year: number
     month: number
@@ -3415,6 +3475,8 @@ const STATUS_ORDER = ["완료", "진행", "예정", "취소"] as const
 
 function MobileGanttView({
   filteredProjects,
+  summaryRanges,
+  projectSummaryRanges,
   allDays,
   changeHistoryEntries,
   seenChangeHistoryIds,
@@ -3491,33 +3553,21 @@ function MobileGanttView({
     [todayIdx, dayIndexByMonthDay],
   )
 
-  // 프로젝트 전체 기간 (태스크 중 가장 이른 시작 ~ 가장 늦은 종료)
+  // 프로젝트 기간은 필터/접기 전 전체 업무 트리에서 집계합니다.
   const getProjectSpan = useCallback(
     (project: FilteredProject) => {
-      let minIdx = Infinity
-      let maxIdx = -Infinity
-      let minDate = ""
-      let maxDate = ""
-      for (const task of project.tasks) {
-        for (const d of [task.startDate, task.endDate]) {
-          if (!d) continue
-          const parsed = parseDate(d)
-          if (!parsed) continue
-          const idx = dayIndexByMonthDay.get(`${parsed.month}-${parsed.day}`) ?? -1
-          if (idx === -1) continue
-          if (idx < minIdx) { minIdx = idx; minDate = d }
-          if (idx > maxIdx) { maxIdx = idx; maxDate = d }
-        }
-      }
-      if (minIdx === Infinity || !minDate || !maxDate) return null
+      const range = projectSummaryRanges.get(project.id)
+      const span = getGanttSummaryDaySpan(range, allDays)
+      if (!range || !span || totalDays === 0) return null
       return {
-        startDate: minDate,
-        endDate: maxDate,
-        leftPct: (minIdx / totalDays) * 100,
-        widthPct: Math.max(0.5, ((maxIdx - minIdx + 1) / totalDays) * 100),
+        startDate: formatDateKey(range.startDate),
+        endDate: formatDateKey(range.endDate),
+        label: getSummaryLabel(project.name, range),
+        leftPct: (span.startIndex / totalDays) * 100,
+        widthPct: ((span.endIndex - span.startIndex + 1) / totalDays) * 100,
       }
     },
-    [dayIndexByMonthDay, totalDays],
+    [projectSummaryRanges, allDays, totalDays],
   )
 
   // 프로젝트 내 상태별 태스크 수 (STATUS_ORDER 순)
@@ -3614,12 +3664,15 @@ function MobileGanttView({
   const lastDay = allDays[allDays.length - 1]
 
   // ── 공통: 미니 타임라인 스트립 ──────────────────────────────────────
-  const MiniTimeline = ({ highlightSpan }: { highlightSpan?: { leftPct: number; widthPct: number } | null }) => (
+  const MiniTimeline = ({ highlightSpan }: { highlightSpan?: { leftPct: number; widthPct: number; label: string } | null }) => (
     <div className="px-3 pb-1.5 pt-0.5">
-      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-border/25">
+      <div className={cn("relative w-full overflow-hidden bg-border/25", highlightSpan ? "h-2.5" : "h-1.5 rounded-full")}>
         {highlightSpan && (
           <div
-            className="absolute bottom-0 top-0 rounded-full bg-blue-400/35"
+            role="img"
+            aria-label={highlightSpan.label}
+            title={highlightSpan.label}
+            className={cn("absolute bottom-0 top-0", SUMMARY_RANGE_CLASS)}
             style={{ left: `${highlightSpan.leftPct}%`, width: `${highlightSpan.widthPct}%` }}
           />
         )}
@@ -3770,7 +3823,16 @@ function MobileGanttView({
                 const depthPrefix = displayDepth >= 3 ? "- " : displayDepth >= 2 ? "• " : ""
                 const depthRowBgClass = getDepthRowBgClass(displayDepth)
                 const barStyle = getStatusBarStyle(task.status)
-                const miniBar = getMiniBarPosition(task.startDate, task.endDate)
+                const summaryRange = task.hasChildren && task.depth === 0 ? summaryRanges.get(task.id) : undefined
+                const summarySpan = getGanttSummaryDaySpan(summaryRange, allDays)
+                const miniBar = task.hasChildren
+                  ? summarySpan && totalDays > 0
+                    ? {
+                        leftPct: (summarySpan.startIndex / totalDays) * 100,
+                        widthPct: ((summarySpan.endIndex - summarySpan.startIndex + 1) / totalDays) * 100,
+                      }
+                    : undefined
+                  : getMiniBarPosition(task.startDate, task.endDate)
                 const hasMemo = Boolean(task.memo?.trim())
                 const isTaskCollapsed = collapsedTaskIds.has(task.id)
                 const containsToday = isTaskContainsToday(task)
@@ -3916,8 +3978,13 @@ function MobileGanttView({
                     )}
 
                     {/* 미니 간트 바 */}
-                    {miniBar && !task.hasChildren && (
-                      <div className="relative mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border/20">
+                    {miniBar && (
+                      <div
+                        className={cn("relative mt-1.5 w-full overflow-hidden bg-border/20", summaryRange ? "h-2.5" : "h-1.5 rounded-full")}
+                        role={summaryRange ? "img" : undefined}
+                        aria-label={summaryRange ? getSummaryLabel(task.task, summaryRange) : undefined}
+                        title={summaryRange ? getSummaryLabel(task.task, summaryRange) : undefined}
+                      >
                         {todayPct !== null && (
                           <div
                             className="absolute bottom-0 top-0 z-10 w-px bg-emerald-500/85"
@@ -3925,7 +3992,7 @@ function MobileGanttView({
                           />
                         )}
                         <div
-                          className={cn("absolute bottom-0 top-0 rounded-full opacity-80", barStyle.barClass)}
+                          className={cn("absolute bottom-0 top-0", summaryRange ? SUMMARY_RANGE_CLASS : cn("rounded-full opacity-80", barStyle.barClass))}
                           style={{ left: `${miniBar.leftPct}%`, width: `${miniBar.widthPct}%` }}
                         />
                       </div>
@@ -4033,7 +4100,12 @@ function MobileGanttView({
 
                       {/* 미니 간트 바 (프로젝트 전체 기간) */}
                       {span && (
-                        <div className="relative mt-2 h-2 w-full overflow-hidden rounded-full bg-border/20">
+                        <div
+                          role="img"
+                          aria-label={span.label}
+                          title={span.label}
+                          className="relative mt-2 h-2.5 w-full overflow-hidden bg-border/20"
+                        >
                           {todayPct !== null && (
                             <div
                               className="absolute bottom-0 top-0 z-10 w-px bg-emerald-500/85"
@@ -4041,7 +4113,7 @@ function MobileGanttView({
                             />
                           )}
                           <div
-                            className="absolute bottom-0 top-0 rounded-full bg-blue-500/50"
+                            className={cn("absolute bottom-0 top-0", SUMMARY_RANGE_CLASS)}
                             style={{ left: `${span.leftPct}%`, width: `${span.widthPct}%` }}
                           />
                         </div>

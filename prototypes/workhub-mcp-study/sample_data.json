@@ -1,0 +1,22 @@
+{
+  "as_of": "2026-09-09",
+  "projects": [
+    {"id": "fa-demo", "department": "fa", "name": "[가상] FA 검사라인", "hidden": false},
+    {"id": "strategy-demo", "department": "strategy", "name": "[가상] 사업 운영 개선", "hidden": false},
+    {"id": "ict-demo", "department": "ict", "name": "[가상] 업무 포털", "hidden": false},
+    {"id": "private-demo", "department": "fa", "name": "[가상] 숨김 프로젝트", "hidden": true}
+  ],
+  "tasks": [
+    {"id": "fa-root", "project_id": "fa-demo", "title": "검사라인 구축", "person": "가상 민수", "status": "진행", "start": "2026-09-01", "end": "2026-09-11", "man_days": 30},
+    {"id": "fa-1", "project_id": "fa-demo", "parent_id": "fa-root", "title": "센서 설치", "person": "가상 민수", "status": "진행", "start": "2026-09-01", "end": "2026-09-07", "man_days": 3},
+    {"id": "fa-2", "project_id": "fa-demo", "parent_id": "fa-root", "title": "검사 조건 설정", "person": "가상 민수", "status": "예정", "start": "2026-09-09", "end": "2026-09-11", "man_days": 2},
+    {"id": "fa-3", "project_id": "fa-demo", "parent_id": "fa-root", "title": "배선 점검", "person": "가상 지수", "status": "완료", "start": "2026-09-01", "end": "2026-09-04", "man_days": 1},
+    {"id": "fa-4", "project_id": "fa-demo", "parent_id": "fa-root", "title": "구형 장비 시험", "person": "가상 지수", "status": "취소", "start": "2026-09-01", "end": "2026-09-03", "man_days": 4},
+    {"id": "fa-hidden", "project_id": "fa-demo", "hidden": true, "title": "숨긴 시험 업무", "person": "가상 민수", "status": "진행", "start": "2026-09-01", "end": "2026-09-02", "man_days": 10},
+    {"id": "fa-hidden-child", "project_id": "fa-demo", "parent_id": "fa-hidden", "title": "숨긴 업무의 하위 항목", "person": "가상 민수", "status": "진행", "start": "2026-09-01", "end": "2026-09-02", "man_days": 5},
+    {"id": "strategy-1", "project_id": "strategy-demo", "title": "운영 지표 정리", "person": "가상 지수", "status": "진행", "start": "2026-09-01", "end": "2026-09-08", "man_days": 2},
+    {"id": "strategy-1", "project_id": "strategy-demo", "view": "ict", "title": "운영 지표 정리", "person": "가상 지수", "status": "진행", "start": "2026-09-01", "end": "2026-09-08", "man_days": 2},
+    {"id": "ict-1", "project_id": "ict-demo", "title": "포털 화면 개발", "person": "가상 민수", "status": "진행", "start": "2026-09-07", "end": "2026-09-10", "man_days": 3},
+    {"id": "private-1", "project_id": "private-demo", "title": "프로젝트 숨김 확인용", "person": "가상 민수", "status": "진행", "start": "2026-09-01", "end": "2026-09-02", "man_days": 10}
+  ]
+}
