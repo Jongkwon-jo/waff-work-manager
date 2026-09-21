@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     const distance = Number(route?.summary?.distance)
     const duration = Number(route?.summary?.duration)
     if (!response.ok || body.code !== 0 || !route || !Number.isFinite(distance) || !Number.isFinite(duration)) {
-      throw new VehicleApiException(502, "자동 운행거리 계산에 실패했습니다. 기록거리와 사유를 직접 입력해 주세요.")
+      throw new VehicleApiException(502, "자동 운행거리 계산에 실패했습니다. 주행거리를 직접 입력해 주세요.")
     }
     const path: Array<[number, number]> = Array.isArray(route.path)
       ? route.path

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 import type { User } from "firebase/auth"
 import { Loader2, MapPin, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -12,14 +12,21 @@ export function AddressSearchInput({
   user,
   value,
   onChange,
+  onQueryChange,
   placeholder,
+  preferAddress = false,
+  showSelected = true,
 }: {
   user: User
   value: AddressPoint | null
   onChange: (point: AddressPoint) => void
+  onQueryChange: (query: string) => void
   placeholder: string
+  preferAddress?: boolean
+  showSelected?: boolean
 }) {
-  const [query, setQuery] = useState(value?.placeName || value?.address || "")
+  const selectedLabel = preferAddress ? value?.address || "" : value?.placeName || value?.address || ""
+  const query = selectedLabel
   const [candidates, setCandidates] = useState<AddressCandidate[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -58,27 +65,14 @@ export function AddressSearchInput({
     }
   }, [user])
 
-  useEffect(() => {
-    const searchQuery = query.trim()
-    const selectedLabel = value?.placeName || value?.address || ""
-    if (searchQuery.length < 2 || searchQuery === selectedLabel) return
-    const controller = new AbortController()
-    const timer = window.setTimeout(() => {
-      void search(searchQuery, controller.signal)
-    }, 350)
-    return () => {
-      window.clearTimeout(timer)
-      controller.abort()
-    }
-  }, [query, search, value?.address, value?.placeName])
-
   return (
     <div className="relative min-w-56 space-y-1">
       <div className="flex gap-1">
         <Input
           value={query}
           onChange={(event) => {
-            setQuery(event.target.value)
+            const nextQuery = event.target.value
+            onQueryChange(nextQuery)
             setCandidates([])
             setError("")
             setLoading(false)
@@ -92,12 +86,12 @@ export function AddressSearchInput({
           placeholder={placeholder}
           className="h-8 min-w-0 text-xs"
         />
-        <Button type="button" variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => void search(query.trim())} disabled={loading}>
+        <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 px-2 text-xs" onClick={() => void search(query.trim())} disabled={loading}>
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-          <span className="sr-only">주소 검색</span>
+          검색
         </Button>
       </div>
-      {value && (
+      {showSelected && value && (
         <p className="flex items-center gap-1 truncate text-[11px] font-medium text-emerald-700" title={value.placeName ? `${value.placeName} · ${value.address}` : value.address}>
           <MapPin className="h-3 w-3 shrink-0" /> 선택됨: {value.placeName ? `${value.placeName} · ${value.address}` : value.address}
         </p>
@@ -111,7 +105,6 @@ export function AddressSearchInput({
               type="button"
               className="block w-full rounded-md px-3 py-2 text-left hover:bg-slate-50"
               onClick={() => {
-                setQuery(candidate.label)
                 onChange(candidate)
                 setCandidates([])
               }}

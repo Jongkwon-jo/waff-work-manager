@@ -101,14 +101,6 @@ export const driveRecordInputSchema = z
         message: "도착 km는 출발 km 이상이어야 합니다.",
       })
     }
-    const adjusted = value.naverDistanceKm === null || Math.abs(value.recordedDistanceKm - value.naverDistanceKm) >= 0.01
-    if (adjusted && !value.distanceOverrideReason.trim()) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["distanceOverrideReason"],
-        message: "거리 수동 입력 또는 보정 사유를 입력해 주세요.",
-      })
-    }
   })
 
 export type DriveRecordInput = z.infer<typeof driveRecordInputSchema>
