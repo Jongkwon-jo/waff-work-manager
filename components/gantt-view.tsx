@@ -69,6 +69,8 @@ interface GanttViewProps {
   hiddenTaskRoots?: Task[]
   loadingHiddenTaskProjectIds?: string[]
   canEdit?: boolean
+  canManageProjectVisibility?: boolean
+  onSetProjectHidden?: (projectId: string, isHidden: boolean) => Promise<void> | void
   canCopyTasks?: boolean
   canDeleteTask?: (task: Task) => boolean
   onAddProject: (project: Project) => void
@@ -425,6 +427,8 @@ export function GanttView({
   hiddenTaskRoots = [],
   loadingHiddenTaskProjectIds = [],
   canEdit = true,
+  canManageProjectVisibility = false,
+  onSetProjectHidden,
   canCopyTasks = canEdit,
   canDeleteTask,
   onAddProject,
@@ -920,12 +924,9 @@ export function GanttView({
   }
 
   const toggleProjectVisibility = (projectId: string) => {
-    const project = projectById.get(projectId)
-    if (!project) return
-    onEditProject({
-      ...project,
-      isHidden: !hiddenProjectIds.has(projectId),
-    })
+    if (!canManageProjectVisibility || !onSetProjectHidden) return
+    if (!projectById.has(projectId)) return
+    void onSetProjectHidden(projectId, !hiddenProjectIds.has(projectId))
   }
 
   useEffect(() => {
@@ -2206,7 +2207,7 @@ export function GanttView({
                           <div className="mb-2 flex items-center justify-between gap-2 px-1">
                             <div>
                               <div className="text-xs font-semibold text-foreground">숨긴 프로젝트</div>
-                              <div className="text-[11px] text-muted-foreground">{hiddenProjectOptionCount}개 숨김</div>
+                              <div className="text-[11px] text-muted-foreground">{hiddenProjectOptionCount}개 숨김 · 선택하면 내 화면에만 표시됩니다.</div>
                             </div>
                             <Button
                               type="button"
@@ -2216,7 +2217,7 @@ export function GanttView({
                               disabled={selectedHiddenProjectCount === 0}
                               onClick={clearSelectedHiddenProjects}
                             >
-                              선택 해제
+                              내 화면에서 모두 숨기기
                             </Button>
                           </div>
                           <div className="max-h-[280px] overflow-y-auto pr-1">
@@ -2232,7 +2233,7 @@ export function GanttView({
                                 >
                                   <Checkbox
                                     checked={selected}
-                                    aria-label={`${project.name} 선택`}
+                                    aria-label={`${project.name} 내 화면에 표시`}
                                     onCheckedChange={() => toggleSelectedHiddenProject(project.id)}
                                   />
                                   <button
@@ -2674,16 +2675,19 @@ export function GanttView({
                             {project.name}
                           </span>
                         )}
+                        {canManageProjectVisibility && onSetProjectHidden && (
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6 text-white hover:bg-white/15 hover:text-white"
                           onClick={() => toggleProjectVisibility(project.id)}
-                          title={isProjectHidden ? "프로젝트 숨김 해제" : "프로젝트 숨기기"}
+                          title={isProjectHidden ? "프로젝트 전체 숨김 해제" : "프로젝트 전체 숨기기"}
+                          aria-label={isProjectHidden ? "프로젝트 전체 숨김 해제" : "프로젝트 전체 숨기기"}
                         >
                           {isProjectHidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                         </Button>
+                        )}
                         {hasHiddenProjectTasks && (
                           <>
                             <button

@@ -83,6 +83,7 @@ export default function IctWorkManagementPage() {
   const hiddenTaskSessionUserRef = useRef("")
   const hasLoadedProjectListRef = useRef(false)
   const [hiddenProjectOptions, setHiddenProjectOptions] = useState<Project[]>([])
+  const [scopedHiddenProjects, setScopedHiddenProjects] = useState<Project[]>([])
   const [selectedHiddenProjectIds, setSelectedHiddenProjectIds] = useState<string[]>([])
   const [hiddenTaskRoots, setHiddenTaskRoots] = useState<Task[]>([])
   const [requestedHiddenTaskProjectIds, setRequestedHiddenTaskProjectIds] = useState<string[]>([])
@@ -898,16 +899,32 @@ export default function IctWorkManagementPage() {
     scheduleScopeAliases,
   ])
 
+  const canManageProjectVisibility = canEdit || canViewFullSchedule
+
   useEffect(() => {
-    if (!currentUserEmail || !canViewFullSchedule) {
-      setHiddenProjectOptions([])
+    setHiddenProjectOptions([])
+    setScopedHiddenProjects([])
+    if (!currentUserEmail || (!canViewFullSchedule &&
+      (!isCurrentProfileReady || currentProfileEmail !== currentUserEmail || !isDepartmentOrgReady))) {
       setSelectedHiddenProjectIds([])
       return
     }
     if (!isScheduleListenerActive) return
+    if (canViewFullSchedule) return subscribeHiddenProjectSummaries(setHiddenProjectOptions)
 
-    return subscribeHiddenProjectSummaries(setHiddenProjectOptions)
-  }, [currentUserEmail, canViewFullSchedule, isScheduleListenerActive])
+    // Reuse the normal access scope; never fetch every task of a selected project.
+    return subscribeProjectsWithTasksByScheduleScope({
+      personKeys: scheduleScopeAliases,
+      pmEmail: currentUserEmail,
+      creatorEmail: currentUserEmail,
+      includeHidden: true,
+    }, (projects) => {
+      const hidden = projects.filter((project) => project.isHidden)
+      setScopedHiddenProjects(hidden)
+      setHiddenProjectOptions(hidden.map((project) => ({ ...project, tasks: [] })))
+    })
+  }, [currentUserEmail, canViewFullSchedule, isScheduleListenerActive,
+    isCurrentProfileReady, currentProfileEmail, isDepartmentOrgReady, scheduleScopeAliases])
 
   useEffect(() => {
     const availableHiddenIds = new Set(hiddenProjectOptions.map((project) => project.id))
@@ -925,11 +942,19 @@ export default function IctWorkManagementPage() {
     }
     if (!isScheduleListenerActive) return
 
+    if (!canViewFullSchedule) {
+      const selected = new Set(selectedHiddenProjectIds)
+      const data = scopedHiddenProjects.filter((project) => selected.has(project.id))
+      selectedHiddenProjectListRef.current = data
+      setProjectList(mergeProjectLists(visibleProjectListRef.current, data))
+      return
+    }
+
     return subscribeProjectsWithTasksByProjectIds(selectedHiddenProjectIds, (data) => {
       selectedHiddenProjectListRef.current = data
       setProjectList(mergeProjectLists(visibleProjectListRef.current, data))
     })
-  }, [currentUserEmail, selectedHiddenProjectIds, isScheduleListenerActive])
+  }, [currentUserEmail, selectedHiddenProjectIds, isScheduleListenerActive, canViewFullSchedule, scopedHiddenProjects])
 
   useEffect(() => {
     if (hiddenTaskSessionUserRef.current === currentUserEmail) return
@@ -1124,7 +1149,33 @@ export default function IctWorkManagementPage() {
     }
   }
 
+  const handleSetProjectHidden = async (projectId: string, isHidden: boolean) => {
+    if (!canManageProjectVisibility) {
+      toast.error("전체 숨김 상태를 변경할 권한이 없습니다.")
+      return
+    }
+    const project = projectList.find((item) => item.id === projectId)
+    if (!project) return
+    try {
+      await updateProjectInDB(projectId, { isHidden })
+      await recordHistory({
+        entityType: "project",
+        action: "update",
+        entityId: projectId,
+        before: serializeProjectData(project),
+        after: serializeProjectData({ ...project, isHidden }),
+      })
+      toast.success(isHidden ? "프로젝트를 전체 숨김 처리했습니다." : "프로젝트의 전체 숨김을 해제했습니다.")
+    } catch {
+      toast.error("프로젝트 숨김 상태 저장 실패")
+    }
+  }
+
   const handleEditProject = async (updatedProject: Project) => {
+    if (!canEdit) {
+      toast.error("프로젝트를 수정할 권한이 없습니다.")
+      return
+    }
     try {
       const beforeProject = projectList.find((p) => p.id === updatedProject.id)
       const { id, tasks, ...projectData } = updatedProject
@@ -2399,6 +2450,8 @@ export default function IctWorkManagementPage() {
                 pmOptions={pmOptions}
                 inactiveOwnerOptions={inactiveOwnerOptions}
                 searchQuery={deferredSearchQuery}
+                canManageProjectVisibility={canManageProjectVisibility}
+                onSetProjectHidden={handleSetProjectHidden}
                 hiddenProjectOptions={hiddenProjectOptions}
                 selectedHiddenProjectIds={selectedHiddenProjectIds}
                 hiddenTaskRoots={hiddenTaskRoots}
