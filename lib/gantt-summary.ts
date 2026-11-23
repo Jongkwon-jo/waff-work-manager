@@ -5,8 +5,8 @@ export type GanttSummaryRange = { startDate: Date; endDate: Date }
 
 type CalendarDay = { year: number; month: number; day: number }
 
-function parseDate(value: string, defaultYear: number): Date | undefined {
-  const match = value.trim().match(/^(?:(\d{4})(?:[-/.]|년)\s*)?(\d{1,2})(?:[-/.]|월)\s*(\d{1,2})(?:일|\.)?$/)
+export function parseTaskDate(value?: string, defaultYear = new Date().getFullYear()): Date | undefined {
+  const match = value?.trim().match(/^(?:(\d{4})\s*(?:[-/.]|년)\s*)?(\d{1,2})\s*(?:[-/.]|월)\s*(\d{1,2})(?:\s*[일.])?$/)
   if (!match) return undefined
   const year = match[1] ? Number(match[1]) : defaultYear
   const month = Number(match[2]) - 1
@@ -15,6 +15,28 @@ function parseDate(value: string, defaultYear: number): Date | undefined {
   return date.getFullYear() === year && date.getMonth() === month && date.getDate() === day
     ? date
     : undefined
+}
+
+export function formatDateKey(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+export function getGanttTaskDaySpan(
+  task: Pick<Task, "startDate" | "endDate">,
+  dayIndexByDate: ReadonlyMap<string, number>,
+  defaultYear = new Date().getFullYear(),
+): { startIndex: number; endIndex: number } | undefined {
+  const start = parseTaskDate(task.startDate, defaultYear)
+  const end = parseTaskDate(task.endDate, defaultYear)
+  if (!start || !end) return undefined
+
+  const startIndex = dayIndexByDate.get(formatDateKey(start))
+  const endIndex = dayIndexByDate.get(formatDateKey(end))
+  if (startIndex === undefined || endIndex === undefined || startIndex > endIndex) return undefined
+  return { startIndex, endIndex }
 }
 
 function mergeRanges(
@@ -47,8 +69,8 @@ function collectGanttRanges(
 
     // Ineligible intermediate tasks still contribute their eligible descendants.
     if (task.status !== "진행" && task.status !== "예정" && task.status !== "미정") return descendants
-    const startDate = parseDate(task.startDate || "", defaultYear)
-    const endDate = parseDate(task.endDate || "", defaultYear)
+    const startDate = parseTaskDate(task.startDate, defaultYear)
+    const endDate = parseTaskDate(task.endDate, defaultYear)
     if (!startDate || !endDate || startDate > endDate) return descendants
     return mergeRanges(descendants, { startDate, endDate })
   }

@@ -1,6 +1,13 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { buildGanttProjectSummaryRanges, buildGanttSummaryRanges, getGanttSummaryDaySpan } from "../lib/gantt-summary.ts"
+import {
+  buildGanttProjectSummaryRanges,
+  buildGanttSummaryRanges,
+  formatDateKey,
+  getGanttSummaryDaySpan,
+  getGanttTaskDaySpan,
+  parseTaskDate,
+} from "../lib/gantt-summary.ts"
 
 const task = (id, overrides = {}) => ({
   id, projectId: "project", task: id, status: "진행", category: "일반",
@@ -13,6 +20,31 @@ const period = (map, id) => {
   return range && [ymd(range.startDate), ymd(range.endDate)]
 }
 const september = Array.from({ length: 30 }, (_, i) => ({ year: 2026, month: 8, day: i + 1 }))
+
+test("saved dates retain the selected year, and legacy dates use the fallback year", () => {
+  const selected = new Date(2027, 0, 7)
+  const saved = formatDateKey(selected)
+  assert.equal(saved, "2027-01-07")
+  assert.deepEqual(parseTaskDate(saved, 2026), selected)
+  assert.deepEqual(parseTaskDate("2027년 1월 7일", 2026), selected)
+  assert.equal(formatDateKey(parseTaskDate("01월 07일", 2026)), "2026-01-07")
+})
+
+test("task bars distinguish years and span the December to January boundary", () => {
+  const dayIndex = new Map([
+    ["2026-01-01", 0],
+    ["2026-12-31", 1],
+    ["2027-01-01", 2],
+    ["2027-01-02", 3],
+  ])
+  const newYear = { startDate: "2027-01-01", endDate: "2027-01-01" }
+  assert.deepEqual(getGanttTaskDaySpan(newYear, dayIndex, 2026), { startIndex: 2, endIndex: 2 })
+  assert.equal(getGanttTaskDaySpan(newYear, new Map([["2026-01-01", 0]]), 2026), undefined)
+  assert.deepEqual(
+    getGanttTaskDaySpan({ startDate: "12월 31일", endDate: "2027-01-02" }, dayIndex, 2026),
+    { startIndex: 1, endIndex: 3 },
+  )
+})
 
 test("projects aggregate eligible roots and deep descendants independently", () => {
   const projects = [

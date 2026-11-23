@@ -17,9 +17,8 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
-import { format } from "date-fns"
-import { ko } from "date-fns/locale"
 import { cn } from "@/lib/utils"
+import { formatDateKey } from "@/lib/gantt-summary"
 import { calculateManDaysBetweenDates } from "@/lib/man-days"
 import {
   DEFAULT_DEPARTMENT_PERSON_SETTINGS,
@@ -99,16 +98,6 @@ export function AddTaskDialog({
     setDepartment(defaultDepartment)
   }, [defaultDepartment, open])
 
-  const formatDate = (date: Date | undefined) => {
-    if (!date) return ""
-    return format(date, "MM월 dd일", { locale: ko })
-  }
-
-  const formatDateDisplay = (date: Date | undefined) => {
-    if (!date) return ""
-    return format(date, "yyyy-MM-dd", { locale: ko })
-  }
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!taskName || !startDate || !endDate) return
@@ -121,8 +110,8 @@ export function AddTaskDialog({
       category,
       department,
       person: joinListValue(personList),
-      startDate: formatDate(startDate),
-      endDate: formatDate(endDate),
+      startDate: formatDateKey(startDate),
+      endDate: formatDateKey(endDate),
       status,
       manDays: parseFloat(manDays) || 0,
       isSubTask: !!parentId,
@@ -302,11 +291,11 @@ export function AddTaskDialog({
                   <PopoverTrigger asChild>
                     <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !startDate && "text-muted-foreground")}>
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {startDate ? formatDateDisplay(startDate) : <span>날짜 선택</span>}
+                      {startDate ? formatDateKey(startDate) : <span>날짜 선택</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={startDate} onSelect={setStartDate} initialFocus />
+                    <Calendar mode="single" selected={startDate} defaultMonth={startDate} onSelect={setStartDate} initialFocus />
                   </PopoverContent>
                 </Popover>
               </div>
@@ -316,11 +305,11 @@ export function AddTaskDialog({
                   <PopoverTrigger asChild>
                     <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !endDate && "text-muted-foreground")}>
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {endDate ? formatDateDisplay(endDate) : <span>날짜 선택</span>}
+                      {endDate ? formatDateKey(endDate) : <span>날짜 선택</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={endDate} onSelect={setEndDate} initialFocus />
+                    <Calendar mode="single" selected={endDate} defaultMonth={endDate} onSelect={setEndDate} initialFocus />
                   </PopoverContent>
                 </Popover>
               </div>

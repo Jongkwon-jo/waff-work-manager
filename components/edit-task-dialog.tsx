@@ -18,9 +18,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
-import { format } from "date-fns"
-import { ko } from "date-fns/locale"
 import { cn } from "@/lib/utils"
+import { formatDateKey, parseTaskDate } from "@/lib/gantt-summary"
 import { calculateManDaysBetweenDates } from "@/lib/man-days"
 import {
   DEFAULT_DEPARTMENT_PERSON_SETTINGS,
@@ -50,31 +49,6 @@ const LockIcon = ({ hint }: { hint: string }) => (
     <Lock className="h-3 w-3" />
   </span>
 )
-
-function parseKoreanDate(value: string): Date | undefined {
-  const text = (value || "").trim()
-  if (!text) return undefined
-
-  const currentYear = new Date().getFullYear()
-
-  // YYYY.MM.DD, YYYY-MM-DD, YYYY/MM/DD
-  const ymd = text.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/)
-  if (ymd) {
-    return new Date(
-      Number.parseInt(ymd[1], 10),
-      Number.parseInt(ymd[2], 10) - 1,
-      Number.parseInt(ymd[3], 10),
-    )
-  }
-
-  // MM월 dd일, MM/DD, MM-DD
-  const md = text.match(/(\d{1,2})\D+(\d{1,2})/)
-  if (md) {
-    return new Date(currentYear, Number.parseInt(md[1], 10) - 1, Number.parseInt(md[2], 10))
-  }
-
-  return undefined
-}
 
 export function EditTaskDialog({
   task,
@@ -154,20 +128,10 @@ export function EditTaskDialog({
     setStatus(task.status)
     setManDays(task.manDays.toString())
     setIncludeWeekends(false)
-    setStartDate(parseKoreanDate(task.startDate))
-    setEndDate(parseKoreanDate(task.endDate))
+    setStartDate(parseTaskDate(task.startDate))
+    setEndDate(parseTaskDate(task.endDate))
     initializedForCurrentOpenRef.current = true
   }, [defaultDepartment, open, task])
-
-  const formatDate = (date: Date | undefined) => {
-    if (!date) return ""
-    return format(date, "MM월 dd일", { locale: ko })
-  }
-
-  const formatDateDisplay = (date: Date | undefined) => {
-    if (!date) return ""
-    return format(date, "yyyy-MM-dd", { locale: ko })
-  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -180,12 +144,8 @@ export function EditTaskDialog({
       category: isFieldEditable("category") ? category : task.category,
       department: isFieldEditable("department") ? department : task.department,
       person: isFieldEditable("person") ? joinListValue(personList) : task.person,
-      startDate: isFieldEditable("startDate")
-        ? (startDate ? formatDate(startDate) : task.startDate)
-        : task.startDate,
-      endDate: isFieldEditable("endDate")
-        ? (endDate ? formatDate(endDate) : task.endDate)
-        : task.endDate,
+      startDate: isFieldEditable("startDate") && startDate ? formatDateKey(startDate) : task.startDate,
+      endDate: isFieldEditable("endDate") && endDate ? formatDateKey(endDate) : task.endDate,
       status: isFieldEditable("status") ? status : task.status,
       manDays: isFieldEditable("manDays") ? (parseFloat(manDays) || 0) : task.manDays,
     }
@@ -408,11 +368,11 @@ export function EditTaskDialog({
                       disabled={!isFieldEditable("startDate")}
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {startDate ? formatDateDisplay(startDate) : <span>날짜 선택</span>}
+                      {startDate ? formatDateKey(startDate) : <span>날짜 선택</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={startDate} onSelect={setStartDate} initialFocus />
+                    <Calendar mode="single" selected={startDate} defaultMonth={startDate} onSelect={setStartDate} initialFocus />
                   </PopoverContent>
                 </Popover>
               </div>
@@ -429,11 +389,11 @@ export function EditTaskDialog({
                       disabled={!isFieldEditable("endDate")}
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {endDate ? formatDateDisplay(endDate) : <span>날짜 선택</span>}
+                      {endDate ? formatDateKey(endDate) : <span>날짜 선택</span>}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={endDate} onSelect={setEndDate} initialFocus />
+                    <Calendar mode="single" selected={endDate} defaultMonth={endDate} onSelect={setEndDate} initialFocus />
                   </PopoverContent>
                 </Popover>
               </div>
