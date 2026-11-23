@@ -900,8 +900,8 @@ export default function MyPageTest() {
     if (!normalized) return
 
     const updates: Partial<Task> = {
-      startDate: formatTaskDateKey(normalized.start),
-      endDate: formatTaskDateKey(normalized.end),
+      startDate: formatDateInputValue(normalized.start),
+      endDate: formatDateInputValue(normalized.end),
     }
     if (isAdmin || allowedFieldSet.has("manDays")) {
       updates.manDays = calculateManDaysBetweenDates(normalized.start, normalized.end, false)

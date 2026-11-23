@@ -321,8 +321,8 @@ function buildTaskWithDraggedDates(task: Task, type: WeeklyTaskDragType, daysDel
 
   return {
     ...task,
-    startDate: toTaskDateKey(nextStart),
-    endDate: toTaskDateKey(nextEnd),
+    startDate: toDayKey(nextStart),
+    endDate: toDayKey(nextEnd),
     manDays: calculateManDaysBetweenDates(nextStart, nextEnd, false),
   }
 }

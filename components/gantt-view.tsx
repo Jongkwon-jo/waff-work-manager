@@ -36,7 +36,15 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { calculateManDaysBetweenDates } from "@/lib/man-days"
-import { buildGanttProjectSummaryRanges, buildGanttSummaryRanges, getGanttSummaryDaySpan, type GanttSummaryRange } from "@/lib/gantt-summary"
+import {
+  buildGanttProjectSummaryRanges,
+  buildGanttSummaryRanges,
+  formatDateKey,
+  getGanttSummaryDaySpan,
+  getGanttTaskDaySpan,
+  parseTaskDate,
+  type GanttSummaryRange,
+} from "@/lib/gantt-summary"
 import { ko } from "date-fns/locale"
 import {
   DEFAULT_DEPARTMENT_PERSON_SETTINGS,
@@ -185,40 +193,14 @@ function getDayOfWeek(year: number, month: number, day: number) {
   return days[new Date(year, month, day).getDay()]
 }
 
-function parseDate(dateStr: string): { month: number; day: number } | null {
-  const match = dateStr.match(/(\d{1,2})\D+(\d{1,2})/)
-  if (!match) return null
-  return { month: Number.parseInt(match[1], 10) - 1, day: Number.parseInt(match[2], 10) }
-}
-
-function parseDateToDate(dateStr: string): Date | undefined {
-  const parsed = parseDate(dateStr)
-  if (!parsed) return undefined
-  const year = new Date().getFullYear()
-  return new Date(year, parsed.month, parsed.day)
-}
-
 function parseIsoDate(value: string): Date | undefined {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (!match) return undefined
   return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
 }
 
-function formatDateKey(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, "0")
-  const day = String(date.getDate()).padStart(2, "0")
-  return `${year}-${month}-${day}`
-}
-
 function getSummaryLabel(name: string, range: GanttSummaryRange): string {
   return `${name} · 하위 업무 일정 (${formatDateKey(range.startDate)} ~ ${formatDateKey(range.endDate)})`
-}
-
-function formatDateKorean(date: Date) {
-  const mm = String(date.getMonth() + 1).padStart(2, "0")
-  const dd = String(date.getDate()).padStart(2, "0")
-  return `${mm}\uC6D4 ${dd}\uC77C`
 }
 
 function parseListValue(value: string): string[] {
@@ -961,10 +943,12 @@ export function GanttView({
 
   const buildTaskWithAutoManDays = (task: Task, updates: Partial<Task>): Task => {
     const nextTask: Task = { ...task, ...updates }
-    const parsedStart = parseDateToDate(nextTask.startDate || "")
-    const parsedEnd = parseDateToDate(nextTask.endDate || "")
+    const parsedStart = parseTaskDate(nextTask.startDate)
+    const parsedEnd = parseTaskDate(nextTask.endDate)
 
     if (parsedStart && parsedEnd) {
+      nextTask.startDate = formatDateKey(parsedStart)
+      nextTask.endDate = formatDateKey(parsedEnd)
       nextTask.manDays = calculateManDaysBetweenDates(parsedStart, parsedEnd, false)
     }
 
@@ -1343,6 +1327,7 @@ export function GanttView({
       year: number
       month: number
       day: number
+      dateKey: string
       label: string
       dow: string
       isWeekend: boolean
@@ -1357,6 +1342,7 @@ export function GanttView({
           year: m.year,
           month: m.month,
           day: d,
+          dateKey: formatDateKey(new Date(m.year, m.month, d)),
           label: `${d}`,
           dow,
           isWeekend: dow === "토" || dow === "일",
@@ -1390,13 +1376,10 @@ export function GanttView({
     return map
   }, [globalSchedules])
 
-  const dayIndexByMonthDay = useMemo(() => {
-    const map = new Map<string, number>()
-    allDays.forEach((d, index) => {
-      map.set(`${d.month}-${d.day}`, index)
-    })
-    return map
-  }, [allDays])
+  const dayIndexByDate = useMemo(
+    () => new Map(allDays.map((day, index) => [day.dateKey, index])),
+    [allDays],
+  )
 
   const exportTitle = useMemo(() => {
     if (months.length === 0) return "사업일정표"
@@ -1436,13 +1419,9 @@ export function GanttView({
       }
 
       const taskRows = project.tasks.map((task) => {
-        const start = parseDate(task.startDate)
-        const end = parseDate(task.endDate)
-        const startIndex =
-          start ? allDays.findIndex((d) => d.month === start.month && d.day === start.day) : -1
-        const endIndex = end ? allDays.findIndex((d) => d.month === end.month && d.day === end.day) : -1
+        const span = getGanttTaskDaySpan(task, dayIndexByDate)
         const days = allDays.map(
-          (_, index) => startIndex !== -1 && endIndex !== -1 && index >= startIndex && index <= endIndex,
+          (_, index) => Boolean(span && index >= span.startIndex && index <= span.endIndex),
         )
 
         return {
@@ -1461,7 +1440,7 @@ export function GanttView({
 
       return [projectRow, ...taskRows]
     })
-  }, [allDays, selectedExportProjects])
+  }, [allDays, dayIndexByDate, selectedExportProjects])
 
   const selectedExportTitle = useMemo(() => {
     if (exportScope === "single") {
@@ -1994,20 +1973,12 @@ export function GanttView({
     return { items, topSpacer, bottomSpacer }
   }, [filteredProjects, collapsedProjectIds, scrollTop, viewportHeight])
 
-  const getBarPosition = (startStr: string, endStr: string) => {
-    const start = parseDate(startStr)
-    const end = parseDate(endStr)
-
-    if (!start || !end) return null
-
-    const startIdx = dayIndexByMonthDay.get(`${start.month}-${start.day}`) ?? -1
-    const endIdx = dayIndexByMonthDay.get(`${end.month}-${end.day}`) ?? -1
-
-    if (startIdx === -1 || endIdx === -1) return null
-
+  const getBarPosition = (task: Task) => {
+    const span = getGanttTaskDaySpan(task, dayIndexByDate)
+    if (!span) return null
     return {
-      left: startIdx * CELL_WIDTH,
-      width: (endIdx - startIdx + 1) * CELL_WIDTH,
+      left: span.startIndex * CELL_WIDTH,
+      width: (span.endIndex - span.startIndex + 1) * CELL_WIDTH,
     }
   }
 
@@ -2019,7 +1990,7 @@ export function GanttView({
     e.preventDefault()
     e.stopPropagation()
 
-    const pos = getBarPosition(task.startDate, task.endDate)
+    const pos = getBarPosition(task)
     if (!pos) return
 
     setDragInfo({
@@ -2068,12 +2039,9 @@ export function GanttView({
       const task = taskById.get(dragInfo.taskId)
 
       if (task && daysDelta !== 0) {
-        const start = parseDate(task.startDate)
-        const end = parseDate(task.endDate)
-
-        if (start && end) {
-          const startIdx = allDays.findIndex((d) => d.month === start.month && d.day === start.day)
-          const endIdx = allDays.findIndex((d) => d.month === end.month && d.day === end.day)
+        const span = getGanttTaskDaySpan(task, dayIndexByDate)
+        if (span) {
+          const { startIndex: startIdx, endIndex: endIdx } = span
 
           let nextStart = startIdx
           let nextEnd = endIdx
@@ -2089,8 +2057,8 @@ export function GanttView({
 
           onEditTask(
             buildTaskWithAutoManDays(task, {
-              startDate: formatDateKorean(new Date(new Date().getFullYear(), allDays[nextStart].month, allDays[nextStart].day)),
-              endDate: formatDateKorean(new Date(new Date().getFullYear(), allDays[nextEnd].month, allDays[nextEnd].day)),
+              startDate: allDays[nextStart].dateKey,
+              endDate: allDays[nextEnd].dateKey,
             }),
           )
         }
@@ -2108,7 +2076,7 @@ export function GanttView({
       window.removeEventListener("mousemove", handleMouseMove)
       window.removeEventListener("mouseup", handleMouseUp)
     }
-  }, [dragInfo, allDays, dayIndexByMonthDay, onEditTask, taskById])
+  }, [dragInfo, allDays, dayIndexByDate, onEditTask, taskById])
 
   if (isMobileViewport) {
     return (
@@ -2123,7 +2091,7 @@ export function GanttView({
         highlightedTaskId={highlightedTaskId}
         currentUserEmail={currentUserEmail}
         onMarkChangeHistorySeen={onMarkChangeHistorySeen}
-        dayIndexByMonthDay={dayIndexByMonthDay}
+        dayIndexByDate={dayIndexByDate}
         collapsedProjectIds={collapsedProjectIds}
         collapsedTaskIds={collapsedTaskIds}
         toggleProjectCollapse={toggleProjectCollapse}
@@ -2813,7 +2781,7 @@ export function GanttView({
                       {project.tasks
                         .slice(virtualItem.startTaskIndex, virtualItem.endTaskIndex)
                         .map((task) => {
-                      const bar = getBarPosition(task.startDate, task.endDate)
+                      const bar = getBarPosition(task)
                       const barRenderWidth = bar ? Math.max(12, bar.width - 4) : 0
                       const resizeHandleWidth = barRenderWidth <= CELL_WIDTH ? 2 : 3
                       const isTaskCollapsed = collapsedTaskIds.has(task.id)
@@ -3450,7 +3418,7 @@ interface MobileGanttViewProps {
   highlightedTaskId: string | null
   currentUserEmail: string
   onMarkChangeHistorySeen?: (ids: string[]) => void
-  dayIndexByMonthDay: Map<string, number>
+  dayIndexByDate: ReadonlyMap<string, number>
   collapsedProjectIds: Set<string>
   collapsedTaskIds: Set<string>
   toggleProjectCollapse: (id: string) => void
@@ -3488,7 +3456,7 @@ function MobileGanttView({
   highlightedTaskId,
   currentUserEmail,
   onMarkChangeHistorySeen,
-  dayIndexByMonthDay,
+  dayIndexByDate,
   collapsedProjectIds,
   collapsedTaskIds,
   toggleProjectCollapse,
@@ -3528,33 +3496,23 @@ function MobileGanttView({
   const todayPct = totalDays > 0 && todayIdx >= 0 ? (todayIdx / totalDays) * 100 : null
 
   const getMiniBarPosition = useCallback(
-    (startStr: string, endStr: string) => {
-      const start = parseDate(startStr)
-      const end = parseDate(endStr)
-      if (!start || !end || totalDays === 0) return null
-      const startIdx = dayIndexByMonthDay.get(`${start.month}-${start.day}`) ?? -1
-      const endIdx = dayIndexByMonthDay.get(`${end.month}-${end.day}`) ?? -1
-      if (startIdx === -1 || endIdx === -1) return null
+    (task: Task) => {
+      const span = getGanttTaskDaySpan(task, dayIndexByDate)
+      if (!span) return null
       return {
-        leftPct: (startIdx / totalDays) * 100,
-        widthPct: Math.max(0.5, ((endIdx - startIdx + 1) / totalDays) * 100),
+        leftPct: (span.startIndex / totalDays) * 100,
+        widthPct: Math.max(0.5, ((span.endIndex - span.startIndex + 1) / totalDays) * 100),
       }
     },
-    [dayIndexByMonthDay, totalDays],
+    [dayIndexByDate, totalDays],
   )
 
   const isTaskContainsToday = useCallback(
     (task: Task) => {
-      if (todayIdx === -1) return false
-      const start = parseDate(task.startDate)
-      const end = parseDate(task.endDate)
-      if (!start || !end) return false
-      const startIdx = dayIndexByMonthDay.get(`${start.month}-${start.day}`) ?? -1
-      const endIdx = dayIndexByMonthDay.get(`${end.month}-${end.day}`) ?? -1
-      if (startIdx === -1 || endIdx === -1) return false
-      return todayIdx >= startIdx && todayIdx <= endIdx
+      const span = getGanttTaskDaySpan(task, dayIndexByDate)
+      return Boolean(span && todayIdx >= span.startIndex && todayIdx <= span.endIndex)
     },
-    [todayIdx, dayIndexByMonthDay],
+    [todayIdx, dayIndexByDate],
   )
 
   // 프로젝트 기간은 필터/접기 전 전체 업무 트리에서 집계합니다.
@@ -3836,7 +3794,7 @@ function MobileGanttView({
                         widthPct: ((summarySpan.endIndex - summarySpan.startIndex + 1) / totalDays) * 100,
                       }
                     : undefined
-                  : getMiniBarPosition(task.startDate, task.endDate)
+                  : getMiniBarPosition(task)
                 const hasMemo = Boolean(task.memo?.trim())
                 const isTaskCollapsed = collapsedTaskIds.has(task.id)
                 const containsToday = isTaskContainsToday(task)
@@ -4135,7 +4093,7 @@ function MobileGanttView({
 }
 
 function DateCell({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const selected = parseDateToDate(value)
+  const selected = parseTaskDate(value)
   const displayValue = selected ? formatDateKey(selected) : value
 
   return (
@@ -4150,13 +4108,14 @@ function DateCell({ value, onChange }: { value: string; onChange: (value: string
         <Calendar
           mode="single"
           selected={selected}
+          defaultMonth={selected}
           locale={ko}
           formatters={{
             formatCaption: (month) => `${month.getFullYear()}년 ${month.getMonth() + 1}월`,
           }}
           onSelect={(date) => {
             if (!date) return
-            onChange(formatDateKorean(date))
+            onChange(formatDateKey(date))
           }}
           initialFocus
         />

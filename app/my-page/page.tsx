@@ -162,10 +162,7 @@ const projectStatusFilterMeta: Record<ProjectStatusFilter, { className: string; 
 
 const isProjectStatusFilter = (status: TaskStatus): status is ProjectStatusFilter => PROJECT_STATUS_FILTERS.includes(status as ProjectStatusFilter)
 
-const parseDateLabel = (value?: string) => {
-  const matched = value?.match(/(\d{1,2})\D+(\d{1,2})/)
-  return matched ? new Date(new Date().getFullYear(), Number(matched[1]) - 1, Number(matched[2])).getTime() : Number.MAX_SAFE_INTEGER
-}
+const parseDateLabel = (value?: string) => parseTaskDateTime(value) ?? Number.MAX_SAFE_INTEGER
 
 const parseTaskDateTime = (value?: string) => {
   const normalized = (value || "").trim()
