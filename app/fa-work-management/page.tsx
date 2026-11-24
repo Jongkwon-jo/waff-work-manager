@@ -5,6 +5,13 @@ import Link from "next/link"
 import { useState, useMemo, useEffect, useDeferredValue, useRef } from "react"
 import { signOut } from "firebase/auth"
 import { makeProjectPmFields, mergeProjectTaskDetails, normalizeProjectPmEmails } from "@/lib/data"
+import {
+  applyProjectDisplayOrder,
+  compareProjectDisplayOrder,
+  applyProjectInsertions,
+  moveProjectInOrder,
+  type ProjectMove,
+} from "@/lib/project-order"
 import type { Project, ProjectPmOption, Task, TaskStatus } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import {
@@ -92,7 +99,9 @@ export default function FaWorkManagementPage() {
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all")
   const [departmentFilter, setDepartmentFilter] = useState("all")
   const [personFilter, setPersonFilter] = useState("all")
-  const [sortBy, setSortBy] = useState<ProjectSortType>("latest")
+  const [savedSortBy, setSortBy] = useState<ProjectSortType | null>(null)
+  const sortBy = savedSortBy ?? "latest"
+  const [isSavingProjectOrder, setIsSavingProjectOrder] = useState(false)
   const [viewMode, setViewMode] = useState<"list" | "gantt" | "card">("gantt")
   const [historyEntries, setHistoryEntries] = useState<ChangeHistoryEntry[]>([])
   const [visibleHistoryEntries, setVisibleHistoryEntries] = useState<ChangeHistoryEntry[]>([])
@@ -204,11 +213,12 @@ export default function FaWorkManagementPage() {
     if (!user) return
     let disposed = false
     void fetchDashboardSortBy()
-      .then((savedSortBy) => {
-        if (!disposed) setSortBy(savedSortBy)
+      .then((loadedSortBy) => {
+        if (!disposed) setSortBy((current) => current ?? loadedSortBy)
       })
       .catch((error) => {
         console.error("Dashboard sort fetch failed:", error)
+        if (!disposed) setSortBy((current) => current ?? "latest")
       })
     return () => {
       disposed = true
@@ -313,6 +323,7 @@ export default function FaWorkManagementPage() {
       createdByName: project.createdByName,
       isHidden: project.isHidden,
       displayOrder: project.displayOrder,
+      insertAfterProjectId: project.insertAfterProjectId,
       createdAt: project.createdAt,
     })
 
@@ -681,20 +692,9 @@ export default function FaWorkManagementPage() {
 
   const sortedProjects = useMemo(() => {
     const list = [...projectList]
-    const getTime = (project: Project) => (project.createdAt ? new Date(project.createdAt).getTime() : 0)
-    const baseCompare = (a: Project, b: Project) => {
-      const orderA = typeof a.displayOrder === "number" ? a.displayOrder : Number.MAX_SAFE_INTEGER
-      const orderB = typeof b.displayOrder === "number" ? b.displayOrder : Number.MAX_SAFE_INTEGER
-      if (orderA !== orderB) return orderA - orderB
+    const baseCompare = compareProjectDisplayOrder
 
-      const timeA = getTime(a)
-      const timeB = getTime(b)
-      if (timeA !== timeB) return timeA - timeB
-
-      return a.id.localeCompare(b.id)
-    }
-
-    return list.sort((a, b) => {
+    list.sort((a, b) => {
       if (sortBy === "latest") {
         return baseCompare(a, b)
       }
@@ -707,8 +707,7 @@ export default function FaWorkManagementPage() {
         const byType = a.type.localeCompare(b.type, "ko")
         if (byType !== 0) return byType
         const byName = a.name.localeCompare(b.name, "ko")
-        if (byName !== 0) return byName
-        return baseCompare(a, b)
+        return byName || baseCompare(a, b)
       }
       if (sortBy === "progress") {
         const getProgress = (p: Project) => {
@@ -722,6 +721,7 @@ export default function FaWorkManagementPage() {
       }
       return baseCompare(a, b)
     })
+    return applyProjectInsertions(list)
   }, [projectList, sortBy])
 
   const pmOptions = useMemo<ProjectPmOption[]>(
@@ -1034,6 +1034,12 @@ export default function FaWorkManagementPage() {
     }
   }, [user, canViewRecentChanges, canViewAllRecentChanges, changeNotificationAliases, ledDepartmentGroups, isRecentChangesOpen])
 
+  const createProjectInCategory = async (project: Omit<Project, "id" | "tasks">) => {
+    const insertAfterProjectId = sortedProjects.findLast((item) => item.type === project.type)?.id ?? null
+    const id = await addProjectToDB({ ...project, displayOrder: undefined, insertAfterProjectId })
+    return { id, insertAfterProjectId }
+  }
+
   const handleAddProject = async (newProject: Project) => {
     try {
       const projectWithCreator: Project = {
@@ -1042,12 +1048,12 @@ export default function FaWorkManagementPage() {
         createdByName: defaultTaskPerson || undefined,
       }
       const { id, tasks, ...projectData } = projectWithCreator
-      const newProjectId = await addProjectToDB(projectData)
+      const { id: newProjectId, insertAfterProjectId } = await createProjectInCategory(projectData)
       await recordHistory({
         entityType: "project",
         action: "create",
         entityId: newProjectId,
-        after: serializeProjectData({ ...projectWithCreator, id: newProjectId }),
+        after: serializeProjectData({ ...projectWithCreator, id: newProjectId, insertAfterProjectId }),
       })
       toast.success("프로젝트가 추가되었습니다.")
     } catch (error) {
@@ -1584,7 +1590,7 @@ export default function FaWorkManagementPage() {
 
     setOperationInProgress("copy")
     try {
-      const copiedProjectId = await addProjectToDB(copiedProjectData)
+      const { id: copiedProjectId, insertAfterProjectId } = await createProjectInCategory(copiedProjectData)
       await recordHistory(
         {
           entityType: "project",
@@ -1594,6 +1600,7 @@ export default function FaWorkManagementPage() {
             id: copiedProjectId,
             tasks: [],
             ...copiedProjectData,
+            insertAfterProjectId,
           } as Project),
         },
         { refreshHistory: false },
@@ -1672,30 +1679,34 @@ export default function FaWorkManagementPage() {
     }
   }
 
-  const handleMoveProject = async (projectId: string, direction: "up" | "down") => {
-    let movedProjectIds: string[] | null = null
-
-    setProjectList((prev) => {
-      const currentIndex = prev.findIndex((project) => project.id === projectId)
-      if (currentIndex === -1) return prev
-
-      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
-      if (targetIndex < 0 || targetIndex >= prev.length) return prev
-
-      const moved = moveArrayItem(prev, currentIndex, targetIndex).map((project, index) => ({
-        ...project,
-        displayOrder: index,
-      }))
-      movedProjectIds = moved.map((project) => project.id)
-      return moved
-    })
-
+  const handleMoveProject = async (
+    projectId: string,
+    move: ProjectMove,
+    visibleProjectIds?: string[],
+  ) => {
+    if (isSavingProjectOrder) return
+    const movedProjectIds = moveProjectInOrder(
+      sortedProjects.map((project) => project.id),
+      projectId,
+      move,
+      visibleProjectIds,
+    )
     if (!movedProjectIds) return
 
+    setIsSavingProjectOrder(true)
     try {
-      await updateProjectOrdersInDB(movedProjectIds)
+      await updateProjectOrdersInDB(movedProjectIds, sortBy === "latest" ? undefined : "latest")
+      const orderById = new Map(movedProjectIds.map((id, index) => [id, index]))
+      visibleProjectListRef.current = applyProjectDisplayOrder(visibleProjectListRef.current, orderById)
+      selectedHiddenProjectListRef.current = applyProjectDisplayOrder(selectedHiddenProjectListRef.current, orderById)
+      setScopedHiddenProjects((prev) => applyProjectDisplayOrder(prev, orderById))
+      setProjectList((prev) => applyProjectDisplayOrder(prev, orderById))
+      setSortBy((current) => current === sortBy ? "latest" : current)
+      toast.success("프로젝트 순서를 저장했습니다.")
     } catch (error) {
       toast.error("프로젝트 순서 저장 실패")
+    } finally {
+      setIsSavingProjectOrder(false)
     }
   }
 
@@ -2243,6 +2254,7 @@ export default function FaWorkManagementPage() {
                 onCopyTasks={handleCopyTasksBulk}
                 onCopyProject={handleCopyProject}
                 onMoveProject={handleMoveProject}
+                isSavingProjectOrder={isSavingProjectOrder || savedSortBy === null}
                 onMoveTask={handleMoveTask}
                 onMoveTaskToProjectTop={handleMoveTaskToProjectTop}
                 onSelectedHiddenProjectIdsChange={setSelectedHiddenProjectIds}

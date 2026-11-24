@@ -1069,7 +1069,7 @@ export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Pr
     compactObject({
       ...project,
       isHidden: typeof project.isHidden === "boolean" ? project.isHidden : false,
-      displayOrder: Date.now(),
+      displayOrder: project.displayOrder ?? (project.insertAfterProjectId === undefined ? Date.now() : undefined),
       createdAt: serverTimestamp(),
     }),
   )
@@ -1079,6 +1079,7 @@ export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Pr
 export async function updateProjectInDB(projectId: string, updates: Partial<Project>): Promise<void> {
   const projectRef = doc(db, PROJECTS_COLLECTION, projectId)
   await updateDoc(projectRef, updates)
+  projectDocCache.delete(projectId)
 }
 
 export async function deleteProjectFromDB(projectId: string): Promise<void> {
@@ -1151,12 +1152,16 @@ export async function deleteTaskFromDB(taskId: string): Promise<void> {
   await deleteDoc(taskRef)
 }
 
-export async function updateProjectOrdersInDB(projectIds: string[]): Promise<void> {
+export async function updateProjectOrdersInDB(projectIds: string[], sortBy?: DashboardSortBy): Promise<void> {
   const batch = writeBatch(db)
   projectIds.forEach((id, index) => {
     batch.update(doc(db, PROJECTS_COLLECTION, id), { displayOrder: index })
   })
+  if (sortBy) {
+    batch.set(doc(db, SETTINGS_COLLECTION, DASHBOARD_PREFERENCES_DOC), { sortBy, updatedAt: serverTimestamp() }, { merge: true })
+  }
   await batch.commit()
+  projectIds.forEach((id) => projectDocCache.delete(id))
 }
 
 export async function updateTaskOrdersInDB(taskIds: string[]): Promise<void> {

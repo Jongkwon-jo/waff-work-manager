@@ -63,6 +63,7 @@ export interface Project {
   sourceSchedule?: "ict" | "strategy"
   originalProjectId?: string
   displayOrder?: number
+  insertAfterProjectId?: string | null
   isHidden?: boolean
   name: string
   type: ProjectType

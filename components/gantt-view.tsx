@@ -35,6 +35,8 @@ import {
   Copy,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import type { ProjectMove } from "@/lib/project-order"
+import { useProjectDrag } from "@/hooks/use-project-drag"
 import { calculateManDaysBetweenDates } from "@/lib/man-days"
 import {
   buildGanttProjectSummaryRanges,
@@ -91,7 +93,8 @@ interface GanttViewProps {
   onCopyTasks?: (taskIds: string[]) => Promise<void> | void
   onCopyProject?: (projectId: string) => Promise<void> | void
   onDeleteProject?: (projectId: string) => Promise<void> | void
-  onMoveProject: (projectId: string, direction: "up" | "down", visibleProjectIds?: string[]) => void
+  onMoveProject: (projectId: string, move: ProjectMove, visibleProjectIds?: string[]) => void
+  isSavingProjectOrder?: boolean
   onMoveTask: (projectId: string, taskId: string, direction: "up" | "down") => void
   onMoveTaskToProjectTop?: (targetProjectId: string, draggedTaskId: string) => Promise<void> | void
   onSelectedHiddenProjectIdsChange?: (projectIds: string[]) => void
@@ -133,6 +136,38 @@ type FlattenedTask = Task & {
 
 type FilteredProject = Omit<Project, "tasks"> & {
   tasks: FlattenedTask[]
+}
+
+function ProjectDragHandle({ name, className, disabled, onStart, onMove }: {
+  name: string
+  className: string
+  disabled: boolean
+  onStart: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  onMove: (move: "up" | "down") => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onPointerDown={onStart}
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
+        event.preventDefault()
+        onMove(event.key === "ArrowUp" ? "up" : "down")
+      }}
+      aria-label={`${name} 프로젝트 순서 이동`}
+      title="드래그하거나 위·아래 방향키로 프로젝트 순서 이동"
+      className={cn("flex shrink-0 touch-none select-none items-center justify-center rounded cursor-grab active:cursor-grabbing disabled:cursor-default disabled:opacity-40", className)}
+    >
+      <GripVertical className="h-4 w-4" />
+    </button>
+  )
+}
+
+function ProjectDropLine({ position }: { position: "before" | "after" }) {
+  return (
+    <div className={cn("pointer-events-none absolute inset-x-0 z-[35] h-0.5 bg-sky-400", position === "before" ? "top-0" : "bottom-0")} />
+  )
 }
 
 type ExportRow = {
@@ -424,6 +459,7 @@ export function GanttView({
   onCopyProject,
   onDeleteProject,
   onMoveProject,
+  isSavingProjectOrder = false,
   onMoveTask,
   onMoveTaskToProjectTop,
   onSelectedHiddenProjectIdsChange,
@@ -1098,6 +1134,8 @@ export function GanttView({
   }, [projects, statusFilter, departmentFilter, personFilter, searchQuery, collapsedTaskIds, hiddenTaskIds, hiddenProjectIds, showHiddenProjects, expandedHiddenParentIds, expandedHiddenProjectIds, collapsedHiddenParentIds, highlightedTaskId, hasHiddenProjectSelector, selectedHiddenProjectIdSet, hiddenRootParentIdSet])
 
   const filteredProjectIds = useMemo(() => filteredProjects.map((project) => project.id), [filteredProjects])
+  const moveProject = (projectId: string, move: ProjectMove) => onMoveProject(projectId, move, filteredProjectIds)
+  const projectDrag = useProjectDrag(moveProject, isSavingProjectOrder || filteredProjectIds.length < 2)
 
   const visibleTaskMap = useMemo(() => {
     const map = new Map<string, FlattenedTask>()
@@ -1783,7 +1821,7 @@ export function GanttView({
   }, [timelineWidth])
 
   const handleTouchScrollStart = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (event.touches.length !== 1) return
+    if (projectDrag.sourceId || event.touches.length !== 1) return
     const touch = event.touches[0]
     touchStartXRef.current = touch.clientX
     touchStartYRef.current = touch.clientY
@@ -1792,7 +1830,7 @@ export function GanttView({
   }
 
   const handleTouchScrollMove = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (event.touches.length !== 1) return
+    if (projectDrag.sourceId || event.touches.length !== 1) return
     if (touchStartXRef.current === null || touchStartYRef.current === null) return
 
     const touch = event.touches[0]
@@ -2082,6 +2120,8 @@ export function GanttView({
     return (
       <MobileGanttView
         filteredProjects={filteredProjects}
+        projectDrag={projectDrag}
+        onMoveProject={moveProject}
         summaryRanges={summaryRanges}
         projectSummaryRanges={projectSummaryRanges}
         allDays={allDays}
@@ -2122,6 +2162,7 @@ export function GanttView({
     <div className="flex h-[calc(100dvh-160px)] min-h-[560px] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
       <div
         ref={scrollContainerRef}
+        {...projectDrag.containerHandlers}
         className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar touch-pan-y"
         onTouchStart={handleTouchScrollStart}
         onTouchMove={handleTouchScrollMove}
@@ -2566,10 +2607,11 @@ export function GanttView({
                     const isHiddenProjectLoading = loadingHiddenTaskProjectIdSet.has(project.id)
                     return (
                   <div
+                    data-gantt-project-id={project.id}
                     className={cn(
                       "sticky z-30 flex min-h-9 border-b border-border",
                       PROJECT_HEADER_ROW_BG_CLASS,
-                      isProjectHidden && "opacity-70",
+                      (isProjectHidden || projectDrag.sourceId === project.id) && "opacity-70",
                       dragOverProjectHeaderId === project.id && "ring-2 ring-blue-400/70 ring-inset",
                     )}
                     style={{ top: stickyBodyTop }}
@@ -2594,6 +2636,9 @@ export function GanttView({
                       clearDragState()
                     }}
                   >
+                    {projectDrag.target?.targetProjectId === project.id && (
+                      <ProjectDropLine position={projectDrag.target.position} />
+                    )}
                     <div
                       className={cn(
                         "sticky left-0 z-30 flex shrink-0 items-center gap-2 border-r border-border px-4 py-1.5 shadow-[2px_0_5px_rgba(0,0,0,0.05)] overflow-visible",
@@ -2601,6 +2646,13 @@ export function GanttView({
                       )}
                       style={{ width: leftPanelWidth }}
                     >
+                      <ProjectDragHandle
+                        name={project.name}
+                        className="h-5 w-4 text-white hover:bg-white/15"
+                        disabled={projectDrag.disabled}
+                        onStart={(event) => projectDrag.start(event, project.id, scrollContainerRef.current, stickyBodyTop)}
+                        onMove={(move) => moveProject(project.id, move)}
+                      />
                       <button
                         type="button"
                         onClick={() => toggleProjectCollapse(project.id)}
@@ -2727,7 +2779,9 @@ export function GanttView({
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6 text-white hover:bg-white/15 hover:text-white"
-                          onClick={() => onMoveProject(project.id, "up", filteredProjectIds)}
+                          onClick={() => moveProject(project.id, "up")}
+                          disabled={isSavingProjectOrder || filteredProjectIds[0] === project.id}
+                          aria-label="프로젝트 위로 이동"
                         >
                           <ArrowUp className="h-3 w-3" />
                         </Button>
@@ -2736,7 +2790,9 @@ export function GanttView({
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6 text-white hover:bg-white/15 hover:text-white"
-                          onClick={() => onMoveProject(project.id, "down", filteredProjectIds)}
+                          onClick={() => moveProject(project.id, "down")}
+                          disabled={isSavingProjectOrder || filteredProjectIds.at(-1) === project.id}
+                          aria-label="프로젝트 아래로 이동"
                         >
                           <ArrowDown className="h-3 w-3" />
                         </Button>
@@ -3401,6 +3457,8 @@ export function GanttView({
 
 interface MobileGanttViewProps {
   filteredProjects: FilteredProject[]
+  projectDrag: ReturnType<typeof useProjectDrag>
+  onMoveProject: (projectId: string, move: ProjectMove) => void
   summaryRanges: ReadonlyMap<string, GanttSummaryRange>
   projectSummaryRanges: ReadonlyMap<string, GanttSummaryRange>
   allDays: Array<{
@@ -3447,6 +3505,8 @@ const STATUS_ORDER = ["완료", "진행", "예정", "취소"] as const
 
 function MobileGanttView({
   filteredProjects,
+  projectDrag,
+  onMoveProject,
   summaryRanges,
   projectSummaryRanges,
   allDays,
@@ -3483,6 +3543,7 @@ function MobileGanttView({
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const projectListRef = useRef<HTMLDivElement>(null)
 
   // 필터로 선택된 프로젝트가 사라지면 목록으로 복귀
   useEffect(() => {
@@ -3991,7 +4052,7 @@ function MobileGanttView({
           </div>
 
           {/* 프로젝트 카드 목록 */}
-          <div className="flex-1 overflow-y-auto px-3 py-2">
+          <div ref={projectListRef} {...projectDrag.containerHandlers} className="flex-1 overflow-y-auto px-3 py-2">
             {filteredProjects.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 표시할 프로젝트가 없습니다
@@ -4006,81 +4067,92 @@ function MobileGanttView({
                     project.tasks.length > 0 ? Math.round((doneCount / project.tasks.length) * 100) : 0
 
                   return (
-                    <button
-                      key={project.id}
-                      type="button"
-                      onClick={() => navigateTo(project.id)}
-                      className="w-full rounded-xl border border-border bg-background px-4 py-2.5 text-left shadow-sm transition-colors hover:bg-accent/5 active:bg-accent/10"
-                    >
-                      {/* 헤더: 타입 뱃지 + 프로젝트명 + 화살표 */}
-                      <div className="flex items-center gap-2">
-                        <ProjectTypeBadge type={project.type} />
-                        <span className="min-w-0 flex-1 truncate text-sm font-bold leading-tight">
-                          {project.name}
-                        </span>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40" />
-                      </div>
-
-                      {/* 상태별 뱃지 + 업무 수 */}
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        {statusCounts.map(([status, count]) => {
-                          const style = getStatusBarStyle(status)
-                          return (
-                            <span
-                              key={status}
-                              className={cn(
-                                "rounded-full px-2 py-0.5 text-[9px] font-bold",
-                                style.barClass,
-                                style.textClass,
-                              )}
-                            >
-                              {status} {count}
-                            </span>
-                          )
-                        })}
-                        {project.tasks.length === 0 && (
-                          <span className="text-[10px] text-muted-foreground/50">업무 없음</span>
-                        )}
-                        <span className="ml-auto text-[10px] text-muted-foreground/60">
-                          {project.tasks.length}개 업무
-                        </span>
-                      </div>
-
-                      {/* 기간 + 진행률 */}
-                      {span && (
-                        <div className="mt-1.5 flex items-center justify-between">
-                          <span className="text-[10px] text-muted-foreground/70">
-                            {span.startDate} ~ {span.endDate}
+                    <div key={project.id} data-gantt-project-id={project.id} className={cn("relative", projectDrag.sourceId === project.id && "opacity-70")}>
+                      <button
+                        type="button"
+                        onClick={() => navigateTo(project.id)}
+                        className="w-full rounded-xl border border-border bg-background py-2.5 pl-4 pr-12 text-left shadow-sm transition-colors hover:bg-accent/5 active:bg-accent/10"
+                      >
+                        {/* 헤더: 타입 뱃지 + 프로젝트명 + 화살표 */}
+                        <div className="flex items-center gap-2">
+                          <ProjectTypeBadge type={project.type} />
+                          <span className="min-w-0 flex-1 truncate text-sm font-bold leading-tight">
+                            {project.name}
                           </span>
-                          {project.tasks.length > 0 && (
-                            <span className="text-[10px] font-semibold text-muted-foreground/70">
-                              {progressPct}% 완료
-                            </span>
-                          )}
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40" />
                         </div>
-                      )}
 
-                      {/* 미니 간트 바 (프로젝트 전체 기간) */}
-                      {span && (
-                        <div
-                          role="img"
-                          aria-label={span.label}
-                          title={span.label}
-                          className="relative mt-2 h-2.5 w-full overflow-hidden bg-border/20"
-                        >
-                          {todayPct !== null && (
-                            <div
-                              className="absolute bottom-0 top-0 z-10 w-px bg-emerald-500/85"
-                              style={{ left: `${todayPct}%` }}
-                            />
+                        {/* 상태별 뱃지 + 업무 수 */}
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          {statusCounts.map(([status, count]) => {
+                            const style = getStatusBarStyle(status)
+                            return (
+                              <span
+                                key={status}
+                                className={cn(
+                                  "rounded-full px-2 py-0.5 text-[9px] font-bold",
+                                  style.barClass,
+                                  style.textClass,
+                                )}
+                              >
+                                {status} {count}
+                              </span>
+                            )
+                          })}
+                          {project.tasks.length === 0 && (
+                            <span className="text-[10px] text-muted-foreground/50">업무 없음</span>
                           )}
-                          <div
-                            className={cn("absolute bottom-0 top-0", SUMMARY_RANGE_CLASS)}
-                            style={{ left: `${span.leftPct}%`, width: `${span.widthPct}%` }}
-                          />
+                          <span className="ml-auto text-[10px] text-muted-foreground/60">
+                            {project.tasks.length}개 업무
+                          </span>
                         </div>
+
+                        {/* 기간 + 진행률 */}
+                        {span && (
+                          <div className="mt-1.5 flex items-center justify-between">
+                            <span className="text-[10px] text-muted-foreground/70">
+                              {span.startDate} ~ {span.endDate}
+                            </span>
+                            {project.tasks.length > 0 && (
+                              <span className="text-[10px] font-semibold text-muted-foreground/70">
+                                {progressPct}% 완료
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 미니 간트 바 (프로젝트 전체 기간) */}
+                        {span && (
+                          <div
+                            role="img"
+                            aria-label={span.label}
+                            title={span.label}
+                            className="relative mt-2 h-2.5 w-full overflow-hidden bg-border/20"
+                          >
+                            {todayPct !== null && (
+                              <div
+                                className="absolute bottom-0 top-0 z-10 w-px bg-emerald-500/85"
+                                style={{ left: `${todayPct}%` }}
+                              />
+                            )}
+                            <div
+                              className={cn("absolute bottom-0 top-0", SUMMARY_RANGE_CLASS)}
+                              style={{ left: `${span.leftPct}%`, width: `${span.widthPct}%` }}
+                            />
+                          </div>
+                        )}
+                      </button>
+                      <ProjectDragHandle
+                        name={project.name}
+                        className="absolute right-1 top-1 h-9 w-9 text-muted-foreground hover:bg-accent"
+                        disabled={projectDrag.disabled}
+                        onStart={(event) => projectDrag.start(event, project.id, projectListRef.current)}
+                        onMove={(move) => onMoveProject(project.id, move)}
+                      />
+                      {projectDrag.target?.targetProjectId === project.id && (
+                        <ProjectDropLine position={projectDrag.target.position} />
                       )}
-                    </button>
+                    </div>
                   )
                 })}
               </div>
