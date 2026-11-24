@@ -56,9 +56,14 @@ const GANTT_COLLAPSE_STATE_FIELD = "ganttCollapseState"
 const GANTT_LEFT_PANEL_WIDTH_FIELD = "ganttLeftPanelWidth"
 const GANTT_DETAIL_PANEL_WIDTH_FIELD = "ganttDetailPanelWidth"
 const ICT_PROJECT_ORDER_IDS_FIELD = "ictProjectOrderIds"
+const ICT_PROJECT_SORT_BY_FIELD = "ictProjectSortBy"
 const USER_PAGE_PERMISSIONS_COLLECTION = "user_page_permissions"
 
 export type DashboardSortBy = "name" | "type" | "progress" | "latest"
+
+function isDashboardSortBy(value: unknown): value is DashboardSortBy {
+  return value === "name" || value === "type" || value === "progress" || value === "latest"
+}
 export type GanttCollapseState = {
   collapsedProjectIds: string[]
   collapsedTaskIds: string[]
@@ -1417,9 +1422,8 @@ export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Pr
     collection(db, PROJECTS_COLLECTION),
     compactObject({
       ...project,
-      // where("isHidden", "==", false) 쿼리에서 누락되지 않도록 항상 boolean 으로 저장
       isHidden: typeof project.isHidden === "boolean" ? project.isHidden : false,
-      displayOrder: Date.now(),
+      displayOrder: project.displayOrder ?? (project.insertAfterProjectId === undefined ? Date.now() : undefined),
       createdAt: serverTimestamp(),
     }),
   )
@@ -1429,6 +1433,7 @@ export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Pr
 export async function updateProjectInDB(projectId: string, updates: Partial<Project>): Promise<void> {
   const projectRef = doc(db, PROJECTS_COLLECTION, projectId)
   await updateDoc(projectRef, updates)
+  projectDocCache.delete(projectId)
 }
 
 export async function deleteProjectFromDB(projectId: string): Promise<void> {
@@ -1553,12 +1558,16 @@ export async function deleteTaskFromDB(taskId: string): Promise<void> {
   await deleteDoc(taskRef)
 }
 
-export async function updateProjectOrdersInDB(projectIds: string[]): Promise<void> {
+export async function updateProjectOrdersInDB(projectIds: string[], sortBy?: DashboardSortBy): Promise<void> {
   const batch = writeBatch(db)
   projectIds.forEach((id, index) => {
     batch.update(doc(db, PROJECTS_COLLECTION, id), { displayOrder: index })
   })
+  if (sortBy) {
+    batch.set(doc(db, SETTINGS_COLLECTION, DASHBOARD_PREFERENCES_DOC), { sortBy, updatedAt: serverTimestamp() }, { merge: true })
+  }
   await batch.commit()
+  projectIds.forEach((id) => projectDocCache.delete(id))
 }
 
 export async function updateTaskOrdersInDB(taskIds: string[]): Promise<void> {
@@ -1761,8 +1770,8 @@ export function subscribeDashboardSortBy(callback: (sortBy: DashboardSortBy) => 
     preferencesRef,
     (snapshot) => {
       const raw = snapshot.data() as { sortBy?: unknown } | undefined
-      const candidate = toStringOrEmpty(raw?.sortBy) as DashboardSortBy
-      if (candidate === "latest" || candidate === "name" || candidate === "type" || candidate === "progress") {
+      const candidate = toStringOrEmpty(raw?.sortBy)
+      if (isDashboardSortBy(candidate)) {
         callback(candidate)
         return
       }
@@ -1778,8 +1787,8 @@ export async function fetchDashboardSortBy(): Promise<DashboardSortBy> {
   try {
     const snap = await getDoc(doc(db, SETTINGS_COLLECTION, DASHBOARD_PREFERENCES_DOC))
     const raw = snap.data() as { sortBy?: unknown } | undefined
-    const candidate = toStringOrEmpty(raw?.sortBy) as DashboardSortBy
-    if (candidate === "latest" || candidate === "name" || candidate === "type" || candidate === "progress") {
+    const candidate = toStringOrEmpty(raw?.sortBy)
+    if (isDashboardSortBy(candidate)) {
       return candidate
     }
     return "latest"
@@ -2226,6 +2235,7 @@ export type CurrentUserProfileBundle = {
   ganttLeftPanelWidth: number | null
   ganttDetailPanelWidth: number | null
   projectOrderIds: string[]
+  ictProjectSortBy?: DashboardSortBy
 }
 
 const EMPTY_BUNDLE: CurrentUserProfileBundle = {
@@ -2270,6 +2280,7 @@ export function subscribeCurrentUserProfileBundle(
         fields.projectOrder && Array.isArray(raw[fields.projectOrder])
           ? uniqueTrimmedStrings((raw[fields.projectOrder] as unknown[]).filter((value): value is string => typeof value === "string"))
           : []
+      const ictProjectSortBy = scope === "ict" ? raw[ICT_PROJECT_SORT_BY_FIELD] : undefined
 
       callback({
         profile: parseUserProfileSnapshot(raw),
@@ -2277,6 +2288,7 @@ export function subscribeCurrentUserProfileBundle(
         ganttLeftPanelWidth: leftWidth > 0 ? leftWidth : null,
         ganttDetailPanelWidth: detailWidth > 0 ? detailWidth : null,
         projectOrderIds,
+        ictProjectSortBy: isDashboardSortBy(ictProjectSortBy) ? ictProjectSortBy : undefined,
       })
     },
     (error) => {
@@ -2316,17 +2328,21 @@ export async function saveUserHiddenOwnerOptions(email: string, hiddenOwnerOptio
   )
 }
 
-export async function saveUserIctProjectOrderIds(email: string, projectOrderIds: string[]): Promise<void> {
+export async function saveUserIctProjectPreferences(
+  email: string,
+  { sortBy, projectOrderIds }: { sortBy: DashboardSortBy; projectOrderIds?: string[] },
+): Promise<void> {
   const normalizedEmail = normalizeEmail(email)
   if (!normalizedEmail) return
 
   await setDoc(
     doc(db, USER_PROFILES_COLLECTION, permissionDocId(normalizedEmail)),
-    {
+    compactObject({
       email: normalizedEmail,
-      [ICT_PROJECT_ORDER_IDS_FIELD]: uniqueTrimmedStrings(projectOrderIds),
+      [ICT_PROJECT_ORDER_IDS_FIELD]: projectOrderIds && uniqueTrimmedStrings(projectOrderIds),
+      [ICT_PROJECT_SORT_BY_FIELD]: sortBy,
       updatedAt: serverTimestamp(),
-    },
+    }),
     { merge: true },
   )
 }

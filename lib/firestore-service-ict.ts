@@ -310,6 +310,9 @@ function buildProjectTree(projectsData: any[], allTasksData: any[]): Project[] {
     return {
       ...projectData,
       id: projectId,
+      ...(projectData.sourceSchedule === "strategy" && typeof projectData.insertAfterProjectId === "string"
+        ? { insertAfterProjectId: `${STRATEGY_SOURCE_PREFIX}${stripStrategyId(projectData.insertAfterProjectId)}` }
+        : {}),
       isHidden: toBooleanOr(projectData.isHidden ?? projectData.is_hidden, false),
       tasks: roots,
       createdAt: projectData.createdAt?.toDate?.() || new Date(0),
@@ -2165,7 +2168,7 @@ export async function addProjectToDB(project: Omit<Project, "id" | "tasks">): Pr
     compactObject({
       ...stripSourcePrefixFromRecord(project as Record<string, unknown>),
       isHidden: typeof project.isHidden === "boolean" ? project.isHidden : false,
-      displayOrder: Date.now(),
+      displayOrder: project.displayOrder ?? (project.insertAfterProjectId === undefined ? Date.now() : undefined),
       createdAt: serverTimestamp(),
     }),
   )
@@ -2208,8 +2211,10 @@ export async function updateProjectInDB(projectId: string, updates: Partial<Proj
     }
     throw new Error("Linked strategy projects cannot be edited from ICT schedule.")
   }
-  const projectRef = doc(db, PROJECTS_COLLECTION, stripIctId(projectId) || projectId)
+  const sourceProjectId = stripIctId(projectId) || projectId
+  const projectRef = doc(db, PROJECTS_COLLECTION, sourceProjectId)
   await updateDoc(projectRef, stripSourcePrefixFromRecord(updates as Record<string, unknown>) as any)
+  projectDocCache.delete(cacheKey(PROJECTS_COLLECTION, sourceProjectId))
 }
 
 export async function deleteProjectFromDB(projectId: string): Promise<void> {

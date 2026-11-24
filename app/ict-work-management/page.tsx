@@ -5,6 +5,13 @@ import Link from "next/link"
 import { useState, useMemo, useEffect, useDeferredValue, useRef } from "react"
 import { signOut } from "firebase/auth"
 import { areProjectPmEmailsEqual, makeProjectPmFields, mergeProjectTaskDetails, normalizeProjectPmEmails } from "@/lib/data"
+import {
+  mergeProjectOrder,
+  compareProjectDisplayOrder,
+  applyProjectInsertions,
+  moveProjectInOrder,
+  type ProjectMove,
+} from "@/lib/project-order"
 import type { Project, ProjectPmOption, Task, TaskStatus } from "@/lib/data"
 import { getDepartmentList } from "@/lib/data"
 import {
@@ -20,7 +27,6 @@ import {
   updateTaskInDB,
   deleteTaskFromDB,
   updateTaskOrdersInDB,
-  saveDashboardSortBy,
   fetchDashboardSortBy,
   saveGanttCollapseState,
   saveGanttDetailPanelWidth,
@@ -36,7 +42,7 @@ import {
   DEFAULT_DEPARTMENT_ORG_SETTINGS,
   saveSeenRecentChangeIds,
   saveUserHiddenOwnerOptions,
-  saveUserIctProjectOrderIds,
+  saveUserIctProjectPreferences,
   subscribeCurrentUserProfileBundle,
   fetchDepartmentOrgSettings,
   fetchGlobalSchedules,
@@ -93,7 +99,10 @@ export default function IctWorkManagementPage() {
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all")
   const [departmentFilter, setDepartmentFilter] = useState("all")
   const [personFilter, setPersonFilter] = useState("all")
-  const [sortBy, setSortBy] = useState<ProjectSortType>("latest")
+  const [dashboardSortBy, setDashboardSortBy] = useState<ProjectSortType>("latest")
+  const [personalSortBy, setPersonalSortBy] = useState<ProjectSortType>()
+  const sortBy = personalSortBy ?? dashboardSortBy
+  const [isSavingProjectOrder, setIsSavingProjectOrder] = useState(false)
   const [viewMode, setViewMode] = useState<"list" | "gantt" | "card">("gantt")
   const [historyEntries, setHistoryEntries] = useState<ChangeHistoryEntry[]>([])
   const [visibleHistoryEntries, setVisibleHistoryEntries] = useState<ChangeHistoryEntry[]>([])
@@ -212,7 +221,7 @@ export default function IctWorkManagementPage() {
     let disposed = false
     void fetchDashboardSortBy()
       .then((savedSortBy) => {
-        if (!disposed) setSortBy(savedSortBy)
+        if (!disposed) setDashboardSortBy(savedSortBy)
       })
       .catch((error) => {
         console.error("Dashboard sort fetch failed:", error)
@@ -230,6 +239,7 @@ export default function IctWorkManagementPage() {
     setGanttLeftPanelWidth(null)
     setGanttDetailPanelWidth(null)
     setIctProjectOrderIds([])
+    setPersonalSortBy(undefined)
 
     if (!email) {
       setDefaultTaskPerson("")
@@ -252,6 +262,7 @@ export default function IctWorkManagementPage() {
       setGanttLeftPanelWidth(bundle.ganttLeftPanelWidth)
       setGanttDetailPanelWidth(bundle.ganttDetailPanelWidth)
       setIctProjectOrderIds((prev) => keepIfShallowEqual(prev, bundle.projectOrderIds))
+      setPersonalSortBy(bundle.ictProjectSortBy)
 
       const profile = bundle.profile
       const accountDefaultPerson = (profile?.taskAliases || [])[0]?.trim() || ""
@@ -322,6 +333,7 @@ export default function IctWorkManagementPage() {
       createdByName: project.createdByName,
       isHidden: project.isHidden,
       displayOrder: project.displayOrder,
+      insertAfterProjectId: project.insertAfterProjectId,
       createdAt: project.createdAt,
     })
 
@@ -713,18 +725,7 @@ export default function IctWorkManagementPage() {
   const sortedProjects = useMemo(() => {
     const list = [...projectList]
     const personalOrderMap = new Map(ictProjectOrderIds.map((projectId, index) => [projectId, index]))
-    const getTime = (project: Project) => (project.createdAt ? new Date(project.createdAt).getTime() : 0)
-    const baseCompare = (a: Project, b: Project) => {
-      const orderA = typeof a.displayOrder === "number" ? a.displayOrder : Number.MAX_SAFE_INTEGER
-      const orderB = typeof b.displayOrder === "number" ? b.displayOrder : Number.MAX_SAFE_INTEGER
-      if (orderA !== orderB) return orderA - orderB
-
-      const timeA = getTime(a)
-      const timeB = getTime(b)
-      if (timeA !== timeB) return timeA - timeB
-
-      return a.id.localeCompare(b.id)
-    }
+    const baseCompare = compareProjectDisplayOrder
     const personalOrderCompare = (a: Project, b: Project) => {
       const orderA = personalOrderMap.get(a.id)
       const orderB = personalOrderMap.get(b.id)
@@ -737,7 +738,7 @@ export default function IctWorkManagementPage() {
       return baseCompare(a, b)
     }
 
-    return list.sort((a, b) => {
+    list.sort((a, b) => {
       if (sortBy === "latest") {
         return personalOrderCompare(a, b)
       }
@@ -750,8 +751,7 @@ export default function IctWorkManagementPage() {
         const byType = a.type.localeCompare(b.type, "ko")
         if (byType !== 0) return byType
         const byName = a.name.localeCompare(b.name, "ko")
-        if (byName !== 0) return byName
-        return baseCompare(a, b)
+        return byName || baseCompare(a, b)
       }
       if (sortBy === "progress") {
         const getProgress = (p: Project) => {
@@ -765,6 +765,7 @@ export default function IctWorkManagementPage() {
       }
       return baseCompare(a, b)
     })
+    return applyProjectInsertions(list, personalOrderMap)
   }, [ictProjectOrderIds, projectList, sortBy])
 
   const pmOptions = useMemo<ProjectPmOption[]>(
@@ -1076,6 +1077,12 @@ export default function IctWorkManagementPage() {
     }
   }, [user, canViewRecentChanges, canViewAllRecentChanges, changeNotificationAliases, ledDepartmentGroups, isRecentChangesOpen])
 
+  const createProjectInCategory = async (project: Omit<Project, "id" | "tasks">) => {
+    const insertAfterProjectId = sortedProjects.findLast((item) => item.type === project.type)?.id ?? null
+    const id = await addProjectToDB({ ...project, displayOrder: undefined, insertAfterProjectId })
+    return { id, insertAfterProjectId }
+  }
+
   const handleAddProject = async (newProject: Project) => {
     try {
       const projectWithCreator: Project = {
@@ -1084,12 +1091,12 @@ export default function IctWorkManagementPage() {
         createdByName: defaultTaskPerson || undefined,
       }
       const { id, tasks, ...projectData } = projectWithCreator
-      const newProjectId = await addProjectToDB(projectData)
+      const { id: newProjectId, insertAfterProjectId } = await createProjectInCategory(projectData)
       await recordHistory({
         entityType: "project",
         action: "create",
         entityId: newProjectId,
-        after: serializeProjectData({ ...projectWithCreator, id: newProjectId }),
+        after: serializeProjectData({ ...projectWithCreator, id: newProjectId, insertAfterProjectId }),
       })
       toast.success("프로젝트가 추가되었습니다.")
     } catch (error) {
@@ -1098,10 +1105,9 @@ export default function IctWorkManagementPage() {
   }
 
   const handleSortByChange = (nextSortBy: ProjectSortType) => {
-    setSortBy(nextSortBy)
-    void saveDashboardSortBy(nextSortBy).catch(() => {
-      toast.error("정렬 설정 저장 실패")
-    })
+    if (!user?.email) return
+    void saveUserIctProjectPreferences(user.email, { sortBy: nextSortBy })
+      .catch(() => toast.error("정렬 설정 저장 실패"))
   }
 
   const handlePersistGanttCollapseState = async (state: {
@@ -1789,7 +1795,7 @@ export default function IctWorkManagementPage() {
 
     setOperationInProgress("copy")
     try {
-      const copiedProjectId = await addProjectToDB(copiedProjectData)
+      const { id: copiedProjectId, insertAfterProjectId } = await createProjectInCategory(copiedProjectData)
       await recordHistory(
         {
           entityType: "project",
@@ -1799,6 +1805,7 @@ export default function IctWorkManagementPage() {
             id: copiedProjectId,
             tasks: [],
             ...copiedProjectData,
+            insertAfterProjectId,
           } as Project),
         },
         { refreshHistory: false },
@@ -1877,52 +1884,30 @@ export default function IctWorkManagementPage() {
     }
   }
 
-  const mergeMovedVisibleProjectIds = (
-    fullProjectIds: string[],
-    visibleProjectIds: string[] | undefined,
-    projectId: string,
-    direction: "up" | "down",
-  ): string[] | null => {
-    const fullProjectIdSet = new Set(fullProjectIds)
-    const scopedVisibleProjectIds = (visibleProjectIds?.length ? visibleProjectIds : fullProjectIds).filter((id) =>
-      fullProjectIdSet.has(id),
-    )
-    const currentIndex = scopedVisibleProjectIds.indexOf(projectId)
-    if (currentIndex === -1) return null
-
-    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
-    if (targetIndex < 0 || targetIndex >= scopedVisibleProjectIds.length) return null
-
-    const movedVisibleProjectIds = moveArrayItem(scopedVisibleProjectIds, currentIndex, targetIndex)
-    if (!visibleProjectIds?.length) return movedVisibleProjectIds
-
-    const visibleProjectIdSet = new Set(scopedVisibleProjectIds)
-    const movedQueue = [...movedVisibleProjectIds]
-    return fullProjectIds.map((id) => (visibleProjectIdSet.has(id) ? movedQueue.shift() || id : id))
-  }
-
   const handleMoveProject = async (
     projectId: string,
-    direction: "up" | "down",
+    move: ProjectMove,
     visibleProjectIds?: string[],
   ) => {
-    if (!user?.email) return
+    if (!user?.email || isSavingProjectOrder) return
 
-    const movedProjectIds = mergeMovedVisibleProjectIds(
+    const movedProjectIds = moveProjectInOrder(
       sortedProjects.map((project) => project.id),
-      visibleProjectIds,
       projectId,
-      direction,
+      move,
+      visibleProjectIds,
     )
     if (!movedProjectIds) return
 
-    setSortBy("latest")
-    setIctProjectOrderIds((prev) => keepIfShallowEqual(prev, movedProjectIds))
-
+    const nextOrder = mergeProjectOrder(ictProjectOrderIds, movedProjectIds)
+    setIsSavingProjectOrder(true)
     try {
-      await saveUserIctProjectOrderIds(user.email, movedProjectIds)
+      await saveUserIctProjectPreferences(user.email, { projectOrderIds: nextOrder, sortBy: "latest" })
+      toast.success("프로젝트 순서를 저장했습니다.")
     } catch (error) {
       toast.error("프로젝트 순서 저장 실패")
+    } finally {
+      setIsSavingProjectOrder(false)
     }
   }
 
@@ -2469,6 +2454,7 @@ export default function IctWorkManagementPage() {
                 onCopyTasks={handleCopyTasksBulk}
                 onCopyProject={handleCopyProject}
                 onMoveProject={handleMoveProject}
+                isSavingProjectOrder={isSavingProjectOrder || !isCurrentProfileReady}
                 onMoveTask={handleMoveTask}
                 onMoveTaskToProjectTop={handleMoveTaskToProjectTop}
                 onSelectedHiddenProjectIdsChange={setSelectedHiddenProjectIds}
